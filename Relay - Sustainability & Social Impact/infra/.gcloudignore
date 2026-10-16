@@ -1,0 +1,26 @@
+# Used by deploy.sh via `gcloud builds submit --ignore-file=infra/.gcloudignore`.
+# Controls what is UPLOADED as build source (the root .dockerignore then trims
+# what goes into the image). Paths are relative to the Relay root.
+.git
+.DS_Store
+**/.DS_Store
+android
+protocol
+PLAN.md
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+dashboard/dist
+**/*.db
+**/*.db-wal
+**/*.db-shm
+infra/terraform
+**/.env
+**/.env.*
+!**/.env.example
+# Not part of the image. ml/ holds multi-GB on-device models.
+ml
+docs
+scripts
+**/build

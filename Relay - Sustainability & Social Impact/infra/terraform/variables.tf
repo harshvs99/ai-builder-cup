@@ -1,0 +1,33 @@
+variable "project_id" {
+  description = "GCP project ID that hosts Relay."
+  type        = string
+}
+
+variable "region" {
+  description = "Region for Cloud Run, Artifact Registry and Firestore."
+  type        = string
+  default     = "us-central1"
+}
+
+variable "vertex_location" {
+  description = "Vertex AI location used for Gemini calls. 'global' routes to any available capacity."
+  type        = string
+  default     = "global"
+}
+
+variable "gemini_model" {
+  description = "Gemini model name passed to the backend as GEMINI_MODEL."
+  type        = string
+  default     = "gemini-flash-latest"
+}
+
+variable "image" {
+  description = "Full container image URI for the relay service, e.g. us-central1-docker.pkg.dev/PROJECT/relay/relay:TAG. deploy.sh builds it and passes it in."
+  type        = string
+}
+
+variable "max_instances" {
+  description = "Cloud Run max instances (min is always 0, scale to zero)."
+  type        = number
+  default     = 3
+}

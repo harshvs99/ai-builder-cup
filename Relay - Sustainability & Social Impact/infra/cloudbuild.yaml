@@ -1,0 +1,24 @@
+# Invoked by deploy.sh from the Relay folder root:
+#   gcloud builds submit --config infra/cloudbuild.yaml \
+#     --substitutions _IMAGE=<region>-docker.pkg.dev/<project>/relay/relay:<tag> \
+#     --ignore-file infra/.gcloudignore \
+#     --service-account projects/<project>/serviceAccounts/relay-build@<project>.iam.gserviceaccount.com \
+#     --gcs-source-staging-dir gs://<project>-relay-build/source .
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "infra/Dockerfile", "-t", "${_IMAGE}", "."]
+    env: ["DOCKER_BUILDKIT=1"]
+
+# Cloud Build pushes these after all steps succeed.
+images:
+  - "${_IMAGE}"
+
+substitutions:
+  _IMAGE: ""
+
+options:
+  # Required when building as a user-specified service account without a logs bucket.
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1200s

@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (git-ignored). deploy.sh passes these on the CLI,
+# so this file is only needed for manual terraform runs.
+project_id      = "your-gcp-project-id"
+region          = "us-central1"
+vertex_location = "global"
+gemini_model    = "gemini-flash-latest"
+max_instances   = 3
+# Full image URI; deploy.sh sets this after building.
+image = "us-central1-docker.pkg.dev/your-gcp-project-id/relay/relay:TAG"
