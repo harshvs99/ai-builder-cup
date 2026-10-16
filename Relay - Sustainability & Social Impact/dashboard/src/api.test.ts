@@ -1,0 +1,57 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, createClient } from './api';
+import { mkTicket } from './test-utils';
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('api client', () => {
+  it('lists tickets from {tickets: [...]} and hits the right URL', async () => {
+    const f = vi.fn().mockResolvedValue(json({ tickets: [mkTicket({ ticket_no: 7 })] }));
+    vi.stubGlobal('fetch', f);
+    const out = await createClient('http://x:1/').listTickets();
+    expect(out[0]?.ticket_no).toBe(7);
+    expect(f.mock.calls[0]?.[0]).toBe('http://x:1/v1/tickets');
+  });
+
+  it('POSTs approve', async () => {
+    const f = vi.fn().mockResolvedValue(json(mkTicket({ status: 'DISPATCHED' })));
+    vi.stubGlobal('fetch', f);
+    const t = await createClient('http://x').approve(3);
+    expect(t.status).toBe('DISPATCHED');
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/tickets/3/approve');
+    expect(f.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
+  });
+
+  it('wraps network failures as ApiError(status 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    const err = await createClient('http://x').getStats().catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(0);
+    expect(err.message).toMatch(/unreachable/i);
+  });
+
+  it('surfaces HTTP errors with the server detail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ detail: 'ticket not found' }, 404)));
+    const err = await createClient('http://x').approve(99).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
+    expect(err.message).toContain('ticket not found');
+  });
+
+  it('handles non-JSON error bodies', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })));
+    const err = await createClient('http://x').getTicket(1).catch((e) => e);
+    expect(err.status).toBe(500);
+    expect(err.message).toContain('boom');
+  });
+
+  it('rejects invalid JSON and malformed list bodies', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
+    await expect(createClient('http://x').getStats()).rejects.toThrow(/Invalid JSON/);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ nope: 1 })));
+    await expect(createClient('http://x').listTickets()).rejects.toThrow(/Malformed/);
+  });
+});

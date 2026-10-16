@@ -1,0 +1,33 @@
+# Docker build context is the Relay folder root (see infra/cloudbuild.yaml).
+# Keep the context small: only backend/ and dashboard/ sources are needed.
+.git
+.gitignore
+.DS_Store
+**/.DS_Store
+
+# Not part of the image
+android
+protocol
+infra
+PLAN.md
+README.md
+
+# Python
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+backend/tests
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Node / build output (rebuilt inside the image)
+**/node_modules
+dashboard/dist
+dashboard/scripts
+
+# Local env files
+**/.env
+**/.env.*
+!**/.env.example

@@ -1,0 +1,8 @@
+# local run state (backend pid/db/logs, BLE demo logs); android/.run/ stays tracked
+/.run/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+android/.idea/
+android/local.properties
