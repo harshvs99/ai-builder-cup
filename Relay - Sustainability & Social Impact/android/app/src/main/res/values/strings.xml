@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Relay</string>
+    <string name="notification_channel">Relay mesh</string>
+    <string name="notification_title">Relay mesh is running</string>
+    <string name="notification_text">Relaying help requests over Bluetooth</string>
+</resources>
