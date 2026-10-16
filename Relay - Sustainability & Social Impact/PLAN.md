@@ -101,6 +101,8 @@ Relay - Sustainability & Social Impact/
 
 ## 4. Wire protocol (`protocol/`)
 
+> **Update:** the implemented format is a fixed binary layout rather than protobuf. It has no codegen, a deterministic size, and is easy to mirror in Kotlin. Hop count moved out of the payload. [`protocol/SPEC.md`](protocol/SPEC.md) is now the source of truth; the tables below are the original sketch.
+
 ### 4.1 Packet types
 | Type | Purpose | Approx. size |
 |---|---|---|
