@@ -163,7 +163,7 @@ def test_sitrep_resolved_count_and_stats_exclude_resolved(client):
     assert stats["open_by_category"]["MEDICAL"] == 0 and stats["open_by_category"]["FOOD"] == 0
     assert stats["open_by_category"]["RESCUE"] == 1
 
-    counts = client.post("/v1/sitreps/run").json()["counts"]
+    counts = client.post("/v1/sitreps/run?district=puri").json()["counts"]
     assert counts["resolved"] == 1 and counts["open"] == 1
     assert counts["dispatched"] == 1                 # ON_THE_WAY still counts as in the field
 

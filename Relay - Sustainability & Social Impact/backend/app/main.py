@@ -9,6 +9,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
@@ -21,6 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import dispatch as dispatching
+from . import districts
 from . import sitrep as sitreps
 from . import teams as team_data
 from .agent import Agent, IncomingNeed, TriagePipeline, agent_from_env, build_ack
@@ -59,7 +61,7 @@ from .pubsub import (
     parse_push_envelope,
 )
 from .store import Store, TeamAtCapacity, open_store
-from .textgen import TextGen, textgen_from_env
+from .textgen import TextGen, sitrep_textgen_from_env, textgen_from_env
 
 log = logging.getLogger("relay.api")
 
@@ -323,7 +325,7 @@ def create_app(
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
-    orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default ``GEMINI_MODEL``);
+    orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default the Pro alias, Flash fallback);
     both default to Gemini when the environment enables it, else to templates."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
@@ -344,7 +346,7 @@ def create_app(
         publisher = PubSubPublisher()
 
     textgen = textgen if textgen is not None else textgen_from_env("GEMINI_MODEL")
-    sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else textgen_from_env("SITREP_GEMINI_MODEL")
+    sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else sitrep_textgen_from_env()
     store = store if store is not None else open_store(db_path=db_path)
     pipeline = TriagePipeline(
         store,
@@ -636,7 +638,7 @@ def create_app(
         tickets = [_ticket_json(r, links, records.get(r["ticket_no"])) for r, links in store.list_tickets_with_links()]
         open_tickets = [t for t in tickets if t["status"] == "OPEN"]
         assignments = dispatching.allocate(open_tickets, views)
-        proposals = dispatching.build_proposals(assignments, open_tickets, textgen, int(clock()))
+        proposals = dispatching.build_proposals(assignments, open_tickets, textgen, int(clock()), teams=views)
         update: dict[int, dict[str, Any] | None] = {
             t["ticket_no"]: None for t in open_tickets if t.get("proposal")  # stale: no team has room now
         }
@@ -646,13 +648,27 @@ def create_app(
         return {"proposals": proposals}
 
     # ------------------------------------------------------------------ sitreps
+    def district_or_404(district_id: str) -> districts.District:
+        d = districts.by_id(district_id)
+        if d is None:
+            raise HTTPException(status_code=404, detail=f"unknown district {district_id!r}")
+        return d
+
     @app.post("/v1/sitreps/run", dependencies=operator)
-    def run_sitrep() -> dict[str, Any]:
-        return sitreps.run(store, sitrep_textgen, clock())
+    def run_sitrep(district: str | None = None) -> dict[str, Any]:
+        """One district's sitrep (``?district=puri``), or with no district every district's, written
+        in parallel (the hourly scheduler): ``{"sitreps": [...]}``."""
+        now = clock()
+        tickets = [_ticket_json(r, links) for r, links in store.list_tickets_with_links()]
+        if district is not None:
+            return sitreps.run(store, sitrep_textgen, now, tickets, district_or_404(district))
+        with ThreadPoolExecutor(max_workers=len(districts.DISTRICTS)) as pool:
+            out = list(pool.map(lambda d: sitreps.run(store, sitrep_textgen, now, tickets, d), districts.DISTRICTS))
+        return {"sitreps": out}
 
     @app.get("/v1/sitreps/latest", dependencies=operator)
-    def latest_sitrep() -> dict[str, Any]:
-        latest = store.latest_sitrep()
+    def latest_sitrep(district: str | None = None) -> dict[str, Any]:
+        latest = store.latest_sitrep(district_or_404(district).id if district is not None else None)
         if latest is None:
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest

@@ -114,10 +114,10 @@ function Kpi({ label, value, note, tone }: { label: string; value: string | numb
   );
 }
 
-export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, scope }: {
-  scope: string; tickets: Ticket[]; teams: Team[]; stats: Stats | null; gateways: Gateway[] | null; nowSec: number; onOpen: (no: number) => void;
+export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, scope, districtId }: {
+  scope: string; districtId: string | null; tickets: Ticket[]; teams: Team[]; stats: Stats | null; gateways: Gateway[] | null; nowSec: number; onOpen: (no: number) => void;
 }) {
-  const { sitrep, loaded, busy, error, regenerate } = useSitrep();
+  const { sitrep, loaded, busy, error, regenerate } = useSitrep(districtId);
   const [lang, setLang] = useState<'en' | 'local'>('en');
   const [copied, setCopied] = useState(false);
 
@@ -159,7 +159,7 @@ export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, sc
           · live figures from {open.length} open and {closed} closed requests
         </p>
         <div className="row-actions">
-          <button type="button" className="btn ghost" disabled={busy} onClick={regenerate}>
+          <button type="button" className="btn ghost" disabled={busy || !districtId} onClick={regenerate}>
             {busy ? 'Generating…' : sitrep ? 'Regenerate' : 'Generate'}
           </button>
           <button type="button" className="btn primary" disabled={!sitrep} onClick={share}>
@@ -190,7 +190,9 @@ export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, sc
               </div>
             )}
           </div>
-          {!loaded ? (
+          {!districtId ? (
+            <p className="muted">Situation reports are written per district, in English and the district's language. Choose a district above.</p>
+          ) : !loaded ? (
             <p className="muted">Loading…</p>
           ) : sitrep ? (
             <>

@@ -52,7 +52,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GOOGLE_GENAI_USE_VERTEXAI` | unset | `true` enables Gemini on Vertex AI via ADC (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, default `global`) |
 | `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
-| `SITREP_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the sitrep prose (set a Pro-tier name here) |
+| `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
 | `PORT` | `8080` | Docker/Cloud Run listen port |
 
@@ -155,9 +155,14 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
   not open in `/v1/stats` and the sitrep, and the sitrep `resolved` count is real (`dispatched` counts
   DISPATCHED + ON_THE_WAY). SQLite databases made before these statuses are migrated on first open
   (the `tickets` table is rebuilt to widen its status CHECK).
-- `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`: counts come from store queries; Gemini writes
-  English and Odia prose around them, and the text is used only if every number in it is one it was
-  handed. Hourly via the Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).
+- `POST /v1/sitreps/run?district=puri|delhi`, `GET /v1/sitreps/latest?district=…`: one report per
+  district (`app/districts.py`: Puri writes English + Odia, Delhi English + Hindi). Counts come from
+  that district's tickets (an unlocated ticket counts in every district); Gemini Pro writes prose
+  around them, and the text is used only if every number in it is one it was handed. Without
+  `district`, `run` writes every district's report and returns `{"sitreps": [...]}`. Hourly via the
+  Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).
+- Dispatch orders (`POST /v1/dispatch/propose`) are written in English plus the assigned team's
+  district language, whatever language the requester used.
 - `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
 
 ## Deploy

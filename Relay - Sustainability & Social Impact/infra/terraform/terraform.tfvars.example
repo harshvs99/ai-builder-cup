@@ -4,6 +4,8 @@ project_id      = "your-gcp-project-id"
 region          = "us-central1"
 vertex_location = "global"
 gemini_model    = "gemini-flash-latest"
+# Pro-tier writer for the hourly per-district sitrep; Flash (gemini_model) is the fallback.
+sitrep_gemini_model = "gemini-pro-latest"
 max_instances   = 3
 # Full image URI; deploy.sh sets this after building.
 image = "us-central1-docker.pkg.dev/your-gcp-project-id/relay/relay:TAG"

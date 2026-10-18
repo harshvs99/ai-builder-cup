@@ -539,15 +539,24 @@ class FirestoreStore:
             ref, sid = self._next(txn, "sitrep")
             saved = {**{k: v for k, v in sitrep.items() if k != "id"}, "id": sid}
             txn.set(self._col("sitreps").document(str(sid)), saved)
+            if saved.get("district"):
+                # a per-district pointer: a filtered, ordered query would need a composite index
+                txn.set(self._col("sitrep_latest").document(saved["district"]), {"id": sid})
             txn.set(ref, {"value": sid})
             return saved
 
         with self._write_lock:
             return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
-    def latest_sitrep(self) -> dict[str, Any] | None:
+    def latest_sitrep(self, district: str | None = None) -> dict[str, Any] | None:
         from google.cloud import firestore
 
+        if district is not None:
+            ptr = self._col("sitrep_latest").document(district).get()
+            if not ptr.exists:
+                return None
+            snap = self._col("sitreps").document(str(int(ptr.get("id")))).get()
+            return snap.to_dict() if snap.exists else None
         docs = list(self._col("sitreps").order_by("id", direction=firestore.Query.DESCENDING).limit(1).stream())
         return docs[0].to_dict() if docs else None
 

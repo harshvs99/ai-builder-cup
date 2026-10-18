@@ -83,17 +83,17 @@ export function createClient(base: string, operatorKey?: string | null) {
       const body = await request<{ gateways?: Gateway[] }>('/v1/gateways', { signal });
       return Array.isArray(body?.gateways) ? body.gateways : [];
     },
-    /** null when no sitrep has been generated yet. */
-    async latestSitrep(signal?: AbortSignal): Promise<Sitrep | null> {
+    /** The district's newest sitrep; null when none has been generated yet. */
+    async latestSitrep(district: string, signal?: AbortSignal): Promise<Sitrep | null> {
       try {
-        return await request<Sitrep>('/v1/sitreps/latest', { signal });
+        return await request<Sitrep>(`/v1/sitreps/latest?district=${encodeURIComponent(district)}`, { signal });
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;
       }
     },
-    runSitrep(): Promise<Sitrep> {
-      return request<Sitrep>('/v1/sitreps/run', { method: 'POST' });
+    runSitrep(district: string): Promise<Sitrep> {
+      return request<Sitrep>(`/v1/sitreps/run?district=${encodeURIComponent(district)}`, { method: 'POST' });
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });

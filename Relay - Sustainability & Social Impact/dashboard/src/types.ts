@@ -144,6 +144,8 @@ export interface Sitrep {
   period_start: number;
   period_end: number;
   generated_at: number;
+  /** District id; absent on reports written before sitreps were per district. */
+  district?: string;
   counts: SitrepCounts;
   text_en: string;
   text_local: string;

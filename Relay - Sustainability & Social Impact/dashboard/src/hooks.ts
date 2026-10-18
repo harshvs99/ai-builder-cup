@@ -124,32 +124,40 @@ export function useTicketDetail(no: number | null) {
   return [detail, setDetail] as const;
 }
 
-/** Latest situation report plus a regenerate action. */
-export function useSitrep() {
+/** A district's latest situation report plus a regenerate action. ``district`` null: none chosen. */
+export function useSitrep(district: string | null) {
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    setSitrep(null);
+    setError(null);
+    if (!district) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
     const ctl = new AbortController();
     api
-      .latestSitrep(ctl.signal)
+      .latestSitrep(district, ctl.signal)
       .then((r) => setSitrep(r))
       .catch((e) => !ctl.signal.aborted && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => !ctl.signal.aborted && setLoaded(true));
     return () => ctl.abort();
-  }, []);
+  }, [district]);
   const regenerate = useCallback(async () => {
+    if (!district) return;
     setBusy(true);
     setError(null);
     try {
-      setSitrep(await api.runSitrep());
+      setSitrep(await api.runSitrep(district));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [district]);
   return { sitrep, loaded, busy, error, regenerate };
 }
 

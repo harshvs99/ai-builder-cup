@@ -21,6 +21,12 @@ variable "gemini_model" {
   default     = "gemini-flash-latest"
 }
 
+variable "sitrep_gemini_model" {
+  description = "Model that writes the hourly sitrep, passed as SITREP_GEMINI_MODEL. Falls back to gemini_model if a call fails."
+  type        = string
+  default     = "gemini-pro-latest"
+}
+
 variable "image" {
   description = "Full container image URI for the relay service, e.g. us-central1-docker.pkg.dev/PROJECT/relay/relay:TAG. deploy.sh builds it and passes it in."
   type        = string

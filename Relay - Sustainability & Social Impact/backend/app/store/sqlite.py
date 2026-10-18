@@ -618,8 +618,14 @@ class SqliteStore:
             c.execute("UPDATE sitreps SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
             return saved
 
-    def latest_sitrep(self) -> dict[str, Any] | None:
-        rows = self._q("SELECT data FROM sitreps ORDER BY id DESC LIMIT 1")
+    def latest_sitrep(self, district: str | None = None) -> dict[str, Any] | None:
+        if district is None:
+            rows = self._q("SELECT data FROM sitreps ORDER BY id DESC LIMIT 1")
+        else:
+            rows = self._q(
+                "SELECT data FROM sitreps WHERE json_extract(data, '$.district') = ? ORDER BY id DESC LIMIT 1",
+                (district,),
+            )
         return json.loads(rows[0]["data"]) if rows else None
 
     # ------------------------------------------------------------------ acks

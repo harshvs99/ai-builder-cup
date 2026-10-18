@@ -74,6 +74,7 @@ The backend must implement exactly this. Terraform provides it; nothing here is 
 | `GOOGLE_CLOUD_PROJECT` | project id | |
 | `GOOGLE_CLOUD_LOCATION` | `global` (default) | Vertex location |
 | `GEMINI_MODEL` | `gemini-flash-latest` (default) | |
+| `SITREP_GEMINI_MODEL` | `gemini-pro-latest` (default, `sitrep_gemini_model`) | hourly per-district sitrep; Flash fallback |
 
 Credentials are Application Default Credentials from the `relay-run` service account (metadata server); no key files.
 

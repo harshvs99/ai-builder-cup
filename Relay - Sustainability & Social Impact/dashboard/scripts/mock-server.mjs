@@ -103,7 +103,7 @@ const teamViews = () => TEAMS.map((t) => {
 });
 const gatewaySeen = new Map(GATEWAYS.map((g, i) => [g, i === GATEWAYS.length - 1 ? now() - 3 * 3600 : now()]));
 setInterval(() => { for (const g of GATEWAYS.slice(0, -1)) gatewaySeen.set(g, now() - Math.floor(Math.random() * 20)); }, 5000);
-let sitrep = null;
+const sitreps = new Map(); // district id -> latest sitrep
 function propose() {
   const out = [];
   for (const t of tickets.values()) {
@@ -146,17 +146,25 @@ const server = http.createServer((req, res) => {
       .sort((a, b) => b.last_seen - a.last_seen), online_window_s: 60 });
   }
   if (req.method === 'POST' && path === '/v1/dispatch/propose') return send(res, 200, { proposals: propose() });
-  if (req.method === 'GET' && path === '/v1/sitreps/latest') return sitrep ? send(res, 200, sitrep) : send(res, 404, { detail: 'no sitrep yet' });
+  if (req.method === 'GET' && path === '/v1/sitreps/latest') {
+    const s = sitreps.get(url.searchParams.get('district') ?? 'puri');
+    return s ? send(res, 200, s) : send(res, 404, { detail: 'no sitrep yet' });
+  }
   if (req.method === 'POST' && path === '/v1/sitreps/run') {
+    // the mock does not split tickets by district; it only mirrors each district's language
+    const district = url.searchParams.get('district') ?? 'puri';
+    const delhi = district === 'delhi';
     const open = [...tickets.values()].filter((t) => t.status === 'OPEN');
     const p1 = open.filter((t) => t.priority_tier === 'P1');
     const counts = { open: open.length, open_by_category: {}, p1_open: p1.length,
       dispatched: [...tickets.values()].filter((t) => t.status === 'DISPATCHED' || t.status === 'ON_THE_WAY').length,
       resolved: [...tickets.values()].filter((t) => t.status === 'RESOLVED').length, gateways_online: GATEWAYS.length - 1,
       oldest_open_ticket_no: open[0]?.ticket_no ?? null, oldest_open_age_s: 600 };
-    sitrep = { period_start: now() - 3600, period_end: now(), generated_at: now(), counts, local_lang: 'or', ticket_nos: p1.map((t) => t.ticket_no),
-      text_en: `Situation report: ${counts.open} open requests, ${counts.p1_open} of them top priority. ${counts.dispatched} dispatched, ${counts.resolved} resolved.\n\n${counts.gateways_online} gateways online.`,
-      text_local: `ପରିସ୍ଥିତି ରିପୋର୍ଟ: ${counts.open}ଟି ଖୋଲା ଅନୁରୋଧ।` };
+    const sitrep = { period_start: now() - 3600, period_end: now(), generated_at: now(), district, counts,
+      local_lang: delhi ? 'hi' : 'or', ticket_nos: p1.map((t) => t.ticket_no),
+      text_en: `Situation report, ${delhi ? 'Delhi' : 'Puri'}: ${counts.open} open requests, ${counts.p1_open} of them top priority. ${counts.dispatched} dispatched, ${counts.resolved} resolved.\n\n${counts.gateways_online} gateways online.`,
+      text_local: delhi ? `स्थिति रिपोर्ट: ${counts.open} खुले अनुरोध।` : `ପରିସ୍ଥିତି ରିପୋର୍ଟ: ${counts.open}ଟି ଖୋଲା ଅନୁରୋଧ।` };
+    sitreps.set(district, sitrep);
     return send(res, 200, sitrep);
   }
   if (req.method === 'GET' && path === '/v1/stats') {

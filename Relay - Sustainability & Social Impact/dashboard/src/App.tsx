@@ -206,7 +206,7 @@ export function App() {
 
       {view === 'teams' && <TeamsView teams={teams} tickets={tickets} nowSec={nowSec} onOpen={open} />}
       {view === 'sitrep' && (
-        <SitrepView scope={districtName(district)} tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
+        <SitrepView scope={districtName(district)} districtId={districtById(district)?.id ?? null} tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
       )}
       {view === 'gateways' && <GatewaysView gateways={gateways} tickets={tickets} nowSec={nowSec} />}
     </div>

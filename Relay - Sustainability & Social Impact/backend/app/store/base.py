@@ -256,7 +256,10 @@ class Store(Protocol):
         """Store a sitrep (without ``id``) and return it with the id assigned (1, 2, ...)."""
         ...
 
-    def latest_sitrep(self) -> dict[str, Any] | None: ...
+    def latest_sitrep(self, district: str | None = None) -> dict[str, Any] | None:
+        """The newest sitrep, or the newest whose ``district`` is ``district`` (sitreps stored
+        before districts existed have none and only show up unfiltered)."""
+        ...
 
     # ------------------------------------------------------------------ acks
     def clamp_ack_cursor(self, cursor: int) -> int:

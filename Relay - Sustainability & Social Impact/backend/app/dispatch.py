@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from . import templates
+from . import districts, templates
 from .codec import ETA_UNKNOWN, STATUS_DISPATCHED, STATUS_ON_THE_WAY, STATUS_RESOLVED, Ack, encode_ack
 from .cluster import haversine_m
 from .store import AckSpec
@@ -171,8 +171,18 @@ _ORDER_LOCAL = {
 }
 
 
-def local_lang_for(t: dict[str, Any]) -> str | None:
-    return t.get("lang") if t.get("lang") in LOCAL_LANGS else None
+def local_lang_for(t: dict[str, Any], team: dict[str, Any] | None = None) -> str:
+    """The district language the order is also written in: the assigned team's district (the team
+    reads the order), else the ticket's, else the requester's language if it is a district language,
+    else the default district's."""
+    if team is not None and team.get("base_lat") is not None:
+        return districts.team_district(team).local_lang
+    d = districts.ticket_district(t)
+    if d is not None:
+        return d.local_lang
+    if t.get("lang") in LOCAL_LANGS:
+        return t["lang"]
+    return districts.DEFAULT_DISTRICT.local_lang
 
 
 def order_template_local(t: dict[str, Any], lang: str, team_name: str, eta_min: int) -> str:
@@ -216,12 +226,13 @@ def _valid_order(text: Any, ticket_no: int, team_name: str) -> str | None:
 
 
 def draft_order(
-    ticket: dict[str, Any], team_name: str, eta_min: int, textgen: TextGen | None
-) -> tuple[str, str | None, str | None, str]:
+    ticket: dict[str, Any], team_name: str, eta_min: int, textgen: TextGen | None,
+    team: dict[str, Any] | None = None,
+) -> tuple[str, str, str, str]:
     """(order_en, order_local, local_lang, source) for one assignment. Never raises."""
-    lang = local_lang_for(ticket)
+    lang = local_lang_for(ticket, team)
     en = order_template_en(ticket, team_name, eta_min)
-    local = order_template_local(ticket, lang, team_name, eta_min) if lang else None
+    local = order_template_local(ticket, lang, team_name, eta_min)
     if textgen is None:
         return en, local, lang, "template"
     facts = json.dumps(
@@ -238,10 +249,7 @@ def draft_order(
     )
     prompt = _ORDER_PROMPT.format(
         facts=facts, ticket_no=ticket["ticket_no"], team_name=team_name, eta_min=eta_min,
-        local_rule=(
-            f"the same order in {LOCAL_LANGS[lang]}, keeping the team name in Latin script"
-            if lang else "an empty string"
-        ),
+        local_rule=f"the same order in {LOCAL_LANGS[lang]}, keeping the team name in Latin script",
     )
     source = "template"
     try:
@@ -254,24 +262,27 @@ def draft_order(
         en, source = model_en, "gemini"
     else:
         log.warning("gemini english order rejected for ticket %s", ticket["ticket_no"])
-    if lang:
-        model_local = _valid_order(data.get("local"), ticket["ticket_no"], team_name)
-        if model_local:
-            local, source = model_local, "gemini"
-        else:
-            log.warning("gemini local order rejected for ticket %s", ticket["ticket_no"])
+    model_local = _valid_order(data.get("local"), ticket["ticket_no"], team_name)
+    if model_local:
+        local, source = model_local, "gemini"
+    else:
+        log.warning("gemini local order rejected for ticket %s", ticket["ticket_no"])
     return en, local, lang, source
 
 
 def build_proposals(
     assignments: list[Assignment], tickets: list[dict[str, Any]], textgen: TextGen | None, now: int,
-    workers: int = 8,
+    workers: int = 8, teams: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Proposal dicts (contract shape plus ``ticket_no``), in assignment order."""
+    """Proposal dicts (contract shape plus ``ticket_no``), in assignment order. ``teams`` (views or
+    seed dicts) place each order in its team's district language."""
     by_no = {t["ticket_no"]: t for t in tickets}
+    team_by_id = {t["id"]: t for t in teams or []}
 
     def one(a: Assignment) -> dict[str, Any]:
-        en, local, lang, _ = draft_order(by_no[a.ticket_no], a.team_name, a.eta_min, textgen)
+        en, local, lang, _ = draft_order(
+            by_no[a.ticket_no], a.team_name, a.eta_min, textgen, team_by_id.get(a.team_id)
+        )
         return {
             "ticket_no": a.ticket_no, "team_id": a.team_id, "team_name": a.team_name, "eta_min": a.eta_min,
             "order_en": en, "order_local": local, "local_lang": lang, "reason": a.reason, "proposed_at": now,
