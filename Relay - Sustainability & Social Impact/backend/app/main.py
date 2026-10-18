@@ -23,6 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import dispatch as dispatching
 from . import sitrep as sitreps
 from . import teams as team_data
+from .embed import Embedder, embedder_from_env
 from .agent import Agent, IncomingNeed, TriagePipeline, agent_from_env, build_ack
 from .codec import (
     CATEGORY_NAMES,
@@ -320,6 +321,7 @@ def create_app(
     triage_budget_s: float | None = None,
     textgen: TextGen | None = None,
     sitrep_textgen: TextGen | None = None,
+    embedder: Embedder | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
@@ -351,6 +353,7 @@ def create_app(
         agent if agent is not None else agent_from_env(),
         clock=clock,
         enrich_budget_s=enrich_budget_s if enrich_budget_s is not None else float(os.environ.get("RELAY_AGENT_BUDGET_S", "20")),
+        embedder=embedder if embedder is not None else embedder_from_env(),
     )
 
     @asynccontextmanager

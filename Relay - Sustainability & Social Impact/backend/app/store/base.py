@@ -45,9 +45,12 @@ TICKET_COLUMNS = {
     # JSON objects, null when unset: estimated location from a landmark; category correction;
     # intake answers {question key: answer key}
     "geo", "reclass", "answers",
+    # base64 float16 unit vector of "{category}: {item}" for embedding-based clustering (see embed.py); null if unset
+    "item_vec",
 }
 # Columns added after the first release: SQLite adds them to existing databases on connect.
 JSON_COLUMNS = ("geo", "reclass", "answers")
+TEXT_COLUMNS = ("item_vec",)  # plain nullable TEXT columns added the same way
 
 # Ticket status -> the statuses it may be entered from (DISPATCHED comes from ``approve_ticket``).
 ADVANCE_FROM: dict[str, tuple[str, ...]] = {
