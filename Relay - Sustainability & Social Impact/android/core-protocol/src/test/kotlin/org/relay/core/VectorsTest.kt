@@ -263,4 +263,43 @@ class VectorsTest {
         assertTrue(bad.size >= 8)
         for ((name, hex) in bad) assertNull(name, org.relay.core.payload.BroadcastCodec.decode(h(hex.jsonPrimitive.content)))
     }
+
+    // ---- ANNOUNCEMENT (SPEC 5.7): its own vector list too
+    @Test fun announcementVectorsMatchByteForByte() {
+        val list = root["announcement_vectors"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(list.size >= 5)
+        for (v in list) {
+            val name = v.s("name")
+            val fl = v["fields"]!!.jsonObject
+            val a = org.relay.core.payload.Announcement(
+                h(fl.s("announcement_id")), Lang.fromTag(fl.s("lang"))!!,
+                org.relay.core.payload.AnnouncementDistricts.indexOf(fl.s("district"))!!,
+                if (fl.s("status") == "active") org.relay.core.payload.AnnouncementStatus.ACTIVE else org.relay.core.payload.AnnouncementStatus.WITHDRAWN,
+                fl.l("approved_at"), fl.l("expires_at"), fl.s("text"),
+            )
+            val payload = org.relay.core.payload.AnnouncementCodec.encode(a)
+            assertEquals("$name payload", v.s("payload_hex"), Hex.encode(payload))
+            assertEquals("$name decode", a, org.relay.core.payload.AnnouncementCodec.decode(h(v.s("payload_hex"))))
+            assertEquals("$name frame", v.s("frame_hex"), Hex.encode(FrameCodec.encode(frameOf(v, payload))))
+            assertEquals("$name key", fl.s("key"), a.keyHex)
+            assertTrue("$name fits one write", v.s("frame_hex").length / 2 <= 182)
+        }
+        assertEquals(org.relay.core.payload.AnnouncementCodec.MAX_PAYLOAD, root["sizes"]!!.jsonObject.i("announcement_max_payload"))
+        assertEquals(org.relay.core.payload.AnnouncementCodec.TTL_SEC, root["announcement_ttl_s"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun announcementPayloadsEveryDecoderMustReject() {
+        val bad = root["must_reject_announcement_payloads"]!!.jsonObject
+        assertTrue(bad.size >= 8)
+        for ((name, hex) in bad) assertNull(name, org.relay.core.payload.AnnouncementCodec.decode(h(hex.jsonPrimitive.content)))
+    }
+
+    @Test fun announcementIndexTablesMatchTheVectors() {
+        val langs = root["announcement_lang_codes"]!!.jsonObject
+        assertEquals(Lang.entries.size, langs.size)
+        for (l in Lang.entries) assertEquals(l.tag, l.code, langs[l.tag]!!.jsonPrimitive.int)
+        val districts = root["announcement_district_codes"]!!.jsonObject
+        assertEquals(org.relay.core.payload.AnnouncementDistricts.IDS.size, districts.size)
+        for ((i, id) in org.relay.core.payload.AnnouncementDistricts.IDS.withIndex()) assertEquals(id, i, districts[id]!!.jsonPrimitive.int)
+    }
 }
