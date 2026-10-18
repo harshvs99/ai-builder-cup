@@ -80,7 +80,7 @@ Everything lives under `HoldOn - BFSI/` in this repository.
 | How detection surfaces | The model **calls `raise_scam_alert(...)`** with structured args. We never parse its speech. | Gives a reliable UI trigger, structured red flags, and a confidence score to apply thresholds to. |
 | Keeping the model quiet during the call | The system prompt says to stay silent and only call tools. **Model audio is muted client-side unless an alert is active.** The warning is spoken from `warning_text` via TTS. Try the native-audio "proactive audio" setting so the model can choose not to respond. | A chatty AI talking over a call ruins the demo. We control exactly what is spoken and when. |
 | Backstop detection | Every 3–5 s, a Gemini Flash call over the rolling transcript returns a JSON classification | Belt and braces in case the Live model misses or delays the function call. Whichever path fires first wins, deduplicated per session. |
-| Trusted-contact channel | **Telegram Bot API** first, Twilio SMS/WhatsApp optional | Free, instant and reliable for a live demo, with no sender-ID or number verification. It buzzes a real phone. |
+| Trusted-contact channel | **A channel-agnostic `Notifier`** with three implementations: in-app (`/contact`, always on), **Telegram** (the demo channel), and **WhatsApp** (a stub behind the same interface, for production) | Telegram buzzes a real phone after 5 minutes of setup. WhatsApp is what contacts in SG/IN/MY/ID actually use, but it needs Meta business verification and approved templates, which take days. Every alert is the template `scam_alert_v1` plus named parameters, kept within WhatsApp's template limits, so switching channels needs no change to the message. |
 | Hotline source | **Curated, verified JSON**. Search grounding is used only for advisories and context. | The core safety rule is never to trust a number the caller supplies or a number from an arbitrary web result. |
 | Stack | Python 3.12 + FastAPI + `google-genai` SDK (uv); Next.js + TypeScript + Tailwind PWA | The Python SDK has the most complete Live API support, and Next.js PWAs are quick to ship. |
 | Hosting | Backend on **Cloud Run** (WebSockets, session affinity); web on Firebase Hosting or Vercel | Microphone access requires HTTPS. Cloud Run is the natural fit for the Google stack. |
@@ -113,8 +113,25 @@ Everything lives under `HoldOn - BFSI/` in this repository.
 > - **Every mock document** (warrant, payment request, report) carries a visible `DEMO`
 >   watermark and uses Lumen Bank or obviously fictional details.
 > - **Lumen Bank's phone numbers, URLs and account numbers are fictional and labelled
->   `DEMO`.** Pick numbers from a reserved or unassigned range, or show them as
->   `1800-LUMEN-00`, and never a string that could dial or reach a real person or service.
+>   `DEMO`.** Never a string that could dial or reach a real person or service:
+>   - Phone: `1800-LUMEN-DEMO`. On a keypad that is 13 digits, which is not a valid length
+>     in Singapore or India. (`1800-LUMEN-00` would map to 1800-586-3600, a well-formed SG/IN
+>     toll-free number, so it is **not** allowed.) Never wrapped in a `tel:` link.
+>   - Web: `lumen-bank.example`. `.example` is reserved (RFC 2606) and never resolves.
+>   - Accounts: `DEMO-0000-1234` style.
+>   - Enforced by `backend/tests/test_knowledge.py`.
+
+### POC decisions (Phase 0)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Runs without keys | Every external dependency has an **offline path**: a heuristic detector instead of Gemini, browser `SpeechRecognition` instead of Live transcription, an in-app "contact phone" (`/contact`) instead of Telegram, and a template report instead of ReportAgent. Gemini and Telegram switch on when their keys are in `backend/.env`. | The demo can't depend on venue Wi-Fi or a quota. It also gives us the **baseline**: Gemini has to beat the heuristic on `eval/` before it becomes the default. |
+| Upload analysis | Gemini **structured output** (transcript + assessment + payee). The backend then runs `lookup_official_contact` / `check_bank_policy` itself to build `verified_facts`. | Verified facts never come from the model. Running the tools ourselves is simpler and more reliable than a tool-call loop on `generateContent`. |
+| Live listen | `/ws/listen` takes either PCM16 audio (Gemini Live) or caption text (the browser's speech engine or a staged-call script). Both feed the same transcript buffer, heuristic backstop and AlertBus. | One pipeline, three input sources. The staged-call text mode is deterministic, so it's the demo we can rehearse reliably. |
+| "Call Mum" button | The user's phone number goes in the message body as plain text, which both Telegram and WhatsApp turn into a tappable link. No call button. | Telegram inline URL buttons don't accept `tel:`, and WhatsApp template call buttons can only dial a number fixed when the template is approved (both assumptions, checked by the spike). |
+| Contact opt-in | `LinkFlow` for each channel returns `{deep_link, code}`: `t.me/<bot>?start=<code>` for Telegram, `wa.me/<number>?text=HOLDON-<code>` for WhatsApp | Both apps need the contact to message first. Telegram needs a `chat_id`. On WhatsApp the contact's message also opens the 24-hour window for free-form follow-ups. |
+| State | A single-user JSON file store in `backend/.data/`, gitignored | The POC has one user (Mdm Tan) and one contact (Priya). No database needed. |
+| Contracts | Pydantic models in `backend/app/tools/schemas.py` are the source of truth. `web/lib/types.ts` is generated from their JSON Schema by `scripts/gen_types.sh`. | The backend and web types can't drift apart. |
 
 ---
 
@@ -209,7 +226,9 @@ HoldOn - BFSI/
 │   │   ├── detect/analyze.py   # fallback-mode generateContent pipeline
 │   │   ├── tools/              # declarations + executors (alert, contacts, bank policy)
 │   │   ├── alerts/bus.py       # dedupe, thresholds, fan-out
-│   │   ├── alerts/telegram.py  # trusted-contact notifier (+ twilio.py optional)
+│   │   ├── alerts/notify.py    # Notifier interface + scam_alert_v1 template ×4 languages
+│   │   ├── alerts/telegram.py  # Telegram notifier + /start link polling
+│   │   ├── alerts/whatsapp.py  # WhatsApp Cloud API notifier (stub until Meta approval)
 │   │   ├── report/agent.py     # structured-output report generation
 │   │   ├── report/render.py    # Markdown/PDF
 │   │   ├── prompts/            # live_guardian.md, analyze.md, report.md, backstop.md
@@ -249,20 +268,22 @@ exists from Phase 1 onward.
 
 ### Phase 0: Spikes and scaffolding (½ day)
 - [ ] Scaffold `backend/` (uv + FastAPI) and `web/` (Next.js + Tailwind), with a `.env.example`.
+- [ ] Shared contracts: `schemas.py` → JSON Schema → `web/lib/types.ts`, plus `CONTRACTS.md` (REST + WS).
 - [ ] **Live API spike** (a Python script, no UI): stream a WAV file into a Live session with
       input transcription, one function declaration and `google_search`. Measure the time
       from the trigger phrase to the function call. **Go/no-go on combining tools.** If the
       chosen model can't combine search and function calls, move search into the backstop
       or report path and keep the Live session on function calls only.
 - [ ] Check native-audio behaviour: can the model stay silent? Does proactive audio help?
-- [ ] Create the Telegram bot, then confirm a send reaches a real phone.
+- [ ] Create the Telegram bot, then confirm a send reaches a real phone. Check whether a
+      `tel:` inline button is rejected. If it is, put the number in the message text.
 - [ ] Draft the knowledge JSON files and verify every hotline and policy against an official
       source URL.
 
 ### Phase 1: Fallback mode end-to-end (1 day)
 - [ ] `knowledge/` loaders and the `lookup_official_contact` / `check_bank_policy` executors, with tests.
 - [ ] `POST /analyze` (voice note and/or screenshot) → `raise_scam_alert` → AlertBus.
-- [ ] AlertBus → Telegram notifier → ReportAgent → `/reports/{id}`.
+- [ ] AlertBus → Notifier (in-app + Telegram) → ReportAgent → `/reports/{id}`.
 - [ ] Web: setup page (language, trusted contact via Telegram deep link `t.me/<bot>?start=<code>`),
       upload page, AlertOverlay, report page.
 - [ ] Generate demo assets: a police-impersonation voice note (EN), a fake warrant
@@ -334,7 +355,8 @@ same recording. The overlay, buzz and report are identical.
 | Hallucinated or wrong hotline | Numbers come only from curated JSON with source URLs. Search results are shown as cited advisories only. |
 | False positives on legitimate calls | Benign controls in eval, and a hard rule against alerting without a money, OTP, app-install or secrecy ask unless confidence is high |
 | Multilingual quality (code-mixed Hinglish, Singlish) | Include code-mixed clips in eval and add phrase variants to `scam_scripts.json` |
-| Telegram blocked or delayed | Twilio SMS as a second channel, and the contact notification also shows in the web status page |
+| Telegram blocked or delayed | The in-app contact phone (`/contact`) always gets the same alert. Twilio SMS can be added as another `Notifier`. |
+| Moving the contact channel to WhatsApp later | Alerts are already template + parameters within WhatsApp's limits. Submit `scam_alert_v1` in 4 languages for Meta approval early, because each change to the wording means another review. |
 | Real-brand misuse (implied endorsement, phishing-grade mocks) | Brand policy in §2: Lumen Bank for all visuals, real names only as cited text, a DEMO watermark on every mock |
 | Privacy and consent concerns from judges | On-device consent, nothing stored by default, the user controls the report, and the call stays on the user's speaker (no call interception) |
 
