@@ -1,0 +1,87 @@
+import Foundation
+import RelayCore
+
+/// Outcome of one sync attempt, for the UI.
+public struct SyncOutcome: Equatable, Sendable {
+    public var ok: Bool
+    public var uploaded: Int
+    public var accepted: Int
+    public var duplicates: Int
+    public var rejected: Int
+    public var acksOriginated: Int
+    public var error: String?
+
+    public init(ok: Bool, uploaded: Int = 0, accepted: Int = 0, duplicates: Int = 0, rejected: Int = 0,
+                acksOriginated: Int = 0, error: String? = nil) {
+        self.ok = ok; self.uploaded = uploaded; self.accepted = accepted; self.duplicates = duplicates
+        self.rejected = rejected; self.acksOriginated = acksOriginated; self.error = error
+    }
+}
+
+/// One gateway sync round: upload stored NEED frames not yet uploaded, then wrap any returned ACK payloads
+/// and originate them into the mesh. Runs against a fake `HTTPTransport` in tests.
+///
+/// Failure semantics: any error leaves `state` untouched, so the same frames go out again next round.
+public final class GatewaySyncer: @unchecked Sendable {
+    private let node: GossipNode
+    private let store: any PacketStore
+    private let state: GatewayState
+    private let client: SyncClient
+    private let config: @Sendable () -> SyncConfig
+    private let log: @Sendable (String) -> Void
+    private let maxFramesPerSync: Int
+    private let syncLock = NSRecursiveLock()
+    private let flagLock = NSLock()
+    private var moreWaitingValue = false
+
+    public init(
+        node: GossipNode, store: any PacketStore, state: GatewayState, client: SyncClient,
+        config: @escaping @Sendable () -> SyncConfig, log: @escaping @Sendable (String) -> Void = { _ in },
+        maxFramesPerSync: Int = 100
+    ) {
+        self.node = node; self.store = store; self.state = state; self.client = client
+        self.config = config; self.log = log; self.maxFramesPerSync = maxFramesPerSync
+    }
+
+    /// True if more NEED frames are waiting after the last round (caller may re-run immediately).
+    public var moreWaiting: Bool {
+        get { flagLock.lock(); defer { flagLock.unlock() }; return moreWaitingValue }
+        set { flagLock.lock(); moreWaitingValue = newValue; flagLock.unlock() }
+    }
+
+    public func pendingNeedKeys() -> [String] {
+        store.all().filter { $0.type == FrameTypes.need && !state.isUploaded($0.key) }.map { $0.key }
+    }
+
+    public func syncOnce() -> SyncOutcome {
+        syncLock.lock(); defer { syncLock.unlock() }
+        let pending = store.all().filter { $0.type == FrameTypes.need && !state.isUploaded($0.key) }
+        let batch = Array(pending.prefix(maxFramesPerSync))
+        moreWaiting = pending.count > batch.count
+        do {
+            let resp = try client.sync(config(), gatewayNode: node.nodeId, frames: batch.map { $0.raw }, ackCursor: state.ackCursor())
+            var originated = 0
+            for payload in resp.acks {
+                guard let ack = AckCodec.decode(payload) else {
+                    log("sync: backend returned an undecodable ACK payload; skipped")
+                    continue
+                }
+                _ = try node.originateAck(ack)
+                log("originating ACK ref=\(Hex.encode(ack.refMsgId)) ticket=#\(ack.ticketNo) status=\(ack.status.name) -> node \(Hex.encode(ack.targetNode))")
+                originated += 1
+            }
+            // Only after ACKs are safely in the store do we advance the cursor / mark frames uploaded.
+            state.markUploaded(batch.map { $0.key })
+            state.setAckCursor(resp.ackCursor)
+            log("sync ok frames=\(batch.count) accepted=\(resp.accepted) duplicates=\(resp.duplicates) "
+                + "rejected=\(resp.rejected) acks=\(originated) ack_cursor=\(resp.ackCursor)")
+            return SyncOutcome(ok: true, uploaded: batch.count, accepted: resp.accepted, duplicates: resp.duplicates,
+                               rejected: resp.rejected, acksOriginated: originated)
+        } catch {
+            moreWaiting = false
+            let msg = (error as? SyncException)?.message ?? "\(type(of: error)): \(error)"
+            log("sync failed: \(msg) (will retry)")
+            return SyncOutcome(ok: false, error: msg)
+        }
+    }
+}
