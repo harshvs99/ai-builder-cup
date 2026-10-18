@@ -83,6 +83,8 @@ fun SettingsScreen(nav: RelayNav) {
         onUpdate = { f -> MeshRepository.settings.update(f) },
         onOpenSystemSettings = nav.setup.openAppSettings,
         onDeveloper = nav::openDeveloper,
+        onHousehold = nav::openHousehold,
+        onReady = nav::openReady,
     )
 }
 
@@ -94,6 +96,8 @@ internal fun SettingsContent(
     onUpdate: ((Settings) -> Settings) -> Unit,
     onOpenSystemSettings: () -> Unit,
     onDeveloper: () -> Unit,
+    onHousehold: () -> Unit = {},
+    onReady: () -> Unit = {},
 ) {
     val s = strings.network
     var languageSheet by remember { mutableStateOf(false) }
@@ -148,13 +152,11 @@ internal fun SettingsContent(
         }
 
         Group(s.groupBeforeDisaster) {
-            Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column {
-                    Text(s.householdPlan, style = MaterialTheme.typography.bodyLarge)
-                    Text(s.householdPlanHelp, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                PillButton(s.setUp, { comingSoon = true }, style = PillStyle.Tonal)
-            }
+            SettingNavRow(
+                strings.ready.settingsHousehold, onHousehold, supporting = strings.ready.settingsHouseholdHelp,
+                value = if (settings.householdSet) strings.common.people(settings.household.people) else null,
+            )
+            SettingNavRow(strings.ready.settingsReady, onReady)
         }
 
         // Last and small: today's developer settings, unchanged.

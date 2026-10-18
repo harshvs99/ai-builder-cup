@@ -59,7 +59,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import org.relay.app.MeshRepository
+import androidx.compose.foundation.layout.heightIn
 import org.relay.app.LocalSpeaker
+import org.relay.app.ready.ReadyRepository
+import org.relay.core.ready.ReadyView
+import org.relay.core.ready.ReadyWarning
 import org.relay.app.VillagerStatus
 import org.relay.app.rememberPermissions
 import org.relay.app.store.MyNeed
@@ -173,6 +177,27 @@ private fun LanguageContent(
 // ---------------------------------------------------------------------------------------------------------------
 // 2. Home
 
+/** The Home banner of an active warning: severity colour, headline, "Landfall in about N h" and a "Get ready" button. */
+@Composable
+private fun ReadyBanner(w: ReadyWarning, onGetReady: () -> Unit) {
+    val r = LocalStrings.current.ready
+    val level = ReadyView.level(w)
+    val (container, onContainer) = org.relay.app.ui.ready.levelColors(level)
+    val hours = ReadyView.landfallHours(w, System.currentTimeMillis() / 1000)
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(container).padding(16.dp)
+            .semantics(mergeDescendants = true) { contentDescription = r.bannerDescription(level, w.headline, hours) },
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(r.levelWord(level), style = MaterialTheme.typography.labelLarge, color = onContainer)
+        Text(w.headline, style = MaterialTheme.typography.titleMedium, color = onContainer)
+        if (hours != null) Text(r.landfallIn(hours), style = MaterialTheme.typography.bodyMedium, color = onContainer)
+        TextButton(onClick = onGetReady, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(r.getReady, style = MaterialTheme.typography.titleMedium, color = onContainer)
+        }
+    }
+}
+
 /** Bluetooth permission is explained once per app run, then asked; later visits to Home only start the mesh. */
 private var bluetoothExplainedThisRun = false
 
@@ -207,7 +232,10 @@ fun HomeScreen(nav: RelayNav) {
         )
     }
 
+    val ready by ReadyRepository.snapshot.collectAsStateWithLifecycle()
     HomeContent(
+        banner = ReadyView.activeWarning(ready.pack, System.currentTimeMillis() / 1000),
+        onGetReady = { nav.openReady() },
         area = settings.areaLabel.trim(),
         villager = villager,
         now = now,
@@ -225,6 +253,8 @@ fun HomeScreen(nav: RelayNav) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeContent(
+    banner: ReadyWarning?,
+    onGetReady: () -> Unit,
     area: String,
     villager: VillagerStatus,
     now: Long,
@@ -261,6 +291,9 @@ private fun HomeContent(
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, contentDescription = s.home.helpLabel, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+
+        // Cyclone warning banner (only while the stored pack has an active warning)
+        if (banner != null) ReadyBanner(banner, onGetReady)
 
         // Status card -> Network
         val title = c.villagerTitle(villager)
@@ -397,6 +430,7 @@ private val demoStatus = VillagerStatus(VillagerStatus.Kind.REACHABLE, VillagerS
 
 @Composable
 private fun HomeDemo() = HomeContent(
+    banner = null, onGetReady = {},
     area = "Ward 4, Puri district", villager = demoStatus, now = System.currentTimeMillis(), recent = demoNeeds.take(2),
     onStatusClick = {}, onTurnOnBluetooth = {}, onMic = {}, onType = {}, onSeeAll = {}, onOpenRequest = {}, onDeleteRequest = {},
 )

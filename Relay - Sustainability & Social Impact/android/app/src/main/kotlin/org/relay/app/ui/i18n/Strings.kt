@@ -20,6 +20,7 @@ class Strings(val lang: Lang) {
     val ask = AskStrings(lang)
     val request = RequestStrings(lang)
     val network = NetworkSettingsStrings(lang)
+    val ready = ReadyStrings(lang)
 }
 
 private val cache = HashMap<Lang, Strings>()

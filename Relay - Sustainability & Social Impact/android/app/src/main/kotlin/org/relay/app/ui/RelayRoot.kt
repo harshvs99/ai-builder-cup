@@ -49,8 +49,13 @@ import org.relay.app.ui.network.ConsoleScreen
 import org.relay.app.ui.network.DeveloperScreen
 import org.relay.app.ui.network.NetworkScreen
 import org.relay.app.ui.network.SettingsScreen
+import org.relay.app.ui.ready.HouseholdScreen
+import org.relay.app.ui.ready.ReadyScreen
 import org.relay.app.ui.request.RequestDetailScreen
+import org.relay.app.ready.ReadyRepository
 import org.relay.core.lang.LanguageCatalog
+import org.relay.core.ready.ReadyPolicy
+import org.relay.core.ready.RefreshTrigger
 import org.relay.core.payload.Lang
 
 /** Permission / Bluetooth setup actions used by the developer screens (built from [Permissions]). */
@@ -75,7 +80,7 @@ private class Tab(val route: String, val icon: ImageVector, val label: @Composab
  * flow screen uses StepTopAppBar (which handles the status bar) plus navigationBarsPadding()/imePadding().
  */
 @Composable
-fun RelayRoot() {
+fun RelayRoot(openReady: Boolean = false, onReadyOpened: () -> Unit = {}) {
     val ctx = LocalContext.current
     val navController = rememberNavController()
     val permissions = rememberPermissions()
@@ -96,6 +101,15 @@ fun RelayRoot() {
     }
 
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
+    // Ready mode: a refresh when the network comes back, and one every 3 h while the app runs (app open is in MainActivity).
+    val online = MeshRepository.status.collectAsStateWithLifecycle().value.internetAvailable
+    LaunchedEffect(online) { if (online) ReadyRepository.refresh(ctx, RefreshTrigger.NETWORK_REGAINED) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(ReadyPolicy.PERIODIC_MS)
+            ReadyRepository.refresh(ctx, RefreshTrigger.PERIODIC)
+        }
+    }
     val snackbar = remember { SnackbarHostState() }
     // The stored language was switched off (backend or build): say so once, then keep showing English.
     val resolution = settings.languageResolution
@@ -108,6 +122,10 @@ fun RelayRoot() {
         }
     }
     val startRoute = remember { if (settings.languageConfirmed) Routes.HOME else Routes.LANGUAGE }
+
+    LaunchedEffect(openReady) {
+        if (openReady && settings.languageConfirmed) { nav.openReady(); onReadyOpened() }
+    }
 
     val backStack by navController.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
@@ -170,6 +188,8 @@ fun RelayRoot() {
                 composable(Routes.NETWORK) { NetworkScreen(nav) }
                 composable(Routes.CONSOLE) { ConsoleScreen(nav) }
                 composable(Routes.SETTINGS) { SettingsScreen(nav) }
+                composable(Routes.READY) { ReadyScreen(nav) }
+                composable(Routes.HOUSEHOLD) { HouseholdScreen(nav) }
                 composable(Routes.DEVELOPER) { DeveloperScreen(nav) }
                 composable(Routes.LEGACY_HOME) { LegacyHomeScreen(actions) }
             }

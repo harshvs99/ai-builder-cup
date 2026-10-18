@@ -112,6 +112,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // Background refresh of the Ready pack (best effort, every 6 h with a network).
+    implementation(libs.androidx.work.runtime.ktx)
     // On-device Gemma (LiteRT-LM). Needs API 31+; the manifest overrides minSdk for it and GemmaRunner guards at runtime.
     implementation(libs.litertlm.android)
 

@@ -7,6 +7,7 @@ import org.relay.app.ble.RecentPeers
 import org.relay.core.lang.LanguageCatalog
 import org.relay.core.lang.LanguageResolution
 import org.relay.core.payload.Lang
+import org.relay.core.ready.Household
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +56,10 @@ data class Settings(
     val serverLanguagesJson: String = "",
     /** The disabled language the "not available yet" line was already shown for (language tag), or empty. */
     val languageNoticeFor: String = "",
+    /** "My household" (contract section 3.2): stays on the phone; only its anonymous flags go to `/v1/ready/plan`. */
+    val household: Household = Household(),
+    /** The household screen was saved at least once (so Ready can ask for it instead of using the defaults silently). */
+    val householdSet: Boolean = false,
 ) {
     /** Languages the picker offers: enabled in this build AND in the cached server list (build default until one arrived). */
     val offeredLanguages: List<Lang>
@@ -140,6 +145,8 @@ class AppSettings(ctx: Context) {
         helpLocateNeighbours = prefs.getBoolean("help_locate", BuildConfig.HELP_LOCATE_DEFAULT),
         serverLanguagesJson = prefs.getString("server_langs", "") ?: "",
         languageNoticeFor = prefs.getString("lang_notice_for", "") ?: "",
+        household = Household.fromJson(prefs.getString("household", null)),
+        householdSet = prefs.getBoolean("household_set", false),
     )
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
@@ -169,6 +176,8 @@ class AppSettings(ctx: Context) {
             .putBoolean("help_locate", next.helpLocateNeighbours)
             .putString("server_langs", next.serverLanguagesJson)
             .putString("lang_notice_for", next.languageNoticeFor)
+            .putString("household", next.household.normalized().toJson().toString())
+            .putBoolean("household_set", next.householdSet)
             .apply()
         _flow.value = next
         for (l in listeners) try { l(next) } catch (_: Exception) {}
