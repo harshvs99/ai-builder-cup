@@ -6,6 +6,7 @@ transaction) and the pipeline code is identical for both:
 
   * ``ingest``          dedupe + cluster + ticket upsert + link + RECEIVED ack, for one packet
   * ``approve_ticket``  OPEN -> DISPATCHED plus one DISPATCHED ack per distinct origin
+  * ``advance_ticket``  DISPATCHED -> ON_THE_WAY -> RESOLVED plus one ack per distinct origin
   * ``update_ticket_if_unchanged``  compare-and-set used by the Gemini enrichment phase
 
 ``ingest`` calls back into the pipeline (``plan``) with the candidate tickets the store read
@@ -38,6 +39,22 @@ TICKET_COLUMNS = {
 }
 # Columns added after the first release: SQLite adds them to existing databases on connect.
 JSON_COLUMNS = ("geo", "reclass", "answers")
+
+# Ticket status -> the statuses it may be entered from (DISPATCHED comes from ``approve_ticket``).
+ADVANCE_FROM: dict[str, tuple[str, ...]] = {
+    "ON_THE_WAY": ("DISPATCHED",),
+    "RESOLVED": ("DISPATCHED", "ON_THE_WAY"),
+}
+
+# What ``advance_ticket`` reports: the transition happened / the ticket is already there / not allowed.
+AdvanceResult = Literal["done", "noop", "conflict"]
+
+
+def merge_dispatch(existing: dict[str, Any] | None, patch: dict[str, Any]) -> dict[str, Any]:
+    """The dispatch record after ``patch`` (timestamps, ETA). A plain approval stores no dispatch
+    record, so one is created without ``approved_at``."""
+    return {**(existing or {"team_id": None, "team_name": None, "eta_min": None}), **patch}
+
 
 class TeamAtCapacity(Exception):
     """``approve_ticket`` refused to assign a team that already carries its capacity."""
@@ -139,10 +156,21 @@ class Store(Protocol):
         dispatches. An already-dispatched ticket returns False before any capacity check."""
         ...
 
+    def advance_ticket(
+        self, ticket_no: int, status: str, now: int, make_ack: Callable[[dict[str, Any]], AckSpec], *,
+        patch: dict[str, Any] | None = None,
+    ) -> AdvanceResult | None:
+        """DISPATCHED -> ON_THE_WAY, or DISPATCHED / ON_THE_WAY -> RESOLVED (``ADVANCE_FROM``), with one
+        ack per distinct origin (``make_ack`` gets the origin's packet). None if no such ticket,
+        ``noop`` if the ticket already has ``status`` (a retry; nothing written), ``conflict`` if the
+        transition is not allowed. ``patch`` is merged into the dispatch record in the same
+        transaction, and resolving also releases the dispatch (the team's load drops)."""
+        ...
+
     def stats(self) -> dict[str, Any]: ...
 
     def ticket_counts(self) -> dict[str, Any]:
-        """{open, p1_open, p1_open_nos (score desc), dispatched, resolved, open_by_category,
+        """{open, p1_open, p1_open_nos (score desc), dispatched (DISPATCHED + ON_THE_WAY), resolved, open_by_category,
         oldest_open_no, oldest_open_at}. Backs /v1/stats and the sitrep."""
         ...
 

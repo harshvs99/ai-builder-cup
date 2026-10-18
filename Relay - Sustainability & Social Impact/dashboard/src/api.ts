@@ -1,3 +1,4 @@
+import { loadOperatorKey } from './lib/operatorKey';
 import type { Stats, Ticket } from './types';
 
 export class ApiError extends Error {
@@ -28,13 +29,14 @@ async function errorMessage(res: Response): Promise<string> {
   }
 }
 
-export function createClient(base: string) {
+export function createClient(base: string, operatorKey?: string | null) {
   const root = base.replace(/\/+$/, '');
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let res: Response;
     try {
-      res = await fetch(`${root}${path}`, init);
+      const withKey = operatorKey ? { ...init, headers: { ...init?.headers, 'X-Operator-Key': operatorKey } } : init;
+      res = await fetch(`${root}${path}`, withKey);
     } catch (e) {
       throw new ApiError(0, `Backend unreachable (${e instanceof Error ? e.message : String(e)})`);
     }
@@ -65,4 +67,4 @@ export function createClient(base: string) {
 }
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
-export const api = createClient(API_BASE);
+export const api = createClient(API_BASE, loadOperatorKey());

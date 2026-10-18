@@ -25,6 +25,17 @@ describe('api client', () => {
     expect(f.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
   });
 
+  it('sends X-Operator-Key only when a key is configured', async () => {
+    const f = vi.fn().mockImplementation(async () => json({ tickets: [] }));
+    vi.stubGlobal('fetch', f);
+    await createClient('http://x', 'k1').listTickets();
+    await createClient('http://x', 'k1').approve(3);
+    await createClient('http://x').listTickets();
+    expect(f.mock.calls[0]?.[1]?.headers).toMatchObject({ 'X-Operator-Key': 'k1' });
+    expect(f.mock.calls[1]?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Operator-Key': 'k1' } });
+    expect(f.mock.calls[2]?.[1]?.headers).toBeUndefined();
+  });
+
   it('wraps network failures as ApiError(status 0)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     const err = await createClient('http://x').getStats().catch((e) => e);

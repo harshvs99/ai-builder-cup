@@ -26,7 +26,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from . import templates
-from .codec import STATUS_DISPATCHED, Ack, encode_ack
+from .codec import ETA_UNKNOWN, STATUS_DISPATCHED, STATUS_ON_THE_WAY, STATUS_RESOLVED, Ack, encode_ack
 from .cluster import haversine_m
 from .store import AckSpec
 from .textgen import TextGen, call_json
@@ -291,3 +291,26 @@ def build_dispatch_ack(*, ref_msg_id: str, target_node: str, ticket_no: int, lan
         )
     )
     return AckSpec(ack_id, payload, target_node, ref_msg_id, ticket_no, STATUS_DISPATCHED)
+
+
+def build_status_ack(
+    *, ref_msg_id: str, target_node: str, ticket_no: int, lang: str, status: int, eta_min: int | None = None
+) -> AckSpec:
+    """ON_THE_WAY / RESOLVED ACK. ``eta_min`` only applies to ON_THE_WAY; without it the wording
+    carries no ETA and the wire field is unknown. Text comes from templates.py, never from a model."""
+    if status == STATUS_ON_THE_WAY and eta_min is not None:
+        eta = max(0, min(MAX_ETA_MIN, int(eta_min)))
+        text = templates.render("ON_THE_WAY", lang, ticket_no, eta)
+    elif status in (STATUS_ON_THE_WAY, STATUS_RESOLVED):
+        eta = ETA_UNKNOWN
+        text = templates.render("ON_THE_WAY_NO_ETA" if status == STATUS_ON_THE_WAY else "RESOLVED", lang, ticket_no)
+    else:
+        raise ValueError(f"not a progress status: {status}")
+    ack_id = os.urandom(8)
+    payload = encode_ack(
+        Ack(
+            ack_id=ack_id, ref_msg_id=bytes.fromhex(ref_msg_id), target_node=bytes.fromhex(target_node),
+            ticket_no=ticket_no, status=status, eta_min=eta, text=text,
+        )
+    )
+    return AckSpec(ack_id, payload, target_node, ref_msg_id, ticket_no, status)

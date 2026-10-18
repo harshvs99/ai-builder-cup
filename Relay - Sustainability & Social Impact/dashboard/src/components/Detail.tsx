@@ -20,7 +20,7 @@ export function Detail({ ticket: t, nowSec, onClose, onApproved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const meta = categoryMeta(t.category);
   const tier = tierOf(t);
-  const dispatched = t.status === 'DISPATCHED';
+  const dispatched = t.status !== 'OPEN';
 
   const approve = async () => {
     setBusy(true);

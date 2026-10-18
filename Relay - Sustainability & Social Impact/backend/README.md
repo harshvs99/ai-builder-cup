@@ -42,6 +42,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest` and `GET /v1/stats` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -119,7 +120,17 @@ the deterministic value and is logged.
 - `POST /v1/tickets/{no}/approve` takes an optional `{team_id?, eta_min?, order_en?}`; missing parts
   come from the pending proposal. It records `dispatch`, counts toward the team's load and puts the
   ETA into the DISPATCHED ACK (templated text). A full team is 409; no body and no proposal is the
-  plain 45 min approval. Releasing a team's load on resolve: `Store.release_dispatch`.
+  plain 45 min approval.
+- `POST /v1/tickets/{no}/on-the-way` (optional `{eta_min?}`) and `POST /v1/tickets/{no}/resolve`:
+  DISPATCHED -> ON_THE_WAY -> RESOLVED, or DISPATCHED -> RESOLVED; any other transition is 409, an
+  unknown ticket 404, and repeating an action the ticket already took is a 200 no-op. Each queues one
+  ACK per reporting origin (status 2 / 3 of SPEC §5.2, templated text in the reporter's language; the
+  on-the-way ACK carries `eta_min` when given, else the ETA is unknown and the text has none).
+  `dispatch.on_the_way_at` / `dispatch.resolved_at` record the times. Resolve releases the team's
+  load in the same transaction (`Store.advance_ticket`); on-the-way keeps it. Resolved tickets are
+  not open in `/v1/stats` and the sitrep, and the sitrep `resolved` count is real (`dispatched` counts
+  DISPATCHED + ON_THE_WAY). SQLite databases made before these statuses are migrated on first open
+  (the `tickets` table is rebuilt to widen its status CHECK).
 - `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`: counts come from store queries; Gemini writes
   English and Odia prose around them, and the text is used only if every number in it is one it was
   handed. Hourly via the Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).

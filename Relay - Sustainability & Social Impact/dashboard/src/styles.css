@@ -107,7 +107,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .meta { display: flex; gap: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .status.OPEN { color: var(--text); }
-.status.DISPATCHED { color: var(--ok); }
+.status.DISPATCHED, .status.ON_THE_WAY, .status.RESOLVED { color: var(--ok); }
 .count { font-weight: 700; font-size: 13px; padding: 1px 7px; border-radius: 999px; background: var(--hover); border: 1px solid var(--border); }
 .tier {
   display: inline-block; min-width: 28px; text-align: center; padding: 1px 6px; border-radius: 4px;

@@ -18,15 +18,18 @@ from typing import Any, Callable, Iterator
 
 from ..codec import CATEGORY_NAMES, Need
 from .base import (
+    ADVANCE_FROM,
     JSON_COLUMNS,
     TICKET_COLUMNS,
     AckSpec,
+    AdvanceResult,
     IngestOutcome,
     Lookup,
     PacketIn,
     Plan,
     RecordStatus,
     TeamAtCapacity,
+    merge_dispatch,
 )
 
 SCHEMA = """
@@ -47,7 +50,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     priority_tier      TEXT    NOT NULL DEFAULT 'P4',
     tier_adjust        INTEGER NOT NULL DEFAULT 0,
     priority_reason    TEXT    NOT NULL DEFAULT '',
-    status             TEXT    NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','DISPATCHED')),
+    status             TEXT    NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','DISPATCHED','ON_THE_WAY','RESOLVED')),
     dispatch_draft_en    TEXT  NOT NULL DEFAULT '',
     dispatch_draft_local TEXT  NOT NULL DEFAULT '',
     first_reported_at  INTEGER NOT NULL,
@@ -135,6 +138,35 @@ CREATE TABLE IF NOT EXISTS sitreps (
 );
 """
 
+_OLD_STATUS_CHECK = "CHECK (status IN ('OPEN','DISPATCHED'))"
+_NEW_STATUS_CHECK = "CHECK (status IN ('OPEN','DISPATCHED','ON_THE_WAY','RESOLVED'))"
+
+
+def _widen_status_check(conn: sqlite3.Connection) -> None:
+    """Databases created before ON_THE_WAY / RESOLVED exist carry the old CHECK on tickets.status,
+    which SQLite cannot alter in place: rebuild the table (rows, ticket numbers and sequence kept)."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tickets'").fetchone()
+    if row is None or _OLD_STATUS_CHECK not in row["sql"]:
+        return
+    new_sql = row["sql"].replace(_OLD_STATUS_CHECK, _NEW_STATUS_CHECK).replace(
+        "CREATE TABLE tickets", "CREATE TABLE tickets_new", 1
+    )
+    conn.execute("PRAGMA foreign_keys = OFF")  # dropping the parent table must not cascade or fail
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(new_sql)
+        conn.execute("INSERT INTO tickets_new SELECT * FROM tickets")
+        conn.execute("DROP TABLE tickets")
+        conn.execute("ALTER TABLE tickets_new RENAME TO tickets")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(SCHEMA)  # the table's index went with the old table
+
+
 # ticket numbers start at 101: seed sqlite_sequence once, before any ticket exists
 _SEED_SEQUENCE = (
     "INSERT INTO sqlite_sequence (name, seq) "
@@ -172,6 +204,7 @@ class SqliteStore:
             if self.path != ":memory:":
                 conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(SCHEMA)
+            _widen_status_check(conn)
             have = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
             for col in JSON_COLUMNS:  # databases created before these columns existed
                 if col not in have:
@@ -394,6 +427,33 @@ class SqliteStore:
                 self.queue_ack_spec(make_ack(p), now)
             return True
 
+    def advance_ticket(
+        self, ticket_no: int, status: str, now: int, make_ack: Callable[[dict[str, Any]], AckSpec], *,
+        patch: dict[str, Any] | None = None,
+    ) -> AdvanceResult | None:
+        with self.tx() as c:
+            row = self.get_ticket(ticket_no)
+            if row is None:
+                return None
+            if row["status"] == status:
+                return "noop"
+            if row["status"] not in ADVANCE_FROM[status]:
+                return "conflict"
+            c.execute("UPDATE tickets SET status = ?, updated_at = ? WHERE ticket_no = ?", (status, now, ticket_no))
+            if patch:
+                rec = self.get_dispatch_record(ticket_no)
+                merged = merge_dispatch(rec["dispatch"] if rec else None, patch)
+                c.execute(
+                    "INSERT INTO ticket_dispatch(ticket_no, dispatch) VALUES (?, ?) "
+                    "ON CONFLICT(ticket_no) DO UPDATE SET dispatch = excluded.dispatch",
+                    (ticket_no, json.dumps(merged)),
+                )
+            if status == "RESOLVED":
+                self.release_dispatch(ticket_no)
+            for p in self.origins_for_ticket(ticket_no):
+                self.queue_ack_spec(make_ack(p), now)
+            return "done"
+
     def list_tickets_with_links(self) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
         rows = self.list_tickets()
         links = self.links_for([r["ticket_no"] for r in rows])
@@ -433,7 +493,7 @@ class SqliteStore:
             "open": by_status.get("OPEN", 0),
             "p1_open": len(p1),
             "p1_open_nos": [r["ticket_no"] for r in p1],
-            "dispatched": by_status.get("DISPATCHED", 0),
+            "dispatched": by_status.get("DISPATCHED", 0) + by_status.get("ON_THE_WAY", 0),
             "resolved": by_status.get("RESOLVED", 0),
             "open_by_category": open_by_cat,
             "oldest_open_no": oldest[0]["ticket_no"] if oldest else None,
