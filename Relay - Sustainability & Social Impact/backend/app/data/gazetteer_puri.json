@@ -1,0 +1,335 @@
+[
+ {
+  "name": "jagannath temple",
+  "aliases": [
+   "srimandir",
+   "श्रीमंदिर",
+   "जगन्नाथ मंदिर",
+   "ଶ୍ରୀମନ୍ଦିର",
+   "ଜଗନ୍ନାଥ ମନ୍ଦିର"
+  ],
+  "lat": 19.8048,
+  "lon": 85.818,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "gundicha temple",
+  "aliases": [
+   "gundicha mandir",
+   "गुंडिचा मंदिर",
+   "ଗୁଣ୍ଡିଚା ମନ୍ଦିର"
+  ],
+  "lat": 19.8137,
+  "lon": 85.8235,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "puri bus stand",
+  "aliases": [
+   "puri bus station",
+   "पुरी बस स्टैंड",
+   "ପୁରୀ ବସ୍ ଷ୍ଟାଣ୍ଡ"
+  ],
+  "lat": 19.819,
+  "lon": 85.835,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "puri railway station",
+  "aliases": [
+   "puri station",
+   "पुरी रेलवे स्टेशन",
+   "ପୁରୀ ରେଳ ଷ୍ଟେସନ"
+  ],
+  "lat": 19.8,
+  "lon": 85.8264,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "grand road market",
+  "aliases": [
+   "bada danda market",
+   "बड़ा डंडा बाजार",
+   "ବଡଦାଣ୍ଡ ବଜାର"
+  ],
+  "lat": 19.807,
+  "lon": 85.823,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "swargadwar",
+  "aliases": [
+   "swargadwar beach",
+   "स्वर्गद्वार",
+   "ସ୍ୱର୍ଗଦ୍ୱାର"
+  ],
+  "lat": 19.7945,
+  "lon": 85.824,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "puri zilla school",
+  "aliases": [
+   "zilla school",
+   "पुरी जिला स्कूल",
+   "ପୁରୀ ଜିଲ୍ଲା ସ୍କୁଲ"
+  ],
+  "lat": 19.809,
+  "lon": 85.82,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "district headquarters hospital puri",
+  "aliases": [
+   "puri hospital",
+   "dhh puri",
+   "पुरी जिला अस्पताल",
+   "ପୁରୀ ଜିଲ୍ଲା ମୁଖ୍ୟ ଚିକିତ୍ସାଳୟ"
+  ],
+  "lat": 19.812,
+  "lon": 85.828,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "penthakata cyclone shelter",
+  "aliases": [
+   "penthakata",
+   "पेंठाकाटा चक्रवात आश्रय",
+   "ପେଣ୍ଠକଟା ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+  ],
+  "lat": 19.784,
+  "lon": 85.846,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "balighai cyclone shelter",
+  "aliases": [
+   "balighai",
+   "बालीघाई",
+   "ବାଲିଘାଇ ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+  ],
+  "lat": 19.743,
+  "lon": 85.92,
+  "block": "Puri Sadar"
+ },
+ {
+  "name": "sakshigopal temple",
+  "aliases": [
+   "sakhigopal",
+   "साक्षीगोपाल मंदिर",
+   "ସାକ୍ଷୀଗୋପାଳ ମନ୍ଦିର"
+  ],
+  "lat": 19.913,
+  "lon": 85.834,
+  "block": "Satyabadi"
+ },
+ {
+  "name": "satyabadi bus stand",
+  "aliases": [
+   "satyabadi chhak",
+   "सत्यबादी बस स्टैंड",
+   "ସତ୍ୟବାଦୀ ବସ୍ ଷ୍ଟାଣ୍ଡ"
+  ],
+  "lat": 19.92,
+  "lon": 85.84,
+  "block": "Satyabadi"
+ },
+ {
+  "name": "daya river embankment",
+  "aliases": [
+   "daya embankment",
+   "दया नदी तटबंध",
+   "ଦୟା ନଦୀ ବନ୍ଧ"
+  ],
+  "lat": 19.935,
+  "lon": 85.86,
+  "block": "Satyabadi"
+ },
+ {
+  "name": "pipili bus stand",
+  "aliases": [
+   "pipili chhak",
+   "पिपिली बस स्टैंड",
+   "ପିପିଲି ବସ୍ ଷ୍ଟାଣ୍ଡ"
+  ],
+  "lat": 20.114,
+  "lon": 85.834,
+  "block": "Pipili"
+ },
+ {
+  "name": "pipili market",
+  "aliases": [
+   "pipili applique market",
+   "पिपिली बाजार",
+   "ପିପିଲି ବଜାର"
+  ],
+  "lat": 20.112,
+  "lon": 85.831,
+  "block": "Pipili"
+ },
+ {
+  "name": "bhargavi river embankment",
+  "aliases": [
+   "bhargavi embankment",
+   "भार्गवी नदी तटबंध",
+   "ଭାର୍ଗବୀ ନଦୀ ବନ୍ଧ"
+  ],
+  "lat": 20.1,
+  "lon": 85.865,
+  "block": "Pipili"
+ },
+ {
+  "name": "pipili high school",
+  "aliases": [
+   "pipili school",
+   "पिपिली हाई स्कूल",
+   "ପିପିଲି ହାଇସ୍କୁଲ"
+  ],
+  "lat": 20.115,
+  "lon": 85.83,
+  "block": "Pipili"
+ },
+ {
+  "name": "nimapara market",
+  "aliases": [
+   "nimapara bazar",
+   "निमापाड़ा बाजार",
+   "ନିମାପଡ଼ା ବଜାର"
+  ],
+  "lat": 20.034,
+  "lon": 86.001,
+  "block": "Nimapara"
+ },
+ {
+  "name": "nimapara bus stand",
+  "aliases": [
+   "nimapara chhak",
+   "निमापाड़ा बस स्टैंड",
+   "ନିମାପଡ଼ା ବସ୍ ଷ୍ଟାଣ୍ଡ"
+  ],
+  "lat": 20.032,
+  "lon": 85.999,
+  "block": "Nimapara"
+ },
+ {
+  "name": "prachi river embankment",
+  "aliases": [
+   "prachi embankment",
+   "प्राची नदी तटबंध",
+   "ପ୍ରାଚୀ ନଦୀ ବନ୍ଧ"
+  ],
+  "lat": 20.02,
+  "lon": 86.03,
+  "block": "Nimapara"
+ },
+ {
+  "name": "nimapara cyclone shelter",
+  "aliases": [
+   "nimapara shelter",
+   "निमापाड़ा चक्रवात आश्रय",
+   "ନିମାପଡ଼ା ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+  ],
+  "lat": 20.045,
+  "lon": 86.015,
+  "block": "Nimapara"
+ },
+ {
+  "name": "gop market",
+  "aliases": [
+   "gop bazar",
+   "गोप बाजार",
+   "ଗୋପ ବଜାର"
+  ],
+  "lat": 20.085,
+  "lon": 86.095,
+  "block": "Gop"
+ },
+ {
+  "name": "gop bus stand",
+  "aliases": [
+   "gop chhak",
+   "गोप बस स्टैंड",
+   "ଗୋପ ବସ୍ ଷ୍ଟାଣ୍ଡ"
+  ],
+  "lat": 20.084,
+  "lon": 86.094,
+  "block": "Gop"
+ },
+ {
+  "name": "gop cyclone shelter",
+  "aliases": [
+   "gop shelter",
+   "गोप चक्रवात आश्रय",
+   "ଗୋପ ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+  ],
+  "lat": 20.09,
+  "lon": 86.11,
+  "block": "Gop"
+ },
+ {
+  "name": "devi river embankment",
+  "aliases": [
+   "devi embankment",
+   "देवी नदी तटबंध",
+   "ଦେବୀ ନଦୀ ବନ୍ଧ"
+  ],
+  "lat": 20.06,
+  "lon": 86.13,
+  "block": "Gop"
+ },
+ {
+  "name": "brahmagiri block office",
+  "aliases": [
+   "brahmagiri",
+   "ब्रह्मगिरि",
+   "ବ୍ରହ୍ମଗିରି ବ୍ଲକ୍ କାର୍ଯ୍ୟାଳୟ"
+  ],
+  "lat": 19.944,
+  "lon": 85.781,
+  "block": "Brahmagiri"
+ },
+ {
+  "name": "brahmagiri cyclone shelter",
+  "aliases": [
+   "brahmagiri shelter",
+   "ब्रह्मगिरि चक्रवात आश्रय",
+   "ବ୍ରହ୍ମଗିରି ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+  ],
+  "lat": 19.93,
+  "lon": 85.76,
+  "block": "Brahmagiri"
+ },
+ {
+  "name": "konark sun temple",
+  "aliases": [
+   "konark temple",
+   "कोणार्क सूर्य मंदिर",
+   "କୋଣାର୍କ ସୂର୍ଯ୍ୟ ମନ୍ଦିର"
+  ],
+  "lat": 19.8876,
+  "lon": 86.0945,
+  "block": "Konark"
+ },
+ {
+  "name": "konark bus stand",
+  "aliases": [
+   "konark chhak",
+   "कोणार्क बस स्टैंड",
+   "କୋଣାର୍କ ବସ୍ ଷ୍ଟାଣ୍ଡ"
+  ],
+  "lat": 19.887,
+  "lon": 86.09,
+  "block": "Konark"
+ },
+ {
+  "name": "kushabhadra river embankment",
+  "aliases": [
+   "kushabhadra embankment",
+   "कुशभद्रा तटबंध",
+   "କୁଶଭଦ୍ରା ନଦୀ ବନ୍ଧ"
+  ],
+  "lat": 19.88,
+  "lon": 86.03,
+  "block": "Konark"
+ }
+]

@@ -1,0 +1,8 @@
+[
+  {"id": "boat-puri", "name": "Puri Rescue Boat 1", "kind": "boat", "capacity": 3, "base_lat": 19.8135, "base_lon": 85.8312, "status": "free"},
+  {"id": "boat-brahmagiri", "name": "Brahmagiri Rescue Boat 2", "kind": "boat", "capacity": 3, "base_lat": 19.9440, "base_lon": 85.7810, "status": "free"},
+  {"id": "med-pipili", "name": "Pipili Medical Team", "kind": "medical", "capacity": 4, "base_lat": 20.1130, "base_lon": 85.8330, "status": "free"},
+  {"id": "med-satyabadi", "name": "Satyabadi Medical Team", "kind": "medical", "capacity": 4, "base_lat": 19.9230, "base_lon": 85.8420, "status": "free"},
+  {"id": "sup-nimapara", "name": "Nimapara Supply Team", "kind": "supply", "capacity": 5, "base_lat": 20.0330, "base_lon": 86.0000, "status": "free"},
+  {"id": "sup-gop", "name": "Gop Supply Team", "kind": "supply", "capacity": 5, "base_lat": 20.0850, "base_lon": 86.0950, "status": "free"}
+]

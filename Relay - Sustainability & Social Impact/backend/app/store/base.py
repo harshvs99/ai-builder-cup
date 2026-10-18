@@ -38,6 +38,10 @@ TICKET_COLUMNS = {
 # Columns added after the first release: SQLite adds them to existing databases on connect.
 JSON_COLUMNS = ("geo", "reclass")
 
+class TeamAtCapacity(Exception):
+    """``approve_ticket`` refused to assign a team that already carries its capacity."""
+
+
 # What a sync said about one frame in ``record_packets``.
 RecordStatus = Literal["new", "pending", "done"]
 
@@ -121,12 +125,61 @@ class Store(Protocol):
         """Write ``fields`` only if the ticket is OPEN and still has ``report_count`` reports."""
         ...
 
-    def approve_ticket(self, ticket_no: int, now: int, make_ack: Callable[[dict[str, Any]], AckSpec]) -> bool | None:
+    def approve_ticket(
+        self, ticket_no: int, now: int, make_ack: Callable[[dict[str, Any]], AckSpec], *,
+        dispatch: dict[str, Any] | None = None, capacity: int | None = None,
+    ) -> bool | None:
         """OPEN -> DISPATCHED and one ack per distinct origin (``make_ack`` gets the origin's
-        packet). None if no such ticket, True if this call made the transition, else False."""
+        packet). None if no such ticket, True if this call made the transition, else False.
+
+        With ``dispatch`` ({team_id, team_name, eta_min, approved_at, ...}) the dispatch is
+        recorded in the same transaction. If it names a team and ``capacity`` is given, raises
+        ``TeamAtCapacity`` (nothing written) when the team already has ``capacity`` active
+        dispatches. An already-dispatched ticket returns False before any capacity check."""
         ...
 
     def stats(self) -> dict[str, Any]: ...
+
+    def ticket_counts(self) -> dict[str, Any]:
+        """{open, p1_open, p1_open_nos (score desc), dispatched, resolved, open_by_category,
+        oldest_open_no, oldest_open_at}. Backs /v1/stats and the sitrep."""
+        ...
+
+    # ------------------------------------------------------------------ teams + dispatch
+    def seed_teams(self, teams: list[dict[str, Any]]) -> None:
+        """Create teams that do not exist yet (by ``id``); existing rows are left untouched."""
+        ...
+
+    def list_teams(self) -> list[dict[str, Any]]:
+        """{id, name, kind, capacity, base_lat, base_lon, status} ordered by id."""
+        ...
+
+    def set_team_status(self, team_id: str, status: str) -> bool: ...
+
+    def team_loads(self) -> dict[str, int]:
+        """team_id -> number of active (approved, not released) dispatches. Teams with none are absent."""
+        ...
+
+    def dispatch_records(self) -> dict[int, dict[str, Any]]:
+        """ticket_no -> {proposal: dict | None, dispatch: dict | None}."""
+        ...
+
+    def get_dispatch_record(self, ticket_no: int) -> dict[str, Any] | None: ...
+
+    def set_proposals(self, proposals: dict[int, dict[str, Any] | None]) -> None:
+        """Write (or, with None, clear) the pending proposal of each ticket."""
+        ...
+
+    def release_dispatch(self, ticket_no: int) -> None:
+        """The dispatch no longer counts toward its team's load (ticket resolved)."""
+        ...
+
+    # ------------------------------------------------------------------ sitreps
+    def add_sitrep(self, sitrep: dict[str, Any]) -> dict[str, Any]:
+        """Store a sitrep (without ``id``) and return it with the id assigned (1, 2, ...)."""
+        ...
+
+    def latest_sitrep(self) -> dict[str, Any] | None: ...
 
     # ------------------------------------------------------------------ acks
     def clamp_ack_cursor(self, cursor: int) -> int:

@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import dispatch as dispatching
+from . import sitrep as sitreps
+from . import teams as team_data
 from .agent import Agent, IncomingNeed, TriagePipeline, agent_from_env, build_ack
 from .codec import (
     CATEGORY_NAMES,
@@ -44,7 +48,8 @@ from .pubsub import (
     google_token_verifier,
     parse_push_envelope,
 )
-from .store import Store, open_store
+from .store import Store, TeamAtCapacity, open_store
+from .textgen import TextGen, textgen_from_env
 
 log = logging.getLogger("relay.api")
 
@@ -110,6 +115,15 @@ class NeedJson(BaseModel):
         return v
 
 
+class ApproveRequest(BaseModel):
+    """Optional body of ``POST /v1/tickets/{no}/approve``; absent fields fall back to the pending
+    proposal, and with neither the approval is the plain 45 min one."""
+
+    team_id: str | None = Field(default=None, max_length=64)
+    eta_min: int | None = Field(default=None, ge=0, le=dispatching.MAX_ETA_MIN)
+    order_en: str | None = Field(default=None, max_length=dispatching.MAX_ORDER_CHARS)
+
+
 class InjectRequest(BaseModel):
     needs: list[NeedJson] = Field(max_length=200)
 
@@ -118,7 +132,9 @@ class InjectRequest(BaseModel):
 # serialisation
 # --------------------------------------------------------------------------------------
 
-def _ticket_json(row: dict[str, Any], links: list[dict[str, Any]]) -> dict[str, Any]:
+def _ticket_json(
+    row: dict[str, Any], links: list[dict[str, Any]], record: dict[str, Any] | None = None
+) -> dict[str, Any]:
     gateways: list[str] = []
     for lk in links:
         if lk["gateway_node"] not in gateways:
@@ -155,6 +171,9 @@ def _ticket_json(row: dict[str, Any], links: list[dict[str, Any]]) -> dict[str, 
     for key in ("geo", "reclass"):
         if row.get(key):
             out[key] = row[key]
+    for key in ("proposal", "dispatch"):  # optional: absent until proposed / approved
+        if record and record.get(key):
+            out[key] = record[key]
     return out
 
 
@@ -231,9 +250,13 @@ def create_app(
     invoker_sa: str | None = None,
     static_dir: str | None = None,
     triage_budget_s: float | None = None,
+    textgen: TextGen | None = None,
+    sitrep_textgen: TextGen | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
-    tests can inject fakes. ``pubsub_topic=""`` forces in-process triage."""
+    tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
+    orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default ``GEMINI_MODEL``);
+    both default to Gemini when the environment enables it, else to templates."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
     env = env if env is not None else os.environ.get("RELAY_ENV", "dev")
@@ -251,6 +274,8 @@ def create_app(
     if topic and publisher is None:
         publisher = PubSubPublisher()
 
+    textgen = textgen if textgen is not None else textgen_from_env("GEMINI_MODEL")
+    sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else textgen_from_env("SITREP_GEMINI_MODEL")
     store = store if store is not None else open_store(db_path=db_path)
     pipeline = TriagePipeline(
         store,
@@ -280,6 +305,22 @@ def create_app(
         )
         if not ok:
             raise HTTPException(status_code=401, detail="invalid or missing X-Relay-Key")
+
+    # Teams are seeded on first use, not at startup: importing the app must not touch the store.
+    teams_seeded = threading.Event()
+    seed_lock = threading.Lock()
+
+    def ensure_teams() -> None:
+        if not teams_seeded.is_set():
+            with seed_lock:
+                if not teams_seeded.is_set():
+                    store.seed_teams(team_data.load_seed())
+                    teams_seeded.set()
+
+    def team_views() -> list[dict[str, Any]]:
+        ensure_teams()
+        loads = store.team_loads()
+        return [team_data.team_view(t, loads) for t in store.list_teams()]
 
     def ticket_or_404(ticket_no: int) -> dict[str, Any]:
         row = store.get_ticket(ticket_no)
@@ -388,39 +429,119 @@ def create_app(
     # ------------------------------------------------------------------ dashboard
     @app.get("/v1/tickets")
     def list_tickets() -> dict[str, Any]:
-        return {"tickets": [_ticket_json(r, links) for r, links in store.list_tickets_with_links()]}
+        records = store.dispatch_records()
+        return {"tickets": [_ticket_json(r, links, records.get(r["ticket_no"])) for r, links in store.list_tickets_with_links()]}
 
     @app.get("/v1/tickets/{ticket_no}")
     def get_ticket(ticket_no: int) -> dict[str, Any]:
         row = ticket_or_404(ticket_no)
         packets = store.ticket_packets(ticket_no)
-        out = _ticket_json(row, packets)
+        out = _ticket_json(row, packets, store.get_dispatch_record(ticket_no))
         out["packets"] = [_packet_json(p) for p in packets]
         return out
 
     @app.post("/v1/tickets/{ticket_no}/approve")
-    def approve(ticket_no: int) -> dict[str, Any]:
+    def approve(ticket_no: int, body: ApproveRequest | None = None) -> dict[str, Any]:
+        body = body or ApproveRequest()
+        record = store.get_dispatch_record(ticket_no) or {}
+        proposal = record.get("proposal")
+        team_id = body.team_id or (proposal or {}).get("team_id")
+        eta: int | None = body.eta_min
+        dispatch: dict[str, Any] | None = None
+        capacity: int | None = None
+        if team_id:
+            team = next((t for t in team_views() if t["id"] == team_id), None)
+            if team is None:
+                raise HTTPException(status_code=422, detail=f"unknown team {team_id!r}")
+            if team["status"] == "off":
+                raise HTTPException(status_code=409, detail=f"team {team_id!r} is off duty")
+            capacity = team["capacity"]
+            same_team = proposal is not None and proposal["team_id"] == team_id
+            if eta is None and same_team:
+                eta = proposal["eta_min"]
+            if eta is None:  # operator picked a team: same ETA rule as the allocator
+                row = ticket_or_404(ticket_no)
+                point = dispatching.ticket_point(_ticket_json(row, store.ticket_packets(ticket_no), record))
+                eta = dispatching.eta_minutes(team, point)
+            order_en = body.order_en or (proposal["order_en"] if same_team else None)
+            dispatch = {"team_id": team_id, "team_name": team["name"], "eta_min": eta, "approved_at": int(clock())}
+            if order_en:
+                dispatch["order_en"] = order_en
+        elif eta is not None or body.order_en:
+            dispatch = {"team_id": None, "team_name": None, "eta_min": eta, "approved_at": int(clock())}
+            if body.order_en:
+                dispatch["order_en"] = body.order_en
+
+        def make_ack(p: dict[str, Any]):
+            lang = LANG_CODES[p["lang"]]
+            if eta is None:  # plain approval: the stock templated ACK
+                return build_ack(
+                    ref_msg_id=p["msg_id"], target_node=p["origin_node"], ticket_no=ticket_no,
+                    status=STATUS_DISPATCHED, lang=lang,
+                )
+            return dispatching.build_dispatch_ack(
+                ref_msg_id=p["msg_id"], target_node=p["origin_node"], ticket_no=ticket_no, lang=lang, eta_min=eta
+            )
+
         # atomic: only the first approval transitions and queues the DISPATCHED acks
-        done = store.approve_ticket(
-            ticket_no, int(clock()),
-            lambda p: build_ack(
-                ref_msg_id=p["msg_id"], target_node=p["origin_node"], ticket_no=ticket_no,
-                status=STATUS_DISPATCHED, lang=LANG_CODES[p["lang"]],
-            ),
-        )
+        try:
+            done = store.approve_ticket(ticket_no, int(clock()), make_ack, dispatch=dispatch, capacity=capacity)
+        except TeamAtCapacity:
+            raise HTTPException(status_code=409, detail=f"team {team_id!r} is at capacity") from None
         if done is None:
             raise HTTPException(status_code=404, detail="ticket not found")
         row = ticket_or_404(ticket_no)
-        return _ticket_json(row, store.ticket_packets(ticket_no))
+        return _ticket_json(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
+
+    # ------------------------------------------------------------------ teams + dispatch
+    @app.get("/v1/teams")
+    def list_teams() -> list[dict[str, Any]]:
+        return team_views()
+
+    @app.post("/v1/dispatch/propose")
+    def propose() -> dict[str, Any]:
+        """Draft a team, ETA and order for every open ticket. Stored on the tickets as pending
+        proposals (replacing earlier ones); nothing is sent to the mesh until an operator approves."""
+        views = team_views()
+        records = store.dispatch_records()
+        tickets = [_ticket_json(r, links, records.get(r["ticket_no"])) for r, links in store.list_tickets_with_links()]
+        open_tickets = [t for t in tickets if t["status"] == "OPEN"]
+        assignments = dispatching.allocate(open_tickets, views)
+        proposals = dispatching.build_proposals(assignments, open_tickets, textgen, int(clock()))
+        update: dict[int, dict[str, Any] | None] = {
+            t["ticket_no"]: None for t in open_tickets if t.get("proposal")  # stale: no team has room now
+        }
+        update.update({p["ticket_no"]: {k: v for k, v in p.items() if k != "ticket_no"} for p in proposals})
+        if update:
+            store.set_proposals(update)
+        return {"proposals": proposals}
+
+    # ------------------------------------------------------------------ sitreps
+    @app.post("/v1/sitreps/run")
+    def run_sitrep() -> dict[str, Any]:
+        return sitreps.run(store, sitrep_textgen, clock())
+
+    @app.get("/v1/sitreps/latest")
+    def latest_sitrep() -> dict[str, Any]:
+        latest = store.latest_sitrep()
+        if latest is None:
+            raise HTTPException(status_code=404, detail="no sitrep yet")
+        return latest
 
     @app.get("/v1/stats")
     def stats() -> dict[str, Any]:
         s = store.stats()
-        s["gateways_online"] = store.gateways_online(clock(), GATEWAY_ONLINE_WINDOW_S)
+        c = store.ticket_counts()
+        views = team_views()
         return {
             "open_by_category": s["open_by_category"],
-            "gateways_online": s["gateways_online"],
+            "gateways_online": store.gateways_online(clock(), GATEWAY_ONLINE_WINDOW_S),
             "tickets": s["tickets"],
+            "open": c["open"],
+            "p1_open": c["p1_open"],
+            "oldest_open_at": c["oldest_open_at"],
+            "teams_free": sum(1 for t in views if t["status"] == "free"),
+            "teams_total": len(views),
         }
 
     # ------------------------------------------------------------------ dev only

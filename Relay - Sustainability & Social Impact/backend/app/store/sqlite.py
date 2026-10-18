@@ -17,7 +17,17 @@ from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
 from ..codec import CATEGORY_NAMES, Need
-from .base import JSON_COLUMNS, TICKET_COLUMNS, AckSpec, IngestOutcome, Lookup, PacketIn, Plan, RecordStatus
+from .base import (
+    JSON_COLUMNS,
+    TICKET_COLUMNS,
+    AckSpec,
+    IngestOutcome,
+    Lookup,
+    PacketIn,
+    Plan,
+    RecordStatus,
+    TeamAtCapacity,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
@@ -94,6 +104,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_acks_ref_status ON acks(ref_msg_id, status
 CREATE TABLE IF NOT EXISTS gateways (
     node      TEXT PRIMARY KEY,
     last_seen REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS teams (
+    id       TEXT PRIMARY KEY,
+    name     TEXT    NOT NULL,
+    kind     TEXT    NOT NULL,
+    capacity INTEGER NOT NULL,
+    base_lat REAL    NOT NULL,
+    base_lon REAL    NOT NULL,
+    status   TEXT    NOT NULL DEFAULT 'free'
+);
+
+-- Pending proposal and approved dispatch of a ticket, kept beside the ticket row so the
+-- tickets table (and its migrations) stay untouched. ``active`` = counts toward team load.
+CREATE TABLE IF NOT EXISTS ticket_dispatch (
+    ticket_no INTEGER PRIMARY KEY,
+    team_id   TEXT,
+    active    INTEGER NOT NULL DEFAULT 0,
+    proposal  TEXT,                          -- JSON or NULL
+    dispatch  TEXT                           -- JSON or NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_dispatch_team ON ticket_dispatch(team_id, active);
+
+CREATE TABLE IF NOT EXISTS sitreps (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    generated_at INTEGER NOT NULL,
+    data         TEXT    NOT NULL            -- JSON, includes id
 );
 """
 
@@ -331,12 +368,27 @@ class SqliteStore:
             self.update_ticket(ticket_no, **fields)
             return True
 
-    def approve_ticket(self, ticket_no: int, now: int, make_ack: Callable[[dict[str, Any]], AckSpec]) -> bool | None:
-        with self.tx():
-            if self.get_ticket(ticket_no) is None:
+    def approve_ticket(
+        self, ticket_no: int, now: int, make_ack: Callable[[dict[str, Any]], AckSpec], *,
+        dispatch: dict[str, Any] | None = None, capacity: int | None = None,
+    ) -> bool | None:
+        with self.tx() as c:
+            row = self.get_ticket(ticket_no)
+            if row is None:
                 return None
-            if not self.mark_dispatched(ticket_no, now):
+            if row["status"] != "OPEN":
                 return False
+            team_id = dispatch.get("team_id") if dispatch else None
+            if team_id and capacity is not None and self.team_loads().get(team_id, 0) >= capacity:
+                raise TeamAtCapacity(team_id)
+            self.mark_dispatched(ticket_no, now)
+            if dispatch is not None:
+                c.execute(
+                    "INSERT INTO ticket_dispatch(ticket_no, team_id, active, dispatch) VALUES (?, ?, 1, ?) "
+                    "ON CONFLICT(ticket_no) DO UPDATE SET team_id = excluded.team_id, active = 1, "
+                    "dispatch = excluded.dispatch",
+                    (ticket_no, team_id, json.dumps(dispatch)),
+                )
             for p in self.origins_for_ticket(ticket_no):
                 self.queue_ack_spec(make_ack(p), now)
             return True
@@ -362,6 +414,92 @@ class SqliteStore:
             open_by_cat[r["category"]] = r["n"]
         total = self._q("SELECT COUNT(*) AS n FROM tickets")[0]["n"]
         return {"open_by_category": open_by_cat, "tickets": total}
+
+    def ticket_counts(self) -> dict[str, Any]:
+        by_status = {r["status"]: r["n"] for r in self._q("SELECT status, COUNT(*) AS n FROM tickets GROUP BY status")}
+        open_by_cat = {name: 0 for name in CATEGORY_NAMES}
+        for r in self._q("SELECT category, COUNT(*) AS n FROM tickets WHERE status = 'OPEN' GROUP BY category"):
+            open_by_cat[r["category"]] = r["n"]
+        p1 = self._q(
+            "SELECT ticket_no FROM tickets WHERE status = 'OPEN' AND priority_tier = 'P1' "
+            "ORDER BY priority_score DESC, first_reported_at ASC, ticket_no ASC"
+        )
+        oldest = self._q(
+            "SELECT ticket_no, first_reported_at FROM tickets WHERE status = 'OPEN' "
+            "ORDER BY first_reported_at ASC, ticket_no ASC LIMIT 1"
+        )
+        return {
+            "open": by_status.get("OPEN", 0),
+            "p1_open": len(p1),
+            "p1_open_nos": [r["ticket_no"] for r in p1],
+            "dispatched": by_status.get("DISPATCHED", 0),
+            "resolved": by_status.get("RESOLVED", 0),
+            "open_by_category": open_by_cat,
+            "oldest_open_no": oldest[0]["ticket_no"] if oldest else None,
+            "oldest_open_at": oldest[0]["first_reported_at"] if oldest else None,
+        }
+
+    # ------------------------------------------------------------------ teams + dispatch
+    def seed_teams(self, teams: list[dict[str, Any]]) -> None:
+        with self.tx() as c:
+            for t in teams:
+                c.execute(
+                    "INSERT OR IGNORE INTO teams(id, name, kind, capacity, base_lat, base_lon, status) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (t["id"], t["name"], t["kind"], t["capacity"], t["base_lat"], t["base_lon"], t.get("status", "free")),
+                )
+
+    def list_teams(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q("SELECT * FROM teams ORDER BY id")]
+
+    def set_team_status(self, team_id: str, status: str) -> bool:
+        with self.tx() as c:
+            return c.execute("UPDATE teams SET status = ? WHERE id = ?", (status, team_id)).rowcount == 1
+
+    def team_loads(self) -> dict[str, int]:
+        rows = self._q(
+            "SELECT team_id, COUNT(*) AS n FROM ticket_dispatch WHERE active = 1 AND team_id IS NOT NULL GROUP BY team_id"
+        )
+        return {r["team_id"]: r["n"] for r in rows}
+
+    @staticmethod
+    def _dispatch_row(r: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "proposal": json.loads(r["proposal"]) if r["proposal"] else None,
+            "dispatch": json.loads(r["dispatch"]) if r["dispatch"] else None,
+        }
+
+    def dispatch_records(self) -> dict[int, dict[str, Any]]:
+        return {r["ticket_no"]: self._dispatch_row(r) for r in self._q("SELECT * FROM ticket_dispatch")}
+
+    def get_dispatch_record(self, ticket_no: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM ticket_dispatch WHERE ticket_no = ?", (ticket_no,))
+        return self._dispatch_row(rows[0]) if rows else None
+
+    def set_proposals(self, proposals: dict[int, dict[str, Any] | None]) -> None:
+        with self.tx() as c:
+            for ticket_no, proposal in proposals.items():
+                c.execute(
+                    "INSERT INTO ticket_dispatch(ticket_no, proposal) VALUES (?, ?) "
+                    "ON CONFLICT(ticket_no) DO UPDATE SET proposal = excluded.proposal",
+                    (ticket_no, json.dumps(proposal) if proposal is not None else None),
+                )
+
+    def release_dispatch(self, ticket_no: int) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE ticket_dispatch SET active = 0 WHERE ticket_no = ?", (ticket_no,))
+
+    # ------------------------------------------------------------------ sitreps
+    def add_sitrep(self, sitrep: dict[str, Any]) -> dict[str, Any]:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO sitreps(generated_at, data) VALUES (?, '{}')", (int(sitrep["generated_at"]),))
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in sitrep.items() if k != "id"}}
+            c.execute("UPDATE sitreps SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            return saved
+
+    def latest_sitrep(self) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM sitreps ORDER BY id DESC LIMIT 1")
+        return json.loads(rows[0]["data"]) if rows else None
 
     # ------------------------------------------------------------------ acks
     def queue_ack(
