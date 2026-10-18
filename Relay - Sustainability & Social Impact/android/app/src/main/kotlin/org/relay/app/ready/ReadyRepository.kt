@@ -40,6 +40,9 @@ object ReadyRepository {
         reload()
     }
 
+    /** Demo builds (every debug build, or `-Prelay.demoShelters=true`) may show a demo shelter list, with a "Demo" badge; release builds never do. */
+    val demoBuild: Boolean get() = org.relay.app.BuildConfig.DEBUG || org.relay.app.BuildConfig.DEMO_SHELTERS
+
     fun reload() { _snapshot.value = store.load() }
 
     fun setTick(version: String, index: Int, done: Boolean) = store.setTick(version, index, done)
@@ -70,6 +73,11 @@ object ReadyRepository {
             RefreshInput(isOnline(app), fix?.lat, fix?.lon, s.effectiveLanguage.tag, s.household),
         )
         _needsDistrict.value = result.needsDistrict
+        // no pack and no way to get one (or none yet): the district's published list needs no key and may still be there
+        if (result.error != null || result.skipped) {
+            val input = RefreshInput(isOnline(app), fix?.lat, fix?.lon, s.effectiveLanguage.tag, s.household)
+            if (refresher.refreshPublicShelters(input)) reload()
+        }
         if (!result.skipped) reload()
         result.newWarning?.let { w ->
             val pack = _snapshot.value.pack

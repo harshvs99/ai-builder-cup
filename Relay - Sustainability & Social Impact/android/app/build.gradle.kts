@@ -44,6 +44,11 @@ android {
         // until a community reviewer signs them off (then: -Prelay.enabledLangs=en,hi,or and the backend's RELAY_LANGS).
         val enabledLangs = providers.gradleProperty("relay.enabledLangs").orElse("en,hi").get().filter { it.isLetter() || it == ',' }
         buildConfigField("String", "ENABLED_LANGS", "\"$enabledLangs\"")
+
+        // A demo shelter list (placeholders no officer verified) shows only in demo builds, with a "Demo" badge. Every debug build is a demo
+        // build; for a release build pass -Prelay.demoShelters=true. Without it a release build shows only officer-published lists.
+        val demoShelters = providers.gradleProperty("relay.demoShelters").orElse("false").get().trim().lowercase() == "true"
+        buildConfigField("boolean", "DEMO_SHELTERS", demoShelters.toString())
     }
 
     // Release uses a real keystore when relay.signing.storeFile is set; otherwise the debug key, so a

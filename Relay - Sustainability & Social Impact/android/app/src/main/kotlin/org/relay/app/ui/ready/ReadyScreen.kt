@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -103,7 +105,7 @@ fun ReadyScreen(nav: RelayNav) {
             } else {
                 if (warning != null) WarningCard(warning, nowSec) else Text(r.noWarningNow, style = MaterialTheme.typography.bodyLarge)
                 if (warning != null && plan != null) PlanCard(plan, uiLang, snap.audio, playMessage) { playMessage = it }
-                ShelterCard(pack, plan)
+                ShelterCard(pack, plan, { nav.openShelters() }, { nav.openShelter(it) })
                 if (pack.checklist.isNotEmpty()) ChecklistCard(pack, uiLang)
                 Footer(pack)
             }
@@ -196,7 +198,7 @@ private fun PlanCard(plan: ReadyPlan, uiLang: Lang, wav: java.io.File?, message:
 }
 
 @Composable
-private fun ShelterCard(pack: ReadyPack, plan: ReadyPlan?) {
+private fun ShelterCard(pack: ReadyPack, plan: ReadyPlan?, onAll: () -> Unit, onOpen: (String) -> Unit) {
     val r = LocalStrings.current.ready
     SectionCard(title = r.nearestShelters) {
         val near = plan?.nearestShelters.orEmpty()
@@ -204,11 +206,12 @@ private fun ShelterCard(pack: ReadyPack, plan: ReadyPlan?) {
             Text(r.noShelters, style = MaterialTheme.typography.bodyLarge)
         }
         near.forEach { n ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { onOpen(n.id) }, verticalAlignment = Alignment.CenterVertically) {
                 Text(n.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 Text(r.kmAway(n.distanceKm), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (pack.shelters.isNotEmpty()) TextButton(onClick = onAll) { Text(r.allShelters, style = MaterialTheme.typography.labelLarge) }
     }
 }
 

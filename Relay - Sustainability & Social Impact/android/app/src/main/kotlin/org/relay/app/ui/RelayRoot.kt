@@ -51,6 +51,8 @@ import org.relay.app.ui.network.NetworkScreen
 import org.relay.app.ui.network.SettingsScreen
 import org.relay.app.ui.ready.HouseholdScreen
 import org.relay.app.ui.ready.ReadyScreen
+import org.relay.app.ui.ready.ShelterDetailScreen
+import org.relay.app.ui.ready.ShelterListScreen
 import org.relay.app.ui.request.RequestDetailScreen
 import org.relay.app.ready.ReadyRepository
 import org.relay.core.lang.LanguageCatalog
@@ -190,6 +192,10 @@ fun RelayRoot(openReady: Boolean = false, onReadyOpened: () -> Unit = {}) {
                 composable(Routes.SETTINGS) { SettingsScreen(nav) }
                 composable(Routes.READY) { ReadyScreen(nav) }
                 composable(Routes.HOUSEHOLD) { HouseholdScreen(nav) }
+                composable(Routes.SHELTERS) { ShelterListScreen(nav) }
+                composable(Routes.SHELTER, listOf(navArgument("id") { type = NavType.StringType })) { e ->
+                    ShelterDetailScreen(nav, java.net.URLDecoder.decode(e.arguments?.getString("id").orEmpty(), "UTF-8"))
+                }
                 composable(Routes.DEVELOPER) { DeveloperScreen(nav) }
                 composable(Routes.LEGACY_HOME) { LegacyHomeScreen(actions) }
             }

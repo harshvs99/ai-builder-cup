@@ -90,6 +90,34 @@ class ReadyStrings(private val lang: Lang) {
     val settingsHouseholdHelp get() = t("Tell Relay who is at home so your evacuation plan fits.", "Relay को बताएँ कि घर में कौन है, ताकि निकलने की योजना सही बने।")
     val settingsReady get() = t("Get ready", "तैयारी करें")
 
+    // ---- shelters
+    val sheltersTitle get() = t("Shelters", "आश्रय")
+    val sheltersRow get() = t("Shelters", "आश्रय")
+    val sheltersRowHelp get() = t("Find the nearest safe place", "सबसे पास की सुरक्षित जगह खोजें")
+    val demoBadge get() = t("Demo", "डेमो")
+    val noSheltersList get() = t("No verified shelter list yet. Open Relay when you have signal and it will download one.", "अभी कोई सत्यापित आश्रय सूची नहीं है। सिग्नल होने पर Relay खोलें, वह एक डाउनलोड करेगा।")
+    fun capacity(n: Int) = t("Holds about $n people", "लगभग $n लोगों की जगह")
+    fun kindName(kind: String) = when (kind) {
+        "cyclone_shelter" -> t("Cyclone shelter", "चक्रवात आश्रय"); "school" -> t("School", "स्कूल")
+        "relief_camp" -> t("Relief camp", "राहत शिविर"); "hospital" -> t("Hospital", "अस्पताल"); else -> t("Shelter", "आश्रय")
+    }
+    fun facilityName(f: String) = when (f) {
+        "water" -> t("Water", "पानी"); "toilets" -> t("Toilets", "शौचालय"); "generator" -> t("Generator", "जनरेटर")
+        "first_aid" -> t("First aid", "प्राथमिक उपचार"); "medical" -> t("Medical care", "चिकित्सा"); "kitchen" -> t("Kitchen", "रसोई")
+        else -> f.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+    val facilities get() = t("Facilities", "सुविधाएँ")
+    val address get() = t("Address", "पता")
+    val coordinates get() = t("Coordinates", "निर्देशांक")
+    val directions get() = t("Directions", "रास्ता")
+    val copyCoordinates get() = t("Copy coordinates", "निर्देशांक कॉपी करें")
+    val copied get() = t("Copied", "कॉपी हो गया")
+    val speakShelter get() = t("Speak", "बोलकर सुनाएँ")
+    val noMapsApp get() = t("No maps app found on this phone.", "इस फ़ोन में कोई मैप ऐप नहीं मिला।")
+    val mapNote get() = t("Pins are placed from the shelter coordinates. Open Directions for a full map.", "पिन आश्रय के निर्देशांक से लगाए गए हैं। पूरा नक्शा देखने के लिए रास्ता दबाएँ।")
+    val shelterNotFound get() = t("This shelter is not in the saved list any more.", "यह आश्रय सहेजी गई सूची में अब नहीं है।")
+    fun mapDescription(n: Int) = t("Map with $n shelters", "$n आश्रयों वाला नक्शा")
+
     private fun clock(sec: Long) = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale()).format(Date(sec * 1000))
     private fun day(sec: Long) = DateFormat.getDateInstance(DateFormat.MEDIUM, locale()).format(Date(sec * 1000))
     private fun locale() = if (lang == Lang.HI) Locale.forLanguageTag("hi-IN") else Locale.getDefault()

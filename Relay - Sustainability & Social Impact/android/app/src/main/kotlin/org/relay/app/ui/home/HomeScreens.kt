@@ -236,6 +236,7 @@ fun HomeScreen(nav: RelayNav) {
     HomeContent(
         banner = ReadyView.activeWarning(ready.pack, System.currentTimeMillis() / 1000),
         onGetReady = { nav.openReady() },
+        onShelters = { nav.openShelters() },
         area = settings.areaLabel.trim(),
         villager = villager,
         now = now,
@@ -255,6 +256,7 @@ fun HomeScreen(nav: RelayNav) {
 private fun HomeContent(
     banner: ReadyWarning?,
     onGetReady: () -> Unit,
+    onShelters: () -> Unit,
     area: String,
     villager: VillagerStatus,
     now: Long,
@@ -309,6 +311,17 @@ private fun HomeContent(
                     if (villager.kind == VillagerStatus.Kind.BLUETOOTH_OFF) {
                         TextButton(onClick = onTurnOnBluetooth) { Text(c.turnOn, style = MaterialTheme.typography.labelLarge) }
                     }
+                }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // Shelters (the nearest safe place; works from the stored list)
+        SectionCard(onClick = onShelters, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "${s.ready.sheltersRow}. ${s.ready.sheltersRowHelp}" }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.ready.sheltersRow, style = MaterialTheme.typography.titleMedium)
+                    Text(s.ready.sheltersRowHelp, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -430,7 +443,7 @@ private val demoStatus = VillagerStatus(VillagerStatus.Kind.REACHABLE, VillagerS
 
 @Composable
 private fun HomeDemo() = HomeContent(
-    banner = null, onGetReady = {},
+    banner = null, onGetReady = {}, onShelters = {},
     area = "Ward 4, Puri district", villager = demoStatus, now = System.currentTimeMillis(), recent = demoNeeds.take(2),
     onStatusClick = {}, onTurnOnBluetooth = {}, onMic = {}, onType = {}, onSeeAll = {}, onOpenRequest = {}, onDeleteRequest = {},
 )

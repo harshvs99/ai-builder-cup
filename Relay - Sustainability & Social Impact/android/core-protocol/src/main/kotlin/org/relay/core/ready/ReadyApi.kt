@@ -29,6 +29,10 @@ interface ReadyApi {
     /** `GET {audio_url}` (device key) → the WAV, or null when the backend has none (404) or failed to make it (503): use on-device speech. */
     @Throws(ReadyApiException::class)
     fun audio(audioUrl: String): ByteArray?
+
+    /** `GET /v1/public/shelters?district=` (no key) → the body, or null when nothing is published yet (404). */
+    @Throws(ReadyApiException::class)
+    fun publicShelters(district: String): String? = null
 }
 
 /** [ReadyApi] over `HttpURLConnection` (the same stack as the gateway sync). Blocking; call from a worker thread. */
@@ -60,9 +64,14 @@ class HttpReadyApi(
         return if (r.status == 404 || r.status == 503) null else r.body
     }
 
+    override fun publicShelters(district: String): String? {
+        val r = request("GET", "/v1/public/shelters?district=" + URLEncoder.encode(district, "UTF-8"), null, okStatuses = setOf(404), sendKey = false)
+        return if (r.status == 404) null else r.text()
+    }
+
     private class Response(val status: Int, val body: ByteArray) { fun text() = body.toString(Charsets.UTF_8) }
 
-    private fun request(method: String, path: String, body: ByteArray?, okStatuses: Set<Int> = emptySet()): Response {
+    private fun request(method: String, path: String, body: ByteArray?, okStatuses: Set<Int> = emptySet(), sendKey: Boolean = true): Response {
         val url = try { URL(base() + path) } catch (e: Exception) { throw ReadyApiException("bad backend URL '$baseUrl'", cause = e) }
         var conn: HttpURLConnection? = null
         try {
@@ -72,7 +81,7 @@ class HttpReadyApi(
                 readTimeout = readTimeoutMs
                 useCaches = false
                 setRequestProperty("Accept", if (path.contains("/audio")) "audio/wav" else "application/json")
-                setRequestProperty("X-Relay-Key", deviceKey)
+                if (sendKey) setRequestProperty("X-Relay-Key", deviceKey)
                 if (body != null) {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")

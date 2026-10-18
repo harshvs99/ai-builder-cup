@@ -113,6 +113,24 @@ class ReadyRefresher(
         return RefreshResult(packFetched = true, planFetched = planFetched, audioFetched = audioFetched, newWarning = fresh, error = error)
     }
 
+    /**
+     * A phone with signal, a known district and no pack at all may use the district's published list instead
+     * (`GET /v1/public/shelters`, no key). It is stored as a pack without a warning, so the shelter screens work unchanged, and the next
+     * real pack replaces it. Returns true when a list was stored. Never throws.
+     */
+    fun refreshPublicShelters(input: RefreshInput): Boolean {
+        val before = store.load()
+        val district = before.district ?: return false
+        if (!input.connected || before.pack != null) return false
+        return try {
+            val got = PublicShelters.toPack(api.publicShelters(district), nowMs() / 1000) ?: return false
+            store.savePack(got.first, got.second, before.lastPackFetchMs) // keeps the pack fetch clock: this is not a pack fetch
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /** Call once the notification was posted, so the same warning never notifies twice. */
     fun noteNotified(warningId: Long) = store.markNotified(warningId)
 }
