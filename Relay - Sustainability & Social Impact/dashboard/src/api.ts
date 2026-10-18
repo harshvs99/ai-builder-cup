@@ -1,5 +1,5 @@
 import { loadOperatorKey } from './lib/operatorKey';
-import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type { Broadcast, Gateway, Sitrep, Stats, Team, Ticket } from './types';
 
 export class ApiError extends Error {
   /** HTTP status, or 0 for network failures. */
@@ -94,6 +94,20 @@ export function createClient(base: string, operatorKey?: string | null) {
     },
     runSitrep(): Promise<Sitrep> {
       return request<Sitrep>('/v1/sitreps/run', { method: 'POST' });
+    },
+    createBroadcast(body: { district: string; text: string; source_lang?: string }): Promise<Broadcast> {
+      return request<Broadcast>('/v1/broadcasts', post(body));
+    },
+    async listBroadcasts(signal?: AbortSignal): Promise<Broadcast[]> {
+      const body = await request<{ broadcasts?: Broadcast[] }>('/v1/broadcasts', { signal });
+      return Array.isArray(body?.broadcasts) ? body.broadcasts : [];
+    },
+    /** `langs` omitted = every language whose status is ok; `edits` = operator-corrected texts. */
+    approveBroadcast(id: number, body: { langs?: string[]; edits?: Record<string, string> }): Promise<Broadcast> {
+      return request<Broadcast>(`/v1/broadcasts/${id}/approve`, post(body));
+    },
+    withdrawBroadcast(id: number): Promise<Broadcast> {
+      return request<Broadcast>(`/v1/broadcasts/${id}/withdraw`, { method: 'POST' });
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });

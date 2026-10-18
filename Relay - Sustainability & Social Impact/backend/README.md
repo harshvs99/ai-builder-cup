@@ -42,7 +42,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
-| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest` and `GET /v1/stats` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, `POST /v1/broadcasts`, `GET /v1/broadcasts` and `POST /v1/broadcasts/{id}/approve\|withdraw` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -53,6 +53,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the sitrep prose (set a Pro-tier name here) |
+| `BROADCAST_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates broadcasts into the five app languages and, in a separate call, checks each translation against the source |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
 | `PORT` | `8080` | Docker/Cloud Run listen port |
 
@@ -72,6 +73,7 @@ app/pubsub.py           publish side of /v1/sync, push envelope parsing, OIDC ve
 app/teams.py            dispatch teams: seed file (data/teams_puri.json), derived load and status
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
 app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
+app/broadcast.py        five-language broadcast: translate, deterministic + model check, human approval
 app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
 app/data/               teams_puri.json, gazetteer_puri.json (landmarks with Hindi/Odia aliases)
 app/main.py             FastAPI app (SPEC section 7), /internal/triage, static dashboard
@@ -158,6 +160,13 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
 - `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`: counts come from store queries; Gemini writes
   English and Odia prose around them, and the text is used only if every number in it is one it was
   handed. Hourly via the Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).
+- Broadcasts (`app/broadcast.py`): `POST /v1/broadcasts {district, text, source_lang?}` drafts the message in
+  en, hi, or, tl, war (one Gemini call translates, a separate one back-translates and judges each against
+  the source; numbers and times must also match the source deterministically). `POST /v1/broadcasts/{id}/approve
+  {langs?, edits?}` publishes the languages whose status is ok (or the listed/edited ones, re-checked; 422 if
+  they fail); `POST .../withdraw` retracts; `GET /v1/broadcasts?district=&status=` lists. Phones with signal
+  fetch `GET /v1/broadcasts/active?district=` with the **device** key: approved, not withdrawn, approved
+  languages only. Mesh delivery is not built (proposal in the module docstring).
 - `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
 
 ## Deploy

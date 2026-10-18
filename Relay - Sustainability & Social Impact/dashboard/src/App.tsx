@@ -3,6 +3,7 @@ import { Header, type View } from './components/Header';
 import { MapView, type MapHandle, type MapLayers } from './components/MapView';
 import { Queue } from './components/Queue';
 import { Detail, type DetailAction } from './components/Detail';
+import { BroadcastView } from './components/BroadcastView';
 import { GatewaysView, SitrepView, TeamsView } from './components/Views';
 import { useDistrict, useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
 import { districtById, districtName, teamInDistrict, ticketInDistrict } from './lib/districts';
@@ -208,6 +209,7 @@ export function App() {
       {view === 'sitrep' && (
         <SitrepView scope={districtName(district)} tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
       )}
+      {view === 'broadcast' && <BroadcastView district={district} nowSec={nowSec} />}
       {view === 'gateways' && <GatewaysView gateways={gateways} tickets={tickets} nowSec={nowSec} />}
     </div>
   );

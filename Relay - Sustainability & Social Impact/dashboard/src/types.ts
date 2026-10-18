@@ -150,3 +150,28 @@ export interface Sitrep {
   local_lang: string;
   ticket_nos: number[];
 }
+
+export type BroadcastLang = 'en' | 'hi' | 'or' | 'tl' | 'war';
+export type BroadcastLangStatus = 'ok' | 'needs_review' | 'missing';
+
+export interface BroadcastTranslation {
+  text: string;
+  back_translation: string;
+  faithful: boolean;
+  issues: string;
+  checks_passed: boolean;
+  status: BroadcastLangStatus;
+  edited?: boolean;
+}
+
+export interface Broadcast {
+  id: number;
+  district: string;
+  source_text: string;
+  source_lang: BroadcastLang;
+  created_at: number;
+  translations: Record<BroadcastLang, BroadcastTranslation>;
+  status: 'draft' | 'approved' | 'withdrawn';
+  approved_at: number | null;
+  approved_langs: BroadcastLang[];
+}
