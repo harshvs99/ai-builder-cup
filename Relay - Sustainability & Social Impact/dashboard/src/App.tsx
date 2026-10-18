@@ -4,6 +4,7 @@ import { MapView, type MapHandle, type MapLayers } from './components/MapView';
 import { Queue } from './components/Queue';
 import { Detail, type DetailAction } from './components/Detail';
 import { GatewaysView, SitrepView, TeamsView } from './components/Views';
+import { RecoverView } from './components/RecoverView';
 import { useDistrict, useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
 import { districtById, districtName, teamInDistrict, ticketInDistrict } from './lib/districts';
 import { sortTickets } from './lib/sort';
@@ -208,6 +209,7 @@ export function App() {
       {view === 'sitrep' && (
         <SitrepView scope={districtName(district)} tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
       )}
+      {view === 'recover' && <RecoverView district={district} theme={theme} />}
       {view === 'gateways' && <GatewaysView gateways={gateways} tickets={tickets} nowSec={nowSec} />}
     </div>
   );

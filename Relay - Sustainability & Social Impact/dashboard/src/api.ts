@@ -1,5 +1,5 @@
 import { loadOperatorKey } from './lib/operatorKey';
-import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type { DamageMap, Gateway, RecoverReport, Sitrep, Stats, Team, Ticket } from './types';
 
 export class ApiError extends Error {
   /** HTTP status, or 0 for network failures. */
@@ -54,6 +54,18 @@ export function createClient(base: string, operatorKey?: string | null) {
     }
   }
 
+  /** A file download (evidence pack): fetched with the operator key, so it cannot be a bare link. */
+  async function requestBlob(path: string): Promise<Blob> {
+    let res: Response;
+    try {
+      res = await fetch(`${root}${path}`, operatorKey ? { headers: { 'X-Operator-Key': operatorKey } } : undefined);
+    } catch (e) {
+      throw new ApiError(0, `Backend unreachable (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.blob();
+  }
+
   return {
     async listTickets(signal?: AbortSignal): Promise<Ticket[]> {
       const body = await request<{ tickets?: Ticket[] }>('/v1/tickets', { signal });
@@ -99,6 +111,20 @@ export function createClient(base: string, operatorKey?: string | null) {
     },
     runSitrep(): Promise<Sitrep> {
       return request<Sitrep>('/v1/sitreps/run', { method: 'POST' });
+    },
+    /** Damage map by village for a district id or "all". */
+    getDamage(district: string, signal?: AbortSignal): Promise<DamageMap> {
+      return request<DamageMap>(`/v1/recover/damage?district=${encodeURIComponent(district)}`, { signal });
+    },
+    /** Relief and insurer report, generated now and not stored. */
+    recoverReport(district: string): Promise<RecoverReport> {
+      return request<RecoverReport>(`/v1/recover/report?district=${encodeURIComponent(district)}`, { method: 'POST' });
+    },
+    ticketEvidence(no: number): Promise<Blob> {
+      return requestBlob(`/v1/recover/evidence/${no}?download=1`);
+    },
+    areaEvidence(areaId: string, district: string): Promise<Blob> {
+      return requestBlob(`/v1/recover/evidence?area=${encodeURIComponent(areaId)}&district=${encodeURIComponent(district)}&download=1`);
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });

@@ -13,6 +13,7 @@ import {
   meshEstimateLabel,
 } from '../lib/location';
 import { photoTagChips } from '../lib/photoTags';
+import { evidenceFileName, saveBlob } from '../lib/recover';
 import {
   capitalise,
   clockTime,
@@ -78,6 +79,18 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
   const onTheWay = () => run('onTheWay', () => api.onTheWay(t.ticket_no));
   const resolve = () => run('resolve', () => api.resolve(t.ticket_no));
   const locate = () => run('locate', () => api.locate(t.ticket_no));
+  // The pack needs the operator key, so it is fetched and saved as a blob rather than opened as a link.
+  const downloadEvidence = async () => {
+    setBusy('evidence');
+    setError(null);
+    try {
+      saveBlob(await api.ticketEvidence(t.ticket_no), evidenceFileName('ticket', t.ticket_no));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
   const propose = () =>
     run('propose', async () => {
       await api.proposeDispatch(t.ticket_no);
@@ -311,6 +324,10 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
         </div>
         <div className="foot-row">
           <button type="button" className="link" onClick={onClose}>Close</button>
+          <button type="button" className="link small" disabled={!!busy} onClick={downloadEvidence}
+            title="Self-contained record of this request for the state or insurers (JSON, with a SHA-256 digest)">
+            {busy === 'evidence' ? 'Preparing…' : 'Evidence pack'}
+          </button>
           <span className="muted small keys">A approve · D delivered · J / K next</span>
         </div>
       </div>

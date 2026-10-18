@@ -147,6 +147,13 @@ class Gazetteer:
     def __len__(self) -> int:
         return len(self._variants)
 
+    def places(self) -> list[Place]:
+        """Every distinct place once (a place has one variant per name and alias), in file order."""
+        seen: dict[Place, None] = {}
+        for _, place in self._variants:
+            seen.setdefault(place)
+        return list(seen)
+
     @staticmethod
     def _unique(places: list[Place]) -> Place | None:
         """One place, or None if the candidates are different places (ambiguous)."""

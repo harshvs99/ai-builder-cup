@@ -36,6 +36,18 @@ describe('api client', () => {
     expect(f.mock.calls[2]?.[1]?.headers).toBeUndefined();
   });
 
+  it('fetches evidence packs with the operator key and returns a blob', async () => {
+    const f = vi.fn().mockImplementation(async () => new Response('{"ok":1}', { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const blob = await createClient('http://x', 'k1').ticketEvidence(101);
+    expect(await blob.text()).toBe('{"ok":1}');
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/recover/evidence/101?download=1');
+    expect(f.mock.calls[0]?.[1]).toMatchObject({ headers: { 'X-Operator-Key': 'k1' } });
+    await createClient('http://x').areaEvidence('place:a b', 'puri');
+    expect(f.mock.calls[1]?.[0]).toBe('http://x/v1/recover/evidence?area=place%3Aa%20b&district=puri&download=1');
+    expect(f.mock.calls[1]?.[1]).toBeUndefined();
+  });
+
   it('wraps network failures as ApiError(status 0)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     const err = await createClient('http://x').getStats().catch((e) => e);

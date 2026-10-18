@@ -42,7 +42,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
-| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve\|locate`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest` and `GET /v1/stats` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve\|locate`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats` and the Recover routes (`GET /v1/recover/damage`, `GET /v1/recover/evidence[/{no}]`, `POST /v1/recover/report`) need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -53,6 +53,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the sitrep prose (set a Pro-tier name here) |
+| `RECOVER_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the Recover relief and insurer report (set a Pro-tier name here, e.g. `gemini-pro-latest`); same Vertex / API-key switch as the other writers, 45 s client timeout |
+| `RELAY_EVIDENCE_SALT` | `relay-evidence-v1` | salt of the reporter pseudonyms in evidence packs (SHA-256 of salt + origin node); **change in prod**, and keep it stable, because digests depend on it |
 | `RELAY_GEOCODER` | unset | `gemini_maps` turns on Gemini + Google Maps grounding for no-fix landmarks the gazetteer does not know, and for `POST /v1/tickets/{no}/locate` (billed, hence opt-in). Needs Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI`) or `GEMINI_API_KEY`; Vertex wins if both are set. An answer without a Maps grounding chunk, or outside the ticket's district bounding box, is dropped |
 | `GEMINI_GEOCODE_MODEL` | `GEMINI_MODEL` | model for the Maps geocoder (then `gemini-flash-latest`) |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
@@ -76,7 +78,8 @@ app/pubsub.py           publish side of /v1/sync, push envelope parsing, OIDC ve
 app/teams.py            dispatch teams: seed file (data/teams_puri.json), derived load and status
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
 app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
-app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
+app/textgen.py          structured-JSON Gemini client for dispatch orders, sitreps and the Recover report
+app/recover.py          Recover mode: village areas, damage map, evidence packs (SHA-256), relief report
 app/data/               teams_puri.json, gazetteer_puri.json (landmarks with Hindi/Odia aliases)
 app/main.py             FastAPI app (SPEC section 7), /internal/triage, static dashboard
 scripts/test-firestore.sh   emulator-backed test run
@@ -194,6 +197,49 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
   English and Odia prose around them, and the text is used only if every number in it is one it was
   handed. Hourly via the Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).
 - `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
+
+## Recover mode
+
+After the towers return, every ticket and dispatch becomes evidence: a damage map by village, households reached, and a
+log for the state and insurers. Everything is computed on request from the store (`app/recover.py`); **nothing is
+persisted**, so a report or pack reflects the store at the moment it is generated.
+
+- **Areas.** A ticket's position is its GPS fix, else its approximate `geo` (landmark lookup or mesh estimate). The area is
+  the nearest gazetteer place within 3 km ("Pipili Bus Stand, Pipili"), else a ~2 km grid cell named after its district and
+  nearest place (or "Delhi: area near 28.61, 77.21"). A ticket with no position is the **Unlocated** bucket: always counted,
+  shown under every district filter. The district is the nearest centre (`districts.py`).
+- `GET /v1/recover/damage?district=puri|delhi|all` returns per-area `tickets`, `reports`, `duplicates_merged`
+  (reports minus tickets), `households` (distinct origin phones), `households_reached` (distinct phones on RESOLVED tickets),
+  `open` / `dispatched` / `resolved`, `by_category`, summed `photo_tags`, `houses_damaged`, `damage_level` and
+  `damage_reason`, plus `totals` with `median_minutes_to_dispatch`, `share_with_location` (GPS fix or approximate position,
+  0 to 1; `share_with_gps_fix` is the strict figure) and `needs_confirmed_closed`. Deterministic, no model.
+  Damage level: **severe** = a collapsed house, or >= 3 tickets with a damaged house, or >= 8 reports; **moderate** = a
+  damaged house, or >= 4 reports, or a hazard tag (floodwater, road blocked, landslide, fire, power line down); **light** =
+  any other area with a ticket. A damaged house is a `house_damaged` / `house_collapsed` / `roof_damaged` tag or the intake
+  answer `house_damaged = yes`. Photo tags are unverified observations from the requester's phone.
+  A plain approval (no team, no ETA) stores no dispatch record, hence no approval time: it is left out of the median
+  and the evidence timeline.
+- `GET /v1/recover/evidence/{ticket_no}` and `GET /v1/recover/evidence?area=<area_id>&district=` return an evidence record per
+  ticket (an area pack wraps them); `?download=1` adds `Content-Disposition: attachment`. A record holds the ticket facts,
+  area, **location provenance** (GPS accuracy bucket, or landmark lookup with query and, for Maps, name + link, or mesh
+  radius and hint count, or none), the reports (msg id, hops, gateway, times; origin phones as salted SHA-256 pseudonyms,
+  never raw ids), the timeline (first reported, received, dispatched with team and ETA, on the way, resolved), intake
+  answers, photo tags ("classified on the requester's phone; tags only, no image") and the priority score, tier and reason.
+- **Integrity.** `integrity = {algorithm: "sha256", digest}` is the SHA-256 of the record's canonical JSON (sorted keys,
+  compact separators) without the `integrity` field; an area pack's digest is taken over the list of its ticket digests.
+  That is **tamper-evidence of the export, not authenticity**: nothing is signed, so it does not show who produced it.
+  Signing is future work.
+- `POST /v1/recover/report?district=` generates, and returns without storing, `{generated_at, district, counts, text_en,
+  text_local, local_lang, model, evidence_digests}`. `counts` is the damage map's totals and rows with integer figures only.
+  Gemini (`RECOVER_GEMINI_MODEL`) writes English and Odia (Hindi for Delhi) in the format a relief commissioner or insurer
+  expects: summary, damage by village, households reached, response times, provenance and limitations (demo data is
+  synthetic, photo tags are unverified, locations are approximate). Same rule as the sitrep: the text is used only if every
+  number in it is one it was handed and the request count is stated, for both languages; otherwise the deterministic
+  template (`model: "template"`). Without a Gemini backend it is always the template.
+
+The district pilot measures map onto it: minutes from ask to dispatch (`median_minutes_to_dispatch`), tickets with a usable
+location (`share_with_location`), duplicates merged before dispatch (`duplicates_merged`), needs confirmed closed by village
+(`resolved` per area) and households reached.
 
 ## Deploy
 

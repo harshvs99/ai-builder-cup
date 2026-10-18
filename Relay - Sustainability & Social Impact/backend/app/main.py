@@ -13,14 +13,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import dispatch as dispatching
+from . import recover
 from . import sitrep as sitreps
 from . import teams as team_data
 from .agent import Agent, IncomingNeed, TriagePipeline, agent_from_env, build_ack
@@ -381,12 +383,15 @@ def create_app(
     triage_budget_s: float | None = None,
     textgen: TextGen | None = None,
     sitrep_textgen: TextGen | None = None,
+    recover_textgen: TextGen | None = None,
+    evidence_salt: str | None = None,
     geocoder: Geocoder | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
-    orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default ``GEMINI_MODEL``);
-    both default to Gemini when the environment enables it, else to templates. ``geocoder`` (Maps-grounded
+    orders, ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default ``GEMINI_MODEL``) and ``recover_textgen`` the
+    Recover-mode relief report (``RECOVER_GEMINI_MODEL``, default ``GEMINI_MODEL``); ``evidence_salt``
+    (``RELAY_EVIDENCE_SALT``) salts the reporter pseudonyms in evidence packs. All three writers default to Gemini when the environment enables it, else to templates. ``geocoder`` (Maps-grounded
     landmark lookup, also used by ``POST /v1/tickets/{no}/locate``) defaults to ``RELAY_GEOCODER``."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
@@ -408,6 +413,10 @@ def create_app(
 
     textgen = textgen if textgen is not None else textgen_from_env("GEMINI_MODEL")
     sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else textgen_from_env("SITREP_GEMINI_MODEL")
+    recover_textgen = (
+        recover_textgen if recover_textgen is not None else textgen_from_env("RECOVER_GEMINI_MODEL", timeout_s=45.0)
+    )
+    salt = evidence_salt if evidence_salt is not None else os.environ.get("RELAY_EVIDENCE_SALT", recover.DEFAULT_SALT)
     store = store if store is not None else open_store(db_path=db_path)
     pipeline = TriagePipeline(
         store,
@@ -755,6 +764,45 @@ def create_app(
         if latest is None:
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
+
+    # ------------------------------------------------------------------ recover (after the towers return)
+    def district_param(district: str) -> str:
+        try:
+            return recover.check_district(district)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    def pack_response(body: dict[str, Any], download: bool, kind: str, ident: str) -> JSONResponse:
+        headers = {}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{recover.download_name(kind, ident)}"'
+        return JSONResponse(body, headers=headers)
+
+    @app.get("/v1/recover/damage", dependencies=operator)
+    def recover_damage(district: str = "all") -> dict[str, Any]:
+        district = district_param(district)
+        return recover.damage_map(recover.load_cases(store, district), district, int(clock()))
+
+    @app.get("/v1/recover/evidence/{ticket_no}", dependencies=operator)
+    def recover_ticket_evidence(ticket_no: int, download: int = Query(default=0)) -> JSONResponse:
+        row = ticket_or_404(ticket_no)
+        case = recover.make_case(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
+        return pack_response(recover.ticket_evidence(case, salt), bool(download), "ticket", str(ticket_no))
+
+    @app.get("/v1/recover/evidence", dependencies=operator)
+    def recover_area_evidence(area: str, district: str = "all", download: int = Query(default=0)) -> JSONResponse:
+        district = district_param(district)
+        cases = recover.load_cases(store, district)
+        found = next((c.area for c in cases if c.area.area_id == area), None)
+        if found is None:
+            raise HTTPException(status_code=404, detail="area not found")
+        return pack_response(recover.area_evidence(cases, found, district, salt, int(clock())), bool(download), "area", area)
+
+    @app.post("/v1/recover/report", dependencies=operator)
+    def recover_report(district: str = "all") -> dict[str, Any]:
+        """Generated now from the store and returned; nothing is persisted (unlike sitreps)."""
+        district = district_param(district)
+        return recover.build_report(recover.load_cases(store, district), district, salt, recover_textgen, int(clock()))
 
     @app.get("/v1/gateways", dependencies=operator)
     def list_gateways() -> dict[str, Any]:

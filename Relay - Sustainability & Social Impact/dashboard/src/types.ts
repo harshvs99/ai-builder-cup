@@ -186,3 +186,69 @@ export interface Sitrep {
   local_lang: string;
   ticket_nos: number[];
 }
+
+// ---------------------------------------------------------------------------- Recover (backend app/recover.py)
+
+export type DamageLevel = 'severe' | 'moderate' | 'light' | 'none';
+
+/** Figures shared by one area and the totals of `GET /v1/recover/damage`. */
+export interface RecoverMetrics {
+  tickets: number;
+  reports: number;
+  /** reports minus tickets: duplicates merged before dispatch. */
+  duplicates_merged: number;
+  /** Distinct reporting phones; one phone stands for one household. */
+  households: number;
+  people: number;
+  /** Distinct phones on resolved tickets. */
+  households_reached: number;
+  open: number;
+  dispatched: number;
+  resolved: number;
+  needs_confirmed_closed: number;
+  by_category: Partial<Record<Category, number>>;
+  photo_tags: Partial<Record<PhotoTag, number>>;
+  houses_damaged: number;
+  houses_collapsed: number;
+  /** null until a dispatch with a recorded approval time exists. */
+  median_minutes_to_dispatch: number | null;
+  /** 0 to 1: tickets with a GPS fix or an approximate position. */
+  share_with_location: number;
+  share_with_gps_fix: number;
+}
+
+export interface DamageArea extends RecoverMetrics {
+  area_id: string;
+  name: string;
+  /** null for the Unlocated bucket. */
+  district: string | null;
+  /** Centroid of the located tickets; null for Unlocated. */
+  lat: number | null;
+  lon: number | null;
+  damage_level: DamageLevel;
+  damage_reason: string;
+}
+
+export interface DamageMap {
+  generated_at: number;
+  district: string;
+  areas: DamageArea[];
+  totals: RecoverMetrics;
+}
+
+export interface ReportCounts {
+  totals: Record<string, number | null>;
+  areas: Array<Record<string, string | number | null>>;
+}
+
+/** `POST /v1/recover/report`: generated on request, never stored. */
+export interface RecoverReport {
+  generated_at: number;
+  district: string;
+  counts: ReportCounts;
+  text_en: string;
+  text_local: string;
+  local_lang: string;
+  model: 'gemini' | 'template';
+  evidence_digests: Array<{ ticket_no: number; digest: string }>;
+}

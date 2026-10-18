@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { detectNewTickets } from './lib/diff';
 import { ALL_DISTRICTS, DEFAULT_DISTRICT, districtById } from './lib/districts';
-import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type { DamageMap, Gateway, RecoverReport, Sitrep, Stats, Team, Ticket } from './types';
 
 export const POLL_MS = 2000;
 export const PULSE_MS = 4000;
@@ -151,6 +151,60 @@ export function useSitrep() {
     }
   }, []);
   return { sitrep, loaded, busy, error, regenerate };
+}
+
+export const RECOVER_POLL_MS = 10_000;
+
+/** Damage map for a district id or "all", refreshed every 10 s (the backend computes it on request). */
+export function useDamage(district: string) {
+  const [damage, setDamage] = useState<DamageMap | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setDamage(null);
+    setError(null);
+    let stopped = false;
+    const ctl = new AbortController();
+    const load = () =>
+      api
+        .getDamage(district, ctl.signal)
+        .then((d) => {
+          if (stopped) return;
+          setDamage(d);
+          setError(null);
+        })
+        .catch((e) => !stopped && setError(e instanceof Error ? e.message : String(e)));
+    void load();
+    const id = setInterval(load, RECOVER_POLL_MS);
+    return () => {
+      stopped = true;
+      ctl.abort();
+      clearInterval(id);
+    };
+  }, [district]);
+  return { damage, error };
+}
+
+/** The relief and insurer report for a district: generated on demand, kept only in this page. */
+export function useRecoverReport(district: string) {
+  const [report, setReport] = useState<RecoverReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setReport(null); // a report is for the district it was generated for
+    setError(null);
+  }, [district]);
+  const generate = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setReport(await api.recoverReport(district));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [district]);
+  return { report, busy, error, generate };
 }
 
 const SEEN_KEY = 'relay.seenTickets';

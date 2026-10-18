@@ -354,3 +354,13 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .est-marker.selected { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--panel); }
 .est-marker.dispatched { opacity: 0.5; }
+
+/* Recover: damage map, area table, report */
+.recover-map { position: relative; height: 380px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.recover-legend { position: absolute; left: 10px; bottom: 10px; z-index: 2; list-style: none; margin: 0; }
+.recover-selected { margin-top: 10px; font-size: 13px; }
+.grid tr.row-selected td { background: var(--sel); }
+.card .row-actions { margin-top: 10px; }
+@media (max-width: 760px) {
+  .recover-map { height: 300px; }
+}

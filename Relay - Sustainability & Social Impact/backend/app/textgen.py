@@ -42,9 +42,12 @@ class SchemaGenaiClient(GenaiClient):
         return resp.text or ""
 
 
-def textgen_from_env(model_var: str = "GEMINI_MODEL", env: dict[str, str] | None = None) -> TextGen | None:
+def textgen_from_env(
+    model_var: str = "GEMINI_MODEL", env: dict[str, str] | None = None, timeout_s: float = 15.0
+) -> TextGen | None:
     """Same switch as ``agent_from_env`` (Vertex wins over an API key); ``None`` = no model.
-    The model name comes from ``model_var`` (falling back to ``GEMINI_MODEL``, then Flash)."""
+    The model name comes from ``model_var`` (falling back to ``GEMINI_MODEL``, then Flash);
+    ``timeout_s`` is the client's own request timeout (longer writers, e.g. a Pro-tier report, raise it)."""
     env = os.environ if env is None else env
     model = env.get(model_var) or env.get("GEMINI_MODEL") or DEFAULT_MODEL
     use_vertex = env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1")
@@ -52,12 +55,12 @@ def textgen_from_env(model_var: str = "GEMINI_MODEL", env: dict[str, str] | None
     try:
         if use_vertex:
             return SchemaGenaiClient(
-                model=model, timeout_s=15.0, vertexai=True,
+                model=model, timeout_s=timeout_s, vertexai=True,
                 project=env.get("GOOGLE_CLOUD_PROJECT") or None,
                 location=env.get("GOOGLE_CLOUD_LOCATION") or "global",
             )
         if key:
-            return SchemaGenaiClient(key, model, timeout_s=15.0)
+            return SchemaGenaiClient(key, model, timeout_s=timeout_s)
     except Exception as e:
         log.error("Gemini text client init failed (%s); using templates", e)
     return None

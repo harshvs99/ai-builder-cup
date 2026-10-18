@@ -452,6 +452,17 @@ Response:
 - `GET /v1/broadcasts` → `{ "broadcasts": [ ...the same objects, live only ] }`.
 - `GET /v1/stats` → `{ "open_by_category": {...}, "gateways_online": n, "tickets": n }`
   (a gateway is online if it synced in the last 60 s).
+- `GET /v1/recover/damage?district=puri|delhi|all` → `{ generated_at, district, areas: [...], totals: {...} }`: tickets grouped
+  by village (nearest gazetteer place within 3 km, else a ~2 km grid cell, else `Unlocated`) with reports, merged duplicates,
+  households (distinct origin phones), households reached (on resolved tickets), photo tags, `damage_level`
+  (`severe|moderate|light|none`) and `damage_reason`; totals add `median_minutes_to_dispatch`, `share_with_location`,
+  `needs_confirmed_closed`. Deterministic.
+- `GET /v1/recover/evidence/{ticket_no}` and `GET /v1/recover/evidence?area=<area_id>&district=` → an evidence record per ticket
+  (area pack: `{tickets: [...], integrity}`), origin phones as salted SHA-256 pseudonyms, `integrity: {algorithm: "sha256",
+  digest}` over canonical JSON (tamper-evidence of the export, not authenticity). `?download=1` sets `Content-Disposition`.
+- `POST /v1/recover/report?district=` → `{ generated_at, district, counts, text_en, text_local, local_lang, model:
+  "gemini"|"template", evidence_digests }`: relief and insurer report generated now, not persisted. Same number-validation rule as sitreps.
+  These three need `X-Operator-Key` when `RELAY_OPERATOR_KEY` is set.
 - `POST /v1/dev/inject` → body `{ "needs": [NeedJson...] }`; dev only.
 - `GET /healthz` → `{ "ok": true }`.
 
