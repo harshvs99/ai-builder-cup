@@ -4,7 +4,8 @@ import { MapView, type MapHandle, type MapLayers } from './components/MapView';
 import { Queue } from './components/Queue';
 import { Detail, type DetailAction } from './components/Detail';
 import { GatewaysView, SitrepView, TeamsView } from './components/Views';
-import { useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
+import { useDistrict, useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
+import { districtById, districtName, teamInDistrict, ticketInDistrict } from './lib/districts';
 import { sortTickets } from './lib/sort';
 import { countEstimated, hasMeshEstimate, isMappable } from './lib/location';
 import { QUEUE_FILTERS, matchesFilter, matchesSearch, orderQueue, ticketRef, type SortKey } from './lib/triage';
@@ -18,7 +19,10 @@ const LEGEND = [
 ] as const;
 
 export function App() {
-  const { tickets, stats, teams, gateways, connected, loaded, fresh, refresh } = useLiveData();
+  const { tickets: allTickets, stats, teams: allTeams, gateways, connected, loaded, fresh, refresh } = useLiveData();
+  const [district, chooseDistrict] = useDistrict();
+  const tickets = useMemo(() => allTickets.filter((t) => ticketInDistrict(t, district)), [allTickets, district]);
+  const teams = useMemo(() => allTeams.filter((t) => teamInDistrict(t, district)), [allTeams, district]);
   const nowSec = useNowSec();
   const [theme, toggleTheme] = useTheme();
   const [seen, markSeen] = useSeen();
@@ -46,6 +50,10 @@ export function App() {
   const shown = listTicket ? { ...(detail ?? {}), ...listTicket, packets: detail?.packets } : null;
   const noLocation = visible.filter((t) => !isMappable(t) && t.status !== 'RESOLVED');
 
+  const switchDistrict = (id: string) => {
+    chooseDistrict(id);
+    setSelected(null);
+  };
   const select = (no: number | null) => {
     setSelected(no);
     if (no !== null) markSeen(no);
@@ -112,6 +120,8 @@ export function App() {
           if (q && view !== 'board') setView('board');
         }}
         searchRef={searchRef}
+        district={district}
+        onDistrict={switchDistrict}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -134,6 +144,7 @@ export function App() {
         <section className="map-pane panel" aria-label="Map of reported needs">
           <MapView
             ref={mapRef}
+            district={districtById(district)}
             tickets={visible}
             teams={teams}
             layers={layers}
@@ -195,7 +206,7 @@ export function App() {
 
       {view === 'teams' && <TeamsView teams={teams} tickets={tickets} nowSec={nowSec} onOpen={open} />}
       {view === 'sitrep' && (
-        <SitrepView tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
+        <SitrepView scope={districtName(district)} tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
       )}
       {view === 'gateways' && <GatewaysView gateways={gateways} tickets={tickets} nowSec={nowSec} />}
     </div>

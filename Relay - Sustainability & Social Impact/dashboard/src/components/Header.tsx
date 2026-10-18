@@ -3,6 +3,7 @@ import type { Gateway, Stats, Ticket } from '../types';
 import type { Theme } from '../hooks';
 import { tierOf } from '../lib/sort';
 import { median } from '../lib/triage';
+import { ALL_DISTRICTS, DISTRICTS } from '../lib/districts';
 
 export type View = 'board' | 'teams' | 'sitrep' | 'gateways';
 
@@ -24,6 +25,8 @@ interface Props {
   search: string;
   onSearch: (q: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
+  district: string;
+  onDistrict: (id: string) => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -44,8 +47,10 @@ function ago(nowSec: number, then: number | null): string {
 
 export function Header(p: Props) {
   const { tickets, stats, gateways, nowSec } = p;
-  const open = stats?.open ?? tickets.filter((t) => t.status === 'OPEN').length;
-  const lifeAtRisk = stats?.p1_open ?? tickets.filter((t) => t.status === 'OPEN' && tierOf(t) === 'P1').length;
+  // Server stats cover every district, so they only apply when nothing is filtered out.
+  const all = p.district === ALL_DISTRICTS;
+  const open = (all ? stats?.open : undefined) ?? tickets.filter((t) => t.status === 'OPEN').length;
+  const lifeAtRisk = (all ? stats?.p1_open : undefined) ?? tickets.filter((t) => t.status === 'OPEN' && tierOf(t) === 'P1').length;
   const gwOnline = gateways ? gateways.filter((g) => g.online).length : stats?.gateways_online;
   const gwTotal = gateways?.length;
   const waits = tickets.filter((t) => t.status === 'OPEN').map((t) => nowSec - t.first_reported_at);
@@ -63,7 +68,11 @@ export function Header(p: Props) {
           </svg>
         </span>
         <b>Relay</b>
-        <span className="where">Control room · Puri district</span>
+        <span className="where">Control room ·</span>
+        <select className="district" value={p.district} onChange={(e) => p.onDistrict(e.target.value)} aria-label="District">
+          {DISTRICTS.map((d) => <option key={d.id} value={d.id}>{d.name} district</option>)}
+          <option value={ALL_DISTRICTS}>All districts</option>
+        </select>
       </div>
       <nav className="tabs" aria-label="Views">
         {TABS.map((t) => (

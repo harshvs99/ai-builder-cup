@@ -71,6 +71,10 @@ button:disabled { cursor: default; }
 .brand { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .brand b { font-size: 16px; font-weight: 700; }
 .brand .where { color: var(--muted); font-size: 13px; }
+.brand .district {
+  padding: 4px 8px; font-size: 13px; font-weight: 600; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
 .logo { display: grid; flex: none; }
 .tabs { display: flex; gap: 2px; }
 .tab {

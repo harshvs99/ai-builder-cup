@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { detectNewTickets } from './lib/diff';
+import { ALL_DISTRICTS, DEFAULT_DISTRICT, districtById } from './lib/districts';
 import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
 
 export const POLL_MS = 2000;
@@ -210,4 +211,28 @@ export function useTheme() {
     });
   }, []);
   return [theme, toggle] as const;
+}
+
+const DISTRICT_KEY = 'relay.district';
+
+/** Which district the board is scoped to ("all" or a district id); the choice is remembered. */
+export function useDistrict() {
+  const [district, setDistrict] = useState<string>(() => {
+    try {
+      const v = localStorage.getItem(DISTRICT_KEY);
+      if (v === ALL_DISTRICTS || (v && districtById(v))) return v;
+    } catch {
+      /* ignore */
+    }
+    return DEFAULT_DISTRICT;
+  });
+  const choose = useCallback((id: string) => {
+    setDistrict(id);
+    try {
+      localStorage.setItem(DISTRICT_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  return [district, choose] as const;
 }

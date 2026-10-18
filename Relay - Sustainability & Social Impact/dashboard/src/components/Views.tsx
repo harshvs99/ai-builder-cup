@@ -114,8 +114,8 @@ function Kpi({ label, value, note, tone }: { label: string; value: string | numb
   );
 }
 
-export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen }: {
-  tickets: Ticket[]; teams: Team[]; stats: Stats | null; gateways: Gateway[] | null; nowSec: number; onOpen: (no: number) => void;
+export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, scope }: {
+  scope: string; tickets: Ticket[]; teams: Team[]; stats: Stats | null; gateways: Gateway[] | null; nowSec: number; onOpen: (no: number) => void;
 }) {
   const { sitrep, loaded, busy, error, regenerate } = useSitrep();
   const [lang, setLang] = useState<'en' | 'local'>('en');
@@ -139,7 +139,7 @@ export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen }: 
   const share = async () => {
     if (!sitrep) return;
     try {
-      await navigator.clipboard.writeText(`Relay situation report, Puri district, ${new Date(sitrep.generated_at * 1000).toLocaleString()}\n\n${sitrep.text_en}\n\n${sitrep.text_local}`);
+      await navigator.clipboard.writeText(`Relay situation report, ${scope}, ${new Date(sitrep.generated_at * 1000).toLocaleString()}\n\n${sitrep.text_en}\n\n${sitrep.text_local}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -152,7 +152,7 @@ export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen }: 
       <div className="page-head">
         <h1>Situation report</h1>
         <p className="muted">
-          Puri district ·{' '}
+          {scope} ·{' '}
           {sitrep
             ? `${new Date(sitrep.generated_at * 1000).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })} · drafted by the sitrep agent`
             : 'no report generated yet'}{' '}
