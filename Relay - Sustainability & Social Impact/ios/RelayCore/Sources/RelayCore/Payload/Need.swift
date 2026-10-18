@@ -12,7 +12,35 @@ public struct NeedAnswer: Equatable, Hashable, Sendable {
     public var wireByte: Int { (questionId << 3) | value }
 }
 
-/// NEED payload (SPEC 5.1). Encoded as payload_version 1, or 2 when [answers] is not empty.
+/// The photo tag table (SPEC 5.1): bit -> JSON key. A photo is classified on the phone into these and only the
+/// 16-bit mask travels, never pixels. Bits are never renumbered; bit 15 is reserved and must be 0. Checked against
+/// `photo_tag_bank` in protocol/vectors.json.
+public enum PhotoTags {
+    public static let keys: [String] = [
+        "floodwater", "house_damaged", "house_collapsed", "roof_damaged", "person_injured", "people_stranded",
+        "road_blocked", "tree_fallen", "power_line_down", "boat_damaged", "crops_damaged", "livestock_lost",
+        "vehicle_damaged", "fire", "landslide",
+    ]
+    /// Every defined bit; bit 15 is reserved.
+    public static let allMask = 0x7FFF
+
+    /// Tag keys of [mask] in bit order, e.g. 0x21 -> floodwater, people_stranded.
+    public static func toKeys(_ mask: Int) -> [String] {
+        keys.enumerated().filter { (mask >> $0.offset) & 1 == 1 }.map { $0.element }
+    }
+
+    /// Inverse of `toKeys`; nil if a key is not in the table.
+    public static func fromKeys(_ names: [String]) -> Int? {
+        var mask = 0
+        for k in names {
+            guard let bit = keys.firstIndex(of: k) else { return nil }
+            mask |= 1 << bit
+        }
+        return mask
+    }
+}
+
+/// NEED payload (SPEC 5.1). Encoded as payload_version 1, 2 when [answers] is not empty, or 3 when [photoTags] is not 0.
 ///
 /// Integer fields are plain `Int` (range-checked by the encoder); [createdAt] is `Int64`.
 public struct Need: Equatable, Hashable, Sendable {
@@ -37,16 +65,18 @@ public struct Need: Equatable, Hashable, Sendable {
     public var summary: String
     /// At most `QuestionBank.maxAnswers`, distinct question ids; empty = a v1 payload on the wire.
     public var answers: [NeedAnswer]
+    /// Bitmask over `PhotoTags.keys`, 0...`PhotoTags.allMask`; 0 = no photo (a v1 or v2 payload on the wire).
+    public var photoTags: Int
 
     public init(
         msgId: [UInt8], originNode: [UInt8], createdAt: Int64, category: NeedCategory, urgency: Int, people: Int,
         vulnFlags: Int, latE5: Int, lonE5: Int, locAcc: Int, lang: Lang, item: String, landmark: String,
-        summary: String, answers: [NeedAnswer] = []
+        summary: String, answers: [NeedAnswer] = [], photoTags: Int = 0
     ) {
         self.msgId = msgId; self.originNode = originNode; self.createdAt = createdAt; self.category = category
         self.urgency = urgency; self.people = people; self.vulnFlags = vulnFlags; self.latE5 = latE5
         self.lonE5 = lonE5; self.locAcc = locAcc; self.lang = lang; self.item = item; self.landmark = landmark
-        self.summary = summary; self.answers = answers
+        self.summary = summary; self.answers = answers; self.photoTags = photoTags
     }
 
     public var lat: Double { Geo.fromE5(latE5) }
@@ -60,6 +90,9 @@ public enum NeedCodec {
     /// v1 layout followed by exactly [answerBytes] answer bytes.
     public static let versionWithAnswers = 2
     public static let answerBytes = 3
+    /// v2 layout followed by [photoTagBytes] (a u16 big-endian bitmask, never 0, bit 15 clear).
+    public static let versionWithPhotoTags = 3
+    public static let photoTagBytes = 2
     public static let maxItem = 16
     public static let maxLandmark = 24
     public static let maxSummary = 40
@@ -67,6 +100,7 @@ public enum NeedCodec {
     /// Fixed part + 3 length bytes + 80 string bytes.
     public static let maxPayload = fixedSize + 3 + maxItem + maxLandmark + maxSummary
     public static let maxPayloadV2 = maxPayload + answerBytes
+    public static let maxPayloadV3 = maxPayloadV2 + photoTagBytes
 
     /// Encode a NEED. Strings are truncated on a code point boundary to their limits. Throws
     /// `IllegalArgumentError` if a numeric field is out of range or an id has the wrong length.
@@ -88,12 +122,17 @@ public enum NeedCodec {
         guard Set(need.answers.map { $0.questionId }).count == need.answers.count else {
             throw IllegalArgumentError("duplicate question id")
         }
-        let v2 = !need.answers.isEmpty
+        guard (0...PhotoTags.allMask).contains(need.photoTags) else {
+            throw IllegalArgumentError("photo_tags out of range or uses the reserved bit")
+        }
+        let v3 = need.photoTags != 0
+        let v2 = v3 || !need.answers.isEmpty // v3 carries the 3 answer slots too (all empty is fine)
         let item = Utf8.truncateToBytes(need.item, maxItem)
         let landmark = Utf8.truncateToBytes(need.landmark, maxLandmark)
         let summary = Utf8.truncateToBytes(need.summary, maxSummary)
-        var w = ByteWriter(capacity: fixedSize + 3 + item.count + landmark.count + summary.count + (v2 ? answerBytes : 0))
-        w.u8(v2 ? versionWithAnswers : version)
+        var w = ByteWriter(capacity: fixedSize + 3 + item.count + landmark.count + summary.count
+                            + (v2 ? answerBytes : 0) + (v3 ? photoTagBytes : 0))
+        w.u8(v3 ? versionWithPhotoTags : v2 ? versionWithAnswers : version)
         w.put(need.msgId)
         w.put(need.originNode)
         w.u32(need.createdAt)
@@ -111,14 +150,15 @@ public enum NeedCodec {
         if v2 {
             for i in 0..<answerBytes { w.u8(i < need.answers.count ? need.answers[i].wireByte : 0) }
         }
+        if v3 { w.u16(need.photoTags) }
         return w.bytes
     }
 
-    /// Nil if invalid (SPEC 5.1 validation) or `payload_version` is not 1 or 2. Never traps.
+    /// Nil if invalid (SPEC 5.1 validation) or `payload_version` is not 1, 2 or 3. Never traps.
     public static func decode(_ p: [UInt8]) -> Need? {
-        if p.count < fixedSize + 3 || p.count > maxPayloadV2 { return nil }
+        if p.count < fixedSize + 3 || p.count > maxPayloadV3 { return nil }
         let ver = Int(p[0])
-        if ver != version && ver != versionWithAnswers { return nil }
+        if ver != version && ver != versionWithAnswers && ver != versionWithPhotoTags { return nil }
         var r = ByteReader(p, at: 1)
         let msgId = r.take(8)
         let origin = r.take(8)
@@ -137,8 +177,10 @@ public enum NeedCodec {
         guard let landmark = readString(&r, max: maxLandmark) else { return nil }
         guard let summary = readString(&r, max: maxSummary) else { return nil }
         var answers: [NeedAnswer] = []
-        if ver == versionWithAnswers {
-            if r.remaining != answerBytes { return nil }
+        var photoTags = 0
+        if ver != version {
+            let tail = answerBytes + (ver == versionWithPhotoTags ? photoTagBytes : 0)
+            if r.remaining != tail { return nil }
             var empty = false
             for _ in 0..<answerBytes {
                 let b = r.u8()
@@ -150,12 +192,16 @@ public enum NeedCodec {
                 }
                 answers.append(a)
             }
-            if answers.isEmpty { return nil } // v2 means "has answers"; encoders emit v1 otherwise
+            if answers.isEmpty && ver == versionWithAnswers { return nil } // v2 means "has answers"; encoders emit v1 otherwise
+            if ver == versionWithPhotoTags {
+                photoTags = r.u16()
+                if photoTags == 0 || photoTags & ~PhotoTags.allMask != 0 { return nil } // v3 means "has tags", bit 15 reserved
+            }
         }
         if r.hasRemaining || !r.ok { return nil }
         return Need(msgId: msgId, originNode: origin, createdAt: createdAt, category: category, urgency: urgency,
                     people: people, vulnFlags: vuln, latE5: lat, lonE5: lon, locAcc: locAcc, lang: lang,
-                    item: item, landmark: landmark, summary: summary, answers: answers)
+                    item: item, landmark: landmark, summary: summary, answers: answers, photoTags: photoTags)
     }
 
     /// Length-prefixed (1 byte) strict UTF-8 string of at most [max] bytes; nil if malformed or truncated.

@@ -43,11 +43,11 @@ TICKET_COLUMNS = {
     "priority_reason", "status", "dispatch_draft_en", "dispatch_draft_local",
     "first_reported_at", "max_hops", "created_at", "updated_at",
     # JSON objects, null when unset: estimated location from a landmark; category correction;
-    # intake answers {question key: answer key}
-    "geo", "reclass", "answers",
+    # intake answers {question key: answer key}; photo tags {tag key: reports that carried it}
+    "geo", "reclass", "answers", "photo_tags",
 }
 # Columns added after the first release: SQLite adds them to existing databases on connect.
-JSON_COLUMNS = ("geo", "reclass", "answers")
+JSON_COLUMNS = ("geo", "reclass", "answers", "photo_tags")
 
 # Ticket status -> the statuses it may be entered from (DISPATCHED comes from ``approve_ticket``).
 ADVANCE_FROM: dict[str, tuple[str, ...]] = {

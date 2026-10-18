@@ -1,6 +1,7 @@
 import type { Ticket } from '../types';
 import { formatRelative } from '../lib/time';
 import { hasMeshEstimate, isMappable, meshEstimateShort } from '../lib/location';
+import { hasPhotoTags, photoTagSummary } from '../lib/photoTags';
 import {
   QUEUE_FILTERS,
   SORT_LABEL,
@@ -94,7 +95,12 @@ export function Queue(p: Props) {
                     {Math.round(t.priority_score)}
                   </span>
                   <span className="body">
-                    <span className="title">{headline(t)}</span>
+                    <span className="title">
+                      {headline(t)}
+                      {hasPhotoTags(t) && (
+                        <span className="photo-ind" role="img" aria-label="Has photo tags" title={photoTagSummary(t.photo_tags)}>📷</span>
+                      )}
+                    </span>
                     <span className="line">{where(t)}</span>
                     <span className="line muted">
                       {u.label} · {formatRelative(p.nowSec, t.first_reported_at)} · {t.max_hops} hop{t.max_hops === 1 ? '' : 's'} · {ticketRef(t.ticket_no)}

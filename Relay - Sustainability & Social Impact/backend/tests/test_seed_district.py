@@ -116,3 +116,11 @@ def test_uploading_through_sync_creates_the_expected_tickets(make_client, clock)
         "gateway_node": seed.GATEWAYS[0],
         "frames": [base64.b64encode(f.frame).decode() for f in frames if f.gateway == seed.GATEWAYS[0]]}).json()
     assert again["accepted"] == 0
+
+
+def test_some_reports_carry_synthetic_photo_tags(frames):
+    tagged = [f for f in frames if f.need.photo_tags]
+    assert 10 <= len(tagged) <= 14
+    for f in tagged:
+        assert codec.decode_frame(f.frame).payload[0] == 3
+        assert codec.photo_tags_to_json(f.need.photo_tags)
