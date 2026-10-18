@@ -6,7 +6,7 @@ final class IntakeTests: XCTestCase {
 
     // ------------------------------------------------------------------ question bank
     func testBankHasTheAgreedQuestionsPerCategory() {
-        func keys(_ c: Category) -> [String] { QuestionBank.forCategory(c).map { $0.key } }
+        func keys(_ c: NeedCategory) -> [String] { QuestionBank.forCategory(c).map { $0.key } }
         XCTAssertEqual(["conscious", "road_reachable"], keys(.medical))
         XCTAssertEqual(["water_rising", "roof_or_ground"], keys(.rescue))
         XCTAssertEqual(["children_or_elderly", "how_long"], keys(.water))
@@ -40,7 +40,7 @@ final class IntakeTests: XCTestCase {
         XCTAssertEqual([5, 6], QuestionBank.select(.food, []))
         XCTAssertEqual([6], QuestionBank.select(.food, [.child]))
         XCTAssertEqual([], QuestionBank.select(.other, []))
-        XCTAssertTrue(Category.allCases.allSatisfy { QuestionBank.select($0, []).count <= 3 })
+        XCTAssertTrue(NeedCategory.allCases.allSatisfy { QuestionBank.select($0, []).count <= 3 })
     }
 
     // ------------------------------------------------------------------ engine

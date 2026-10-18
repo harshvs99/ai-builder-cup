@@ -9,7 +9,7 @@ import RelayCore
 public struct MyNeed: Equatable, Hashable, Sendable, Codable {
     public var msgIdHex: String
     public var createdAtMs: Int64
-    public var category: Category
+    public var category: NeedCategory
     public var urgency: Int
     public var people: Int
     public var item: String
@@ -46,7 +46,7 @@ public struct MyNeed: Equatable, Hashable, Sendable, Codable {
     public var cancelledAtMs: Int64
 
     public init(
-        msgIdHex: String, createdAtMs: Int64, category: Category, urgency: Int, people: Int, item: String,
+        msgIdHex: String, createdAtMs: Int64, category: NeedCategory, urgency: Int, people: Int, item: String,
         landmark: String, summary: String, lang: Lang, needPayloadB64: String,
         sentToMesh: Bool = false, ackStatus: Int = -1, ticketNo: Int64 = -1, ackText: String = "",
         etaMin: Int = 0xFFFF, receivedText: String = "", vulnFlags: Int = 0, answers: [Int: Int] = [:],
@@ -138,7 +138,7 @@ public struct MyNeed: Equatable, Hashable, Sendable, Codable {
         let created = try c.decode(Int64.self, forKey: .createdAtMs)
         msgIdHex = try c.decode(String.self, forKey: .msgIdHex)
         createdAtMs = created
-        category = Category.fromCode(try c.decode(Int.self, forKey: .category)) ?? .other
+        category = NeedCategory.fromCode(try c.decode(Int.self, forKey: .category)) ?? .other
         urgency = try c.decode(Int.self, forKey: .urgency)
         people = try c.decode(Int.self, forKey: .people)
         item = try c.decodeIfPresent(String.self, forKey: .item) ?? ""

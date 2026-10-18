@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Request categories as the design shows them. Local to the design system so views stay free of RelayCore;
-/// map from `RelayCore.Category` at the call site.
+/// map from `RelayCore.NeedCategory` at the call site.
 enum RequestCategory: String, CaseIterable, Sendable {
     case medical, rescue, water, food, shelter, missingPerson, other
 

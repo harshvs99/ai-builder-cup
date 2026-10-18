@@ -116,7 +116,7 @@ public struct CommonStrings: Equatable, Sendable {
     }
 
     // ---- categories and vulnerability flags
-    public func categoryName(_ c: Category) -> String {
+    public func categoryName(_ c: NeedCategory) -> String {
         switch c {
         case .water: return tr(lang, "Water", "पानी", "ପାଣି", "Tubig", "Tubig")
         case .food: return tr(lang, "Food", "खाना", "ଖାଦ୍ୟ", "Pagkain", "Pagkaon")

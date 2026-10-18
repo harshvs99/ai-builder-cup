@@ -21,7 +21,7 @@ public enum RequestLists {
 }
 
 /// Item words that merely restate their category, so the localized category name can stand in for them.
-private let restatements: [Category: Set<String>] = [
+private let restatements: [NeedCategory: Set<String>] = [
     .water: ["water", "drinking water", "needs water"],
     .food: ["food", "needs food", "rice", "rice and dal"],
     .medical: ["medicine", "medicines", "needs medicine", "medical", "medical help", "needs medical help", "doctor", "needs doctor"],
@@ -33,7 +33,7 @@ private let restatements: [Category: Set<String>] = [
 /// The name of what is needed, for titles and share text. English UI: the item (capitalised), else the category.
 /// Other languages: the wire item is English, so show the localized category; when the item says more than the
 /// category does (e.g. "insulin" under medical) show "<category>: <item>".
-public func requestLabel(_ category: Category, _ item: String, english: Bool, categoryName: (Category) -> String) -> String {
+public func requestLabel(_ category: NeedCategory, _ item: String, english: Bool, categoryName: (NeedCategory) -> String) -> String {
     let shown = item.trimmed
     if english {
         let base = shown.isEmpty ? categoryName(category) : shown
@@ -60,7 +60,7 @@ public struct RequestRowModel: Equatable, Sendable, Identifiable {
     public var id: String { msgIdHex }
     public let msgIdHex: String
     /// Category circle (a green check when `isClosed`).
-    public let category: Category
+    public let category: NeedCategory
     /// "Drinking water · 6 people".
     public let title: String
     /// The latest timeline step with relative time: "Reached a gateway phone · 2 min ago".

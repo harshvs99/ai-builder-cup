@@ -23,7 +23,7 @@ enum UI {
 
     static func need(
         _ id: String, at: Int64 = 1_700_000_000_000, ack: Int = -1, cancelled: Bool = false, item: String = "",
-        urgency: Int = 2, people: Int = 6, category: Category = .water, landmark: String = ""
+        urgency: Int = 2, people: Int = 6, category: NeedCategory = .water, landmark: String = ""
     ) -> MyNeed {
         MyNeed(
             msgIdHex: id, createdAtMs: at, category: category, urgency: urgency, people: people, item: item,

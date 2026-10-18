@@ -6,7 +6,10 @@ import RelayCore
 /// `category` is nil until something (extraction or a tap) says what it is. `edited` holds the fields the person set
 /// by hand; extraction never overwrites those (a user choice beats a model or rule guess).
 public struct AskDraft: Equatable, Sendable {
-    public var category: Category?
+    public var category: NeedCategory?
+    /// Further categories the person also needs (water *and* food). Each goes out as its own NEED, sharing the
+    /// people, flags, landmark, note and urgency; `category` stays the one the item and follow-up answers belong to.
+    public var extraCategories: [NeedCategory]
     public var item: String
     public var people: Int
     public var vulnFlags: Set<VulnFlag>
@@ -18,14 +21,17 @@ public struct AskDraft: Equatable, Sendable {
     public var edited: Set<IntakeField>
 
     public init(
-        category: Category? = nil, item: String = "", people: Int = 1, vulnFlags: Set<VulnFlag> = [],
+        category: NeedCategory? = nil, extraCategories: [NeedCategory] = [], item: String = "", people: Int = 1, vulnFlags: Set<VulnFlag> = [],
         landmark: String = "", summary: String = "", urgency: Int = 1, answers: [Int: Int] = [:],
         edited: Set<IntakeField> = []
     ) {
-        self.category = category; self.item = item; self.people = people; self.vulnFlags = vulnFlags
+        self.category = category; self.extraCategories = extraCategories; self.item = item; self.people = people; self.vulnFlags = vulnFlags
         self.landmark = landmark; self.summary = summary; self.urgency = urgency; self.answers = answers
         self.edited = edited
     }
+
+    /// Every chosen category, the primary first.
+    public var categories: [NeedCategory] { (category.map { [$0] } ?? []) + extraCategories }
 
     /// Follow-up questions for the current category, from the bank (never written by a model).
     public var questionIds: [Int] { QuestionBank.select(category ?? .other, vulnFlags) }
@@ -50,8 +56,24 @@ public enum AskLogic {
     public static let maxPeople = 255
 
     /// Category chips of step 1, in display order; Missing person and Other sit behind "Something else".
-    public static let mainCategories: [Category] = [.water, .food, .medical, .rescue, .shelter]
-    public static let moreCategories: [Category] = [.missingPerson, .other]
+    /// Water and food share one chip (`.water` stands for the group): the same supply team answers both, so they
+    /// are one ticket. A chip is a group of wire categories, and at most one per group is chosen.
+    public static let mainCategories: [NeedCategory] = [.water, .medical, .rescue, .shelter]
+    public static let moreCategories: [NeedCategory] = [.missingPerson, .other]
+
+    /// The wire categories one chip stands for.
+    public static func group(_ c: NeedCategory) -> [NeedCategory] { c == .water || c == .food ? [.water, .food] : [c] }
+
+    /// Chip text: "Water / Food" for the supply group, else the category's name.
+    public static func chipLabel(_ common: CommonStrings, _ c: NeedCategory) -> String {
+        group(c).count > 1 ? group(c).map { common.categoryName($0) }.joined(separator: " / ") : common.categoryName(c)
+    }
+
+    /// True when the draft has a category of the chip's group.
+    public static func isChosen(_ d: AskDraft, chip c: NeedCategory) -> Bool { d.categories.contains { group(c).contains($0) } }
+
+    /// The chips of the Need editor on Check and send: every category on its own.
+    public static let editorCategories: [NeedCategory] = [.water, .food, .medical, .rescue, .shelter, .missingPerson, .other]
 
     /// Display order of vulnerability flags (children first, as in the design).
     public static let flagOrder: [VulnFlag] = [.child, .elderly, .pregnant, .injured, .trapped]
@@ -82,7 +104,9 @@ public enum AskLogic {
         func free(_ f: IntakeField) -> Bool { !draft.edited.contains(f) }
         var d = draft
         if free(.category) { d.category = n.category == .other ? nil : n.category }
-        if free(.item) { d.item = fit(n.item.trimmed, maxItem) }
+        // An item extracted for another category than the person chose (rice, for a chosen "water") is not theirs.
+        let itemFits = free(.category) || d.category == nil || n.category == d.category
+        if free(.item) { d.item = itemFits ? fit(n.item.trimmed, maxItem) : "" }
         if free(.people) { d.people = clamp(n.people, 1, maxPeople) }
         if free(.vuln) { d.vulnFlags = n.vulnFlags }
         if free(.landmark) { d.landmark = fit(n.landmark.trimmed, maxLandmark) }
@@ -94,8 +118,9 @@ public enum AskLogic {
     private static func clamp(_ v: Int, _ lo: Int, _ hi: Int) -> Int { min(max(v, lo), hi) }
 
     /// Set the category by hand; nil clears the choice so extraction decides again.
-    public static func setCategory(_ d: AskDraft, _ c: Category?) -> AskDraft {
+    public static func setCategory(_ d: AskDraft, _ c: NeedCategory?) -> AskDraft {
         var n = d
+        n.extraCategories = []
         if let c {
             n.category = c
             n.edited.insert(.category)
@@ -103,7 +128,66 @@ public enum AskLogic {
             n.category = nil
             n.edited.remove(.category)
         }
-        return n.pruned()
+        return retargeted(from: d, n).pruned()
+    }
+
+    /// Tap on a merged chip (New request): adds its group to the chosen set, or removes it when already chosen.
+    /// Tapping a category that extraction guessed only confirms it (so it stays); removing the primary promotes the
+    /// next one; removing the last hands the decision back to extraction (`category` nil, not edited).
+    public static func toggleCategory(_ d: AskDraft, _ c: NeedCategory) -> AskDraft {
+        change(d, c, exact: false)
+    }
+
+    /// Tap on an exact category (Check and send, where water and food are separate chips): like `toggleCategory`,
+    /// but a sibling in the same group is swapped for [c], so "food" can be corrected to "water".
+    public static func pickCategory(_ d: AskDraft, _ c: NeedCategory) -> AskDraft {
+        change(d, c, exact: true)
+    }
+
+    private static func change(_ d: AskDraft, _ c: NeedCategory, exact: Bool) -> AskDraft {
+        var n = d
+        if let chosen = n.categories.first(where: { group(c).contains($0) }) {
+            if exact, chosen != c {
+                if n.category == chosen { n.category = c } else if let i = n.extraCategories.firstIndex(of: chosen) { n.extraCategories[i] = c }
+                n.edited.insert(.category)
+            } else if let i = n.extraCategories.firstIndex(of: chosen) {
+                n.extraCategories.remove(at: i)
+            } else if !n.edited.contains(.category) {
+                n.edited.insert(.category)
+            } else if n.extraCategories.isEmpty {
+                n.category = nil
+                n.edited.remove(.category)
+            } else {
+                n.category = n.extraCategories.removeFirst()
+            }
+        } else {
+            if n.category == nil { n.category = c } else { n.extraCategories.append(c) }
+            n.edited.insert(.category)
+        }
+        return retargeted(from: d, n).pruned()
+    }
+
+    /// An item the rules or a model picked belongs to the category it was picked for ("rice" for food); when the
+    /// person moves the primary category and never edited the item, it is dropped so the new category's word shows.
+    private static func retargeted(from old: AskDraft, _ new: AskDraft) -> AskDraft {
+        guard new.category != old.category, !new.edited.contains(.item) else { return new }
+        var n = new
+        n.item = ""
+        return n
+    }
+
+    /// One draft per chosen category, in order: the primary keeps the item and answers; the others get the
+    /// category's own word as item and the shared fields. A draft with no category gives a single `.other` one.
+    public static func perCategory(_ d: AskDraft) -> [AskDraft] {
+        let cats = d.categories
+        if cats.count <= 1 { return [d.pruned()] }
+        return cats.enumerated().map { i, c in
+            var n = d
+            n.category = c
+            n.extraCategories = []
+            if i > 0 { n.item = ""; n.answers = [:] }
+            return n.pruned()
+        }
     }
 
     public static func setItem(_ d: AskDraft, _ text: String) -> AskDraft {
@@ -148,7 +232,7 @@ public enum AskLogic {
         d.category != nil || !transcript.trimmed.isEmpty || !d.item.trimmed.isEmpty
     }
 
-    private static func isGeneric(_ category: Category?, _ item: String) -> Bool {
+    private static func isGeneric(_ category: NeedCategory?, _ item: String) -> Bool {
         let i = item.trimmed.lowercased()
         if i.isEmpty { return true }
         switch category {
@@ -180,6 +264,7 @@ public enum AskLogic {
         var chips: [String] = []
         let need = needWords(common, d)
         if !need.isEmpty { chips.append(need) }
+        chips.append(contentsOf: d.extraCategories.map { chipLabel(common, $0) })
         if d.people > 1 || !d.vulnFlags.isEmpty {
             chips.append(d.vulnFlags.isEmpty ? common.people(d.people) : peopleLine(common, d.people, d.vulnFlags))
         }
@@ -190,7 +275,7 @@ public enum AskLogic {
 
     /// The "Something else" row shows when the person opened it, or when a category behind it is chosen.
     public static func showsMoreCategories(_ d: AskDraft, opened: Bool) -> Bool {
-        opened || (d.category.map { moreCategories.contains($0) } ?? false)
+        opened || d.categories.contains { moreCategories.contains($0) }
     }
 
     // ---------------------------------------------------------------- location line (Check and send)
@@ -210,7 +295,7 @@ public enum AskLogic {
 
     // ---------------------------------------------------------------- the wire
 
-    private static let englishWord: [Category: String] = [
+    private static let englishWord: [NeedCategory: String] = [
         .water: "water", .food: "food", .medical: "medicine", .rescue: "rescue", .shelter: "shelter",
         .missingPerson: "missing person", .other: "help",
     ]
@@ -218,6 +303,7 @@ public enum AskLogic {
     /// Item text for the wire: the draft's, or the category's English word so the control room never sees blank.
     public static func wireItem(_ d: AskDraft) -> String {
         let item = d.item.trimmed
+        if item.isEmpty, d.category == .water { return "food and water" }
         return fit(item.isEmpty ? englishWord[d.category ?? .other]! : item, maxItem)
     }
 

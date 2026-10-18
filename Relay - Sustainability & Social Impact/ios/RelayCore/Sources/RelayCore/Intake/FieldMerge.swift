@@ -3,7 +3,7 @@ import Foundation
 /// Fields a model proposed; nil = the model gave nothing usable for that field. Values are validated and clamped by
 /// `FieldMerge.merge`, never trusted.
 public struct ModelFields: Equatable, Sendable {
-    public var category: Category?
+    public var category: NeedCategory?
     public var item: String?
     public var landmark: String?
     public var urgency: Int?
@@ -12,7 +12,7 @@ public struct ModelFields: Equatable, Sendable {
     public var summary: String?
 
     public init(
-        category: Category? = nil, item: String? = nil, landmark: String? = nil, urgency: Int? = nil,
+        category: NeedCategory? = nil, item: String? = nil, landmark: String? = nil, urgency: Int? = nil,
         people: Int? = nil, vulnFlags: Set<VulnFlag>? = nil, summary: String? = nil
     ) {
         self.category = category; self.item = item; self.landmark = landmark; self.urgency = urgency

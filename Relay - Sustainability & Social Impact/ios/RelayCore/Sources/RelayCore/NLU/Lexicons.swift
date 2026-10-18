@@ -5,7 +5,7 @@ import Foundation
 /// item label comes from the most urgent [request] concept ("send a doctor"), else from the most urgent concept.
 final class Concept: Sendable {
     let id: String
-    let category: Category
+    let category: NeedCategory
     let urgency: Int
     let item: String?
     let phrase: String
@@ -15,7 +15,7 @@ final class Concept: Sendable {
     let request: Bool
     let lex: Lex
 
-    init(_ id: String, _ category: Category, _ urgency: Int, _ item: String?, _ phrase: String,
+    init(_ id: String, _ category: NeedCategory, _ urgency: Int, _ item: String?, _ phrase: String,
          _ flags: Set<VulnFlag> = [], context: Bool = false, request: Bool = false, lex: Lex) {
         self.id = id; self.category = category; self.urgency = urgency; self.item = item; self.phrase = phrase
         self.flags = flags; self.context = context; self.request = request; self.lex = lex
@@ -29,7 +29,7 @@ enum Lexicons {
     private static let pregnant: Set<VulnFlag> = [.pregnant]
 
     /// Tie-break between categories of equal urgency.
-    static func categoryRank(_ c: Category) -> Int {
+    static func categoryRank(_ c: NeedCategory) -> Int {
         switch c {
         case .medical: return 0
         case .rescue: return 1
@@ -41,7 +41,7 @@ enum Lexicons {
         }
     }
 
-    static func defaultItem(_ c: Category) -> String {
+    static func defaultItem(_ c: NeedCategory) -> String {
         switch c {
         case .medical: return "medical help"
         case .rescue: return "rescue"

@@ -33,7 +33,7 @@ final class VectorsTests: XCTestCase {
         let answers = (fl["answers"] as? [JObj])?.map { NeedAnswer(questionId: i($0, "id"), value: i($0, "value")) } ?? []
         return Need(
             msgId: h(s(fl, "msg_id")), originNode: h(s(fl, "origin_node")), createdAt: l(fl, "created_at"),
-            category: Category.fromCode(i(fl, "category"))!, urgency: i(fl, "urgency"), people: i(fl, "people"),
+            category: NeedCategory.fromCode(i(fl, "category"))!, urgency: i(fl, "urgency"), people: i(fl, "people"),
             vulnFlags: i(fl, "vuln_flags"), latE5: Geo.toE5(d(fl, "lat")), lonE5: Geo.toE5(d(fl, "lon")),
             locAcc: i(fl, "loc_acc"), lang: Lang.fromCode(i(fl, "lang"))!,
             item: str("item"), landmark: str("landmark"), summary: str("summary"), answers: answers)

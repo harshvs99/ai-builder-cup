@@ -227,17 +227,17 @@ struct CheckScreen: View {
                 return
             }
         }
-        let need = ctl.flow.buildNeed(
-            msgId: NodeId.random(), originNode: model.nodeId, createdAtSec: Int64(Date().timeIntervalSince1970),
+        // One NEED per chosen category; the first one's detail opens.
+        let needs = ctl.flow.buildNeeds(
+            newMsgId: { NodeId.random() }, originNode: model.nodeId, createdAtSec: Int64(Date().timeIntervalSince1970),
             lang: lang, fix: fix)
-        do {
-            try model.submit(need)
-        } catch {
-            ctl.flow.endSend()
-            return
+        var sent: [Need] = []
+        for need in needs {
+            do { try model.submit(need); sent.append(need) } catch { break }
         }
         ctl.flow.endSend()
-        nav.finishAsk(msgId: need.msgIdHex)
+        guard let first = sent.first else { return }
+        nav.finishAsk(msgId: first.msgIdHex)
     }
 }
 

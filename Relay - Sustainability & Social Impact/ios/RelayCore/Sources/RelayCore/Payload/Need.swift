@@ -20,7 +20,7 @@ public struct Need: Equatable, Hashable, Sendable {
     public var originNode: [UInt8]
     /// unix seconds, u32
     public var createdAt: Int64
-    public var category: Category
+    public var category: NeedCategory
     public var urgency: Int
     /// 1..255, 0 = unknown
     public var people: Int
@@ -39,7 +39,7 @@ public struct Need: Equatable, Hashable, Sendable {
     public var answers: [NeedAnswer]
 
     public init(
-        msgId: [UInt8], originNode: [UInt8], createdAt: Int64, category: Category, urgency: Int, people: Int,
+        msgId: [UInt8], originNode: [UInt8], createdAt: Int64, category: NeedCategory, urgency: Int, people: Int,
         vulnFlags: Int, latE5: Int, lonE5: Int, locAcc: Int, lang: Lang, item: String, landmark: String,
         summary: String, answers: [NeedAnswer] = []
     ) {
@@ -123,7 +123,7 @@ public enum NeedCodec {
         let msgId = r.take(8)
         let origin = r.take(8)
         let createdAt = r.u32()
-        guard let category = Category.fromCode(r.u8()) else { return nil }
+        guard let category = NeedCategory.fromCode(r.u8()) else { return nil }
         let urgency = r.u8()
         if urgency > 3 { return nil }
         let people = r.u8()

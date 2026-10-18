@@ -2,7 +2,7 @@ import Foundation
 
 /// Structured result of reading a free-text help request.
 public struct NeedDraft: Equatable, Hashable, Sendable {
-    public var category: Category
+    public var category: NeedCategory
     /// 0..3; 3 = life-threatening
     public var urgency: Int
     /// 1..255 (1 when the text gives no count; 2 for plural-without-count)
@@ -17,7 +17,7 @@ public struct NeedDraft: Equatable, Hashable, Sendable {
     public var lang: Lang
 
     public init(
-        category: Category, urgency: Int, people: Int, vulnFlags: Set<VulnFlag>, item: String, landmark: String,
+        category: NeedCategory, urgency: Int, people: Int, vulnFlags: Set<VulnFlag>, item: String, landmark: String,
         summary: String, lang: Lang
     ) {
         self.category = category; self.urgency = urgency; self.people = people; self.vulnFlags = vulnFlags

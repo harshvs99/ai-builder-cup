@@ -77,7 +77,7 @@ public struct HomeStrings: Equatable, Sendable {
     /// "Water · food · medicine · rescue · shelter" from the category names.
     public var categoriesLine: String {
         let c = CommonStrings(lang, timeZone: .autoupdatingCurrent)
-        let cats: [Category] = [.water, .food, .medical, .rescue, .shelter]
+        let cats: [NeedCategory] = [.water, .food, .medical, .rescue, .shelter]
         return cats.enumerated().map { i, cat in
             let n = c.categoryName(cat)
             return i == 0 ? n : n.lowercased()

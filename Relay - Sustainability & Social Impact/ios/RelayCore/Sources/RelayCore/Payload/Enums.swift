@@ -1,10 +1,10 @@
 import Foundation
 
-public enum Category: Int, CaseIterable, Sendable, Hashable {
+public enum NeedCategory: Int, CaseIterable, Sendable, Hashable {
     case medical = 0, rescue = 1, water = 2, food = 3, shelter = 4, missingPerson = 5, other = 6
 
     public var code: Int { rawValue }
-    public static func fromCode(_ code: Int) -> Category? { Category(rawValue: code) }
+    public static func fromCode(_ code: Int) -> NeedCategory? { NeedCategory(rawValue: code) }
 
     /// The Kotlin constant name (`MISSING_PERSON`), as used by the backend / dashboard JSON and the eval labels.
     public var name: String {

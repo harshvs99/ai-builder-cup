@@ -135,7 +135,7 @@ final class StringsTests: XCTestCase {
                 c.ago(now - 10_000, now), c.ago(now - 120_000, now), c.ago(now - 7_200_000, now), c.ago(at(17, 20), now), c.ago(at(10, 1), now),
             ]
             for u in 0...3 { all.append(c.urgencyWord(u)); all.append(c.urgencyHelp(u)) }
-            for cat in Category.allCases { all.append(c.categoryName(cat)) }
+            for cat in NeedCategory.allCases { all.append(c.categoryName(cat)) }
             for f in VulnFlag.allCases { all.append(c.vulnFlag(f)) }
             for k in RequestTimeline.Key.allCases { all.append(c.stepTitle(k)) }
             for k in [VillagerStatus.Kind.reachable, .thisPhoneGateway, .waitingForGateway, .searching, .bluetoothOff] {

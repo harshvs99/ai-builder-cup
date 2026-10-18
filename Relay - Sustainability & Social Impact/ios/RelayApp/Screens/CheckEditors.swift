@@ -38,7 +38,7 @@ private struct NeedEditor: View {
             ForEach(CheckModel.needEditorChips(flow.flow.draft, strings: strings)) { chip in
                 let category = RequestCategory(chip.category)
                 TintedChip(chip.label, systemImage: category.systemImage, tint: category.tint, isSelected: chip.isSelected) {
-                    flow.flow.setCategory(chip.category)
+                    flow.flow.pickCategory(chip.category)
                 }
             }
         }

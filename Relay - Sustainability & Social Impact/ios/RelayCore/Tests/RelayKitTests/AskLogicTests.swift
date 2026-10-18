@@ -145,7 +145,8 @@ final class AskLogicTests: XCTestCase {
     }
 
     func testWireItemFallsBackToTheCategoryWord() {
-        XCTAssertEqual("water", AskLogic.wireItem(AskDraft(category: .water)))
+        XCTAssertEqual("food and water", AskLogic.wireItem(AskDraft(category: .water)))
+        XCTAssertEqual("food", AskLogic.wireItem(AskDraft(category: .food)))
         XCTAssertEqual("medicine", AskLogic.wireItem(AskDraft(category: .medical, item: "  ")))
         XCTAssertEqual("insulin", AskLogic.wireItem(AskDraft(category: .medical, item: " insulin ")))
         XCTAssertEqual("help", AskLogic.wireItem(AskDraft()))

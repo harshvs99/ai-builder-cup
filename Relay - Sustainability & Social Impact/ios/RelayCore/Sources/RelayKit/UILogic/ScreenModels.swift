@@ -152,8 +152,8 @@ public enum VoiceUi: Equatable, Sendable {
 
 /// A category chip of New request or the Check editor.
 public struct CategoryChipModel: Equatable, Sendable, Identifiable {
-    public var id: Category { category }
-    public let category: Category
+    public var id: NeedCategory { category }
+    public let category: NeedCategory
     public let label: String
     public let isSelected: Bool
 }
@@ -206,8 +206,8 @@ public struct AskScreenModel: Equatable, Sendable {
         case .problem(let p): problem = p
         case .paused: break
         }
-        func chips(_ cats: [Category]) -> [CategoryChipModel] {
-            cats.map { CategoryChipModel(category: $0, label: s.common.categoryName($0), isSelected: d.category == $0) }
+        func chips(_ cats: [NeedCategory]) -> [CategoryChipModel] {
+            cats.map { CategoryChipModel(category: $0, label: AskLogic.chipLabel(s.common, $0), isSelected: AskLogic.isChosen(d, chip: $0)) }
         }
         let showMore = AskLogic.showsMoreCategories(d, opened: moreOpened)
         return AskScreenModel(
@@ -283,8 +283,10 @@ public struct CheckModel: Equatable, Sendable {
     public static func make(draft d: AskDraft, locUi: LocUi, accuracyM: Double?, phase: SendPhase, lang: Lang, strings s: Strings) -> CheckModel {
         let c = s.common
         let sending = phase != .idle
+        let needWords = ([AskLogic.needWords(c, d)] + d.extraCategories.map { AskLogic.chipLabel(c, $0) }).filter { !$0.isEmpty }
+        let needValue = needWords.isEmpty ? s.ask.nothingChosen : needWords.joined(separator: ", ")
         let rows = [
-            Row(editor: .need, label: s.ask.rowNeed, value: AskLogic.needWords(c, d).isEmpty ? s.ask.nothingChosen : AskLogic.needWords(c, d),
+            Row(editor: .need, label: s.ask.rowNeed, value: needValue,
                 secondary: nil, offersTurnOn: false, secondaryIsWarning: false),
             Row(editor: .people, label: s.ask.rowPeople, value: AskLogic.peopleLine(c, d.people, d.vulnFlags), secondary: nil, offersTurnOn: false,
                 secondaryIsWarning: false),
@@ -311,10 +313,10 @@ public struct CheckModel: Equatable, Sendable {
         )
     }
 
-    /// The category chips of the Need editor (all seven, main first).
+    /// The category chips of the Need editor: all seven, water and food separate.
     public static func needEditorChips(_ d: AskDraft, strings s: Strings) -> [CategoryChipModel] {
-        (AskLogic.mainCategories + AskLogic.moreCategories).map {
-            CategoryChipModel(category: $0, label: s.common.categoryName($0), isSelected: d.category == $0)
+        AskLogic.editorCategories.map {
+            CategoryChipModel(category: $0, label: s.common.categoryName($0), isSelected: d.categories.contains($0))
         }
     }
 }

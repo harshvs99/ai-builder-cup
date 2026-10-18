@@ -24,11 +24,11 @@ public struct Question: Equatable, Hashable, Sendable {
     public let id: Int
     /// stable name used in the backend / dashboard JSON (`answers: {"conscious": "no"}`)
     public let key: String
-    public let categories: Set<Category>
+    public let categories: Set<NeedCategory>
     public let options: [AnswerOption]
     private let texts: [Lang: String]
 
-    public init(_ id: Int, _ key: String, _ categories: Set<Category>, _ options: [AnswerOption], _ texts: [Lang: String]) {
+    public init(_ id: Int, _ key: String, _ categories: Set<NeedCategory>, _ options: [AnswerOption], _ texts: [Lang: String]) {
         self.id = id; self.key = key; self.categories = categories; self.options = options; self.texts = texts
     }
 
@@ -100,14 +100,14 @@ public enum QuestionBank {
     public static func byKey(_ key: String) -> Question? { byKeyTable[key] }
 
     /// The category's questions in asking order. OTHER has none.
-    public static func forCategory(_ category: Category) -> [Question] { all.filter { $0.categories.contains(category) } }
+    public static func forCategory(_ category: NeedCategory) -> [Question] { all.filter { $0.categories.contains(category) } }
 
     /// True if [id] is a bank question and [value] one of its answers.
     public static func isValid(_ id: Int, _ value: Int) -> Bool { byIdTable[id]?.option(value) != nil }
 
     /// Up to `maxAnswers` question ids for a request of [category], in asking order. Rules only: skips a question the
     /// text already answered (children or elderly flagged by the parser).
-    public static func select(_ category: Category, _ vulnFlags: Set<VulnFlag>) -> [Int] {
+    public static func select(_ category: NeedCategory, _ vulnFlags: Set<VulnFlag>) -> [Int] {
         Array(
             forCategory(category)
                 .filter { !($0.key == "children_or_elderly" && (vulnFlags.contains(.child) || vulnFlags.contains(.elderly))) }

@@ -6,7 +6,7 @@ import RelayKit
 // The DesignSystem has its own `ChainNode`; inside this module the bare name means that one, RelayKit's is spelled out.
 
 extension RequestCategory {
-    init(_ category: Category) {
+    init(_ category: NeedCategory) {
         switch category {
         case .medical: self = .medical
         case .rescue: self = .rescue

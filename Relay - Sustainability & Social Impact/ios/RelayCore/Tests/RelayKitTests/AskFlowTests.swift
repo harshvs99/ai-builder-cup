@@ -31,7 +31,7 @@ final class AskFlowTests: XCTestCase {
         flow.toggleCategory(.water)
         let n = flow.buildNeed(msgId: ids(0), originNode: ids(0), createdAtSec: 1, lang: .en, fix: nil)
         XCTAssertEqual(.water, n.category)
-        XCTAssertEqual("water", n.item)
+        XCTAssertEqual("food and water", n.item)
         // Nothing chosen at all still builds (category Other).
         XCTAssertEqual(.other, AskFlow().buildNeed(msgId: ids(0), originNode: ids(0), createdAtSec: 1, lang: .en, fix: nil).category)
     }
@@ -41,14 +41,101 @@ final class AskFlowTests: XCTestCase {
         flow.onTranscript("need wat", lang: .en)
         flow.onTranscript("need water", lang: .en)
         XCTAssertEqual(.water, flow.draft.category)
-        flow.toggleCategory(.food)
+        flow.toggleCategory(.medical)
         flow.onTranscript("need water for 5 people", lang: .en)
-        XCTAssertEqual(.food, flow.draft.category)
+        XCTAssertEqual([.water, .medical], flow.draft.categories, "a tapped chip adds to what was understood")
         XCTAssertEqual(5, flow.draft.people)
         XCTAssertEqual("need water for 5 people", flow.state.transcript)
-        // Tapping the chosen chip again returns the decision to extraction.
+        // Tapping a chosen chip again removes it.
+        flow.toggleCategory(.medical)
+        XCTAssertEqual([.water], flow.draft.categories)
+    }
+
+    func testWaterAndFoodAreOneChipAndOneTicket() {
+        var flow = AskFlow()
+        flow.toggleCategory(.water)
         flow.toggleCategory(.food)
-        XCTAssertEqual(.water, flow.draft.category)
+        XCTAssertEqual([], flow.draft.categories, "food is the same chip as water: the second tap removes it")
+        flow.toggleCategory(.food)
+        XCTAssertEqual([.food], flow.draft.categories)
+        flow.toggleCategory(.water)
+        XCTAssertEqual([], flow.draft.categories)
+        flow.toggleCategory(.water)
+        let n = flow.buildNeeds(newMsgId: { self.ids(1) }, originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil)
+        XCTAssertEqual(1, n.count)
+        XCTAssertEqual("food and water", n[0].item)
+        XCTAssertEqual(.water, n[0].category)
+    }
+
+    func testTappingAnUnderstoodChipConfirmsItInsteadOfDroppingIt() {
+        var flow = AskFlow()
+        flow.onTranscript("need water", lang: .en)
+        flow.toggleCategory(.water)
+        XCTAssertEqual([.water], flow.draft.categories)
+        XCTAssertTrue(flow.draft.edited.contains(.category))
+        flow.toggleCategory(.water)
+        flow.onTranscript("need water", lang: .en)
+        XCTAssertEqual([.water], flow.draft.categories, "removing the last chip hands the decision back to extraction")
+    }
+
+    func testEditorCanCorrectFoodToWaterAndItSticks() {
+        var flow = AskFlow()
+        flow.onTranscript("we need rice for 4 people", lang: .en)
+        XCTAssertEqual(.food, flow.draft.category)
+        XCTAssertFalse(flow.draft.item.isEmpty, "extraction filled an item for food")
+        flow.pickCategory(.water)
+        XCTAssertEqual([.water], flow.draft.categories, "the sibling is swapped, not added")
+        XCTAssertEqual("", flow.draft.item, "the item guessed for food does not follow")
+        // More speech or a re-extraction later does not bring food or rice back.
+        flow.onTranscript("we need rice for 4 people near the school", lang: .en)
+        XCTAssertEqual([.water], flow.draft.categories)
+        XCTAssertEqual("", flow.draft.item)
+        let need = flow.buildNeed(msgId: ids(0), originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil)
+        XCTAssertEqual(.water, need.category)
+        XCTAssertEqual("food and water", need.item)
+    }
+
+    func testRemovingThePrimaryPromotesTheNext() {
+        var flow = AskFlow()
+        flow.toggleCategory(.rescue)
+        flow.toggleCategory(.medical)
+        flow.toggleCategory(.rescue)
+        XCTAssertEqual([.medical], flow.draft.categories)
+    }
+
+    func testSeveralGroupsBuildOneNeedEachSharingTheRest() throws {
+        var flow = AskFlow()
+        flow.toggleCategory(.water)
+        flow.toggleCategory(.medical)
+        flow.toggleCategory(.rescue)
+        flow.setPeople(4)
+        flow.setLandmark("school")
+        flow.setUrgency(3)
+        flow.setItem("insulin")
+        var n: UInt8 = 0
+        let needs = flow.buildNeeds(newMsgId: { n += 10; return self.ids(n) }, originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil)
+        XCTAssertEqual([.water, .medical, .rescue], needs.map(\.category))
+        XCTAssertEqual(3, Set(needs.map(\.msgId)).count, "each NEED has its own id")
+        XCTAssertEqual(["insulin", "medicine", "rescue"], needs.map(\.item), "the typed item stays with the first group")
+        XCTAssertTrue(needs.allSatisfy { $0.people == 4 && $0.landmark == "school" && $0.urgency == 3 })
+        for need in needs { XCTAssertEqual(need, NeedCodec.decode(try NeedCodec.encode(need))) }
+    }
+
+    func testOneOrNoCategoryStillBuildsExactlyOneNeed() {
+        var flow = AskFlow()
+        XCTAssertEqual(1, flow.buildNeeds(newMsgId: { self.ids(1) }, originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil).count)
+        flow.toggleCategory(.water)
+        XCTAssertEqual(1, flow.buildNeeds(newMsgId: { self.ids(1) }, originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil).count)
+    }
+
+    func testAnswersGoOnlyToTheCategoryTheirQuestionBelongsTo() {
+        var flow = AskFlow()
+        flow.toggleCategory(.rescue)
+        flow.toggleCategory(.medical)
+        flow.setAnswer(3, 1)
+        let needs = flow.buildNeeds(newMsgId: { self.ids(1) }, originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil)
+        XCTAssertEqual([NeedAnswer(3, 1)], needs[0].answers)
+        XCTAssertTrue(needs[1].answers.isEmpty)
     }
 
     func testPrefillAppliesOnceAndSurvivesExtraction() {

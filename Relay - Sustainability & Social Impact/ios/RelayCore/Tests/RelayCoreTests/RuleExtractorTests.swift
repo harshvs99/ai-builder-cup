@@ -237,7 +237,7 @@ final class RuleExtractorTests: XCTestCase {
 
 extension NeedDraft {
     func check(
-        category: Category? = nil, urgency: Int? = nil, item: String? = nil, landmark: String? = nil,
+        category: NeedCategory? = nil, urgency: Int? = nil, item: String? = nil, landmark: String? = nil,
         people: Int? = nil, lang: Lang? = nil, flags: Set<VulnFlag>? = nil, text: String = "",
         file: StaticString = #filePath, line: UInt = #line
     ) {

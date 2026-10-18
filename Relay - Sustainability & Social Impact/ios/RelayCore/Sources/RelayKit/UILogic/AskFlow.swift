@@ -59,7 +59,7 @@ public struct AskFlow: Sendable {
     public mutating func setTyping(_ typing: Bool) { state.typing = typing }
 
     /// Add to request: start from an existing request's category and landmark. Applies once.
-    public mutating func prefill(category: Category, landmark: String) {
+    public mutating func prefill(category: NeedCategory, landmark: String) {
         if prefilled { return }
         prefilled = true
         var d = AskLogic.setCategory(state.draft, category)
@@ -67,15 +67,21 @@ public struct AskFlow: Sendable {
         state.draft = d
     }
 
-    /// A tap on a category chip sets it; tapping the chosen one again hands the decision back to extraction.
-    public mutating func toggleCategory(_ c: Category) {
-        let d = state.draft
-        if d.category == c && d.edited.contains(.category) {
-            let cleared = AskLogic.setCategory(d, nil)
-            state.draft = AskLogic.applyIntake(cleared, engine.extract(state.transcript, langHint: lastLang))
+    /// A tap on a category chip adds it (several can be chosen); tapping a chosen one removes it, and removing the
+    /// last hands the decision back to extraction.
+    public mutating func toggleCategory(_ c: NeedCategory) {
+        let next = AskLogic.toggleCategory(state.draft, c)
+        if next.category == nil {
+            state.draft = AskLogic.applyIntake(next, engine.extract(state.transcript, langHint: lastLang))
         } else {
-            state.draft = AskLogic.setCategory(d, c)
+            state.draft = next
         }
+    }
+
+    /// A tap on an exact category in the Need editor (water and food are separate there); a sibling is swapped.
+    public mutating func pickCategory(_ c: NeedCategory) {
+        let next = AskLogic.pickCategory(state.draft, c)
+        state.draft = next.category == nil ? AskLogic.applyIntake(next, engine.extract(state.transcript, langHint: lastLang)) : next
     }
 
     /// True when "Done, check it" may be tapped: something was said, typed or chosen.
@@ -97,7 +103,7 @@ public struct AskFlow: Sendable {
 
     // ---------------------------------------------------------------- Check and send
 
-    public mutating func setCategory(_ c: Category) { state.draft = AskLogic.setCategory(state.draft, c) }
+    public mutating func setCategory(_ c: NeedCategory) { state.draft = AskLogic.setCategory(state.draft, c) }
     public mutating func setItem(_ text: String) { state.draft = AskLogic.setItem(state.draft, text) }
     public mutating func setPeople(_ n: Int) { state.draft = AskLogic.setPeople(state.draft, n) }
     public mutating func toggleFlag(_ f: VulnFlag) { state.draft = AskLogic.toggleFlag(state.draft, f) }
@@ -126,7 +132,17 @@ public struct AskFlow: Sendable {
         self = AskFlow(engine: e)
     }
 
-    /// The wire NEED for the current draft. [fix] is the position fix or nil for "no location" (zeros, loc_acc 0).
+    /// One wire NEED per chosen category (a single one when only one or none is chosen); each gets a fresh id from
+    /// [newMsgId]. The caller submits them in order through `MeshRepository`.
+    public func buildNeeds(newMsgId: () -> [UInt8], originNode: [UInt8], createdAtSec: Int64, lang: Lang, fix: Fix?) -> [Need] {
+        AskLogic.perCategory(state.draft).map { d in
+            var f = self
+            f.state.draft = d
+            return f.buildNeed(msgId: newMsgId(), originNode: originNode, createdAtSec: createdAtSec, lang: lang, fix: fix)
+        }
+    }
+
+    /// The wire NEED for the current draft's primary category. [fix] is the position fix or nil for "no location" (zeros, loc_acc 0).
     /// The caller submits it through `MeshRepository`.
     public func buildNeed(msgId: [UInt8], originNode: [UInt8], createdAtSec: Int64, lang: Lang, fix: Fix?) -> Need {
         let d = state.draft.pruned()
