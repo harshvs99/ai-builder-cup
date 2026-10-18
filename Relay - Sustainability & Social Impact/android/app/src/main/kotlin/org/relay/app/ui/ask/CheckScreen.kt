@@ -26,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -50,6 +52,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -86,6 +89,7 @@ import org.relay.app.ui.i18n.LocalStrings
 import org.relay.app.ui.i18n.Strings
 import org.relay.app.ui.i18n.stringsFor
 import org.relay.app.ui.rememberNowMs
+import org.relay.app.ui.theme.RelayTheme
 import org.relay.core.ids.NodeId
 import org.relay.core.intake.QuestionBank
 import org.relay.core.payload.Category
@@ -114,6 +118,9 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
     val nowMs by rememberNowMs()
     var phase by remember { mutableStateOf(SendPhase.IDLE) }
     var askedLocation by remember { mutableStateOf(false) }
+    var prompt by remember { mutableStateOf<NoLocationPrompt?>(null) }
+    var confirmArmed by remember { mutableStateOf(false) }
+    var openWhere by remember { mutableStateOf(false) }
 
     // ---- location: re-checked on resume (back from settings) and when a permission result arrives
     var hasPerm by remember { mutableStateOf(BlePermissions.hasLocation(ctx)) }
@@ -157,16 +164,30 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
         }
     }
 
-    fun doSend() {
+    // The control room cannot act on a request it cannot place: without a fix, ask before anything leaves.
+    // [force] = the person chose "Send without location" in the dialog.
+    fun doSend(force: Boolean = false) {
         if (phase != SendPhase.IDLE) return
         scope.launch {
             LocationProvider.start(ctx) // reopen the listening window; a no-op without permission or Location
             var current: Fix? = LocationProvider.fix.value?.takeIf { FixPolicy.isUsable(it, System.currentTimeMillis()) }
-            if (current == null) {
+            if (current == null && !force) {
                 val ui = LocationState.ui(BlePermissions.hasLocation(ctx), LocationProvider.isSystemEnabled(ctx), null, System.currentTimeMillis())
                 if (LocationState.shouldWaitForFix(ui)) {
                     phase = SendPhase.LOCATING
                     current = FixWait.await(LocationProvider.fix, MutableStateFlow(false), SEND_FIX_WAIT_MS)
+                    phase = SendPhase.IDLE
+                }
+            }
+            if (current == null && !force) {
+                val p = NoLocationLogic.promptOnSend(
+                    permissionGranted = BlePermissions.hasLocation(ctx), servicesEnabled = LocationProvider.isSystemEnabled(ctx),
+                    fixPresent = false, waiting = false, landmarkEmpty = vm.state.value.draft.landmark.isBlank(),
+                )
+                if (p != null) {
+                    confirmArmed = false
+                    prompt = p
+                    return@launch
                 }
             }
             val need = vm.buildNeed(
@@ -180,8 +201,27 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
         }
     }
 
+    // Dialog title and body are also spoken when "Read messages aloud" is on.
+    LaunchedEffect(prompt) {
+        val p = prompt ?: return@LaunchedEffect
+        if (settings.readAloud) speaker?.speak(noLocationSpeech(s, p, state.draft.landmark), lang)
+    }
+
     CheckContent(
         s = s, lang = lang, draft = state.draft, locUi = locUi, accuracyM = fix?.accuracyM, phase = phase,
+        prompt = prompt, confirmArmed = confirmArmed,
+        onPromptTurnOn = {
+            prompt = null
+            if (hasPerm && locationOn) LocationProvider.start(ctx) else turnOnLocation()
+        },
+        onPromptLandmark = { prompt = null; openWhere = true },
+        onPromptSendAnyway = {
+            val p = prompt
+            if (p != null && p.confirmSendAnyway && !confirmArmed) confirmArmed = true
+            else { prompt = null; confirmArmed = false; doSend(force = true) }
+        },
+        onPromptDismiss = { prompt = null; confirmArmed = false },
+        openWhereEditor = openWhere, onWhereEditorOpened = { openWhere = false },
         onBack = nav::back,
         onTurnOnLocation = ::turnOnLocation,
         onSetCategory = vm::setCategory,
@@ -196,7 +236,7 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
             if (speaker?.speak(text, lang) != true) Toast.makeText(ctx, s.ask.noVoiceInstalled, Toast.LENGTH_SHORT).show()
         },
         // Location is asked at the first Send; the NEED goes out whatever the answer, with the honest no-location state.
-        onSend = { if (!perms.hasLocation()) perms.ensureLocation { doSend() } else doSend() },
+        onSend = { if (!perms.hasLocation()) { askedLocation = true; perms.ensureLocation { doSend() } } else doSend() },
         onChangeSomething = nav::back,
     )
 }
@@ -226,8 +266,17 @@ fun CheckContent(
     onSend: () -> Unit,
     onChangeSomething: () -> Unit,
     initialEditor: CheckEditor? = null,
+    prompt: NoLocationPrompt? = null,
+    confirmArmed: Boolean = false,
+    onPromptTurnOn: () -> Unit = {},
+    onPromptLandmark: () -> Unit = {},
+    onPromptSendAnyway: () -> Unit = {},
+    onPromptDismiss: () -> Unit = {},
+    openWhereEditor: Boolean = false,
+    onWhereEditorOpened: () -> Unit = {},
 ) {
     var editor by remember { mutableStateOf(initialEditor) }
+    LaunchedEffect(openWhereEditor) { if (openWhereEditor) { editor = CheckEditor.WHERE; onWhereEditorOpened() } }
     val common = s.common
     val sending = phase != SendPhase.IDLE
 
@@ -252,9 +301,16 @@ fun CheckContent(
                     s.ask.rowWhere,
                     if (draft.landmark.isBlank()) s.ask.noLandmark else s.ask.nearLandmark(draft.landmark),
                     { editor = CheckEditor.WHERE },
-                    secondary = locationText(s, locUi, accuracyM),
-                    secondaryAction = if (locUi == LocUi.OFF || locUi == LocUi.NO_PERMISSION) {
-                        { TextButton(onClick = onTurnOnLocation, modifier = Modifier.heightIn(min = 48.dp)) { Text(common.turnOn) } }
+                    secondary = if (locUi == LocUi.READY) locationText(s, locUi, accuracyM) else null,
+                    secondaryAction = if (locUi != LocUi.READY) {
+                        {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                WarningLine(s, locationText(s, locUi, accuracyM), Modifier.weight(1f))
+                                if (locUi == LocUi.OFF || locUi == LocUi.NO_PERMISSION) {
+                                    TextButton(onClick = onTurnOnLocation, modifier = Modifier.heightIn(min = 48.dp)) { Text(common.turnOn) }
+                                }
+                            }
+                        }
                     } else null,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -313,6 +369,10 @@ fun CheckContent(
         }
     }
 
+    prompt?.let { p ->
+        NoLocationDialog(s, p, draft.landmark, confirmArmed, onPromptTurnOn, onPromptLandmark, onPromptSendAnyway, onPromptDismiss)
+    }
+
     editor?.let { which ->
         EditorSheet(onDismiss = { editor = null }, doneLabel = common.done) {
             when (which) {
@@ -326,10 +386,59 @@ fun CheckContent(
 }
 
 /** "GPS · about 40 m accuracy", "Getting location…", or the honest "Location is off" line. */
-private fun locationText(s: Strings, ui: LocUi, accuracyM: Float?): String = when (ui) {
-    LocUi.READY -> if (accuracyM == null || accuracyM.isNaN() || accuracyM < 0f) "GPS" else s.ask.locationAccuracy(accuracyM.roundToInt().coerceAtLeast(1))
-    LocUi.ACQUIRING -> s.ask.locationAcquiring
-    LocUi.OFF, LocUi.NO_PERMISSION -> s.ask.locationOff
+private fun locationText(s: Strings, ui: LocUi, accuracyM: Float?): String =
+    when (NoLocationLogic.reason(ui != LocUi.NO_PERMISSION, ui != LocUi.OFF && ui != LocUi.NO_PERMISSION, ui == LocUi.READY)) {
+        null -> if (accuracyM == null || accuracyM.isNaN() || accuracyM < 0f) "GPS" else s.ask.locationAccuracy(accuracyM.roundToInt().coerceAtLeast(1))
+        NoLocationReason.PERMISSION_OFF -> s.ask.whereReasonPermissionOff
+        NoLocationReason.SERVICES_OFF -> s.ask.whereReasonServicesOff
+        NoLocationReason.FINDING -> s.ask.whereReasonFinding
+    }
+
+/** Warning icon + amber text: "there is no GPS fix, and here is why". */
+@Composable
+private fun WarningLine(s: Strings, text: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Icons.Filled.Warning, contentDescription = s.ask.noLocationWarningA11y, tint = RelayTheme.colors.warningText, modifier = Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = RelayTheme.colors.warningText)
+    }
+}
+
+private fun noLocationBody(s: Strings, p: NoLocationPrompt, landmark: String): String =
+    if (p.bodyWithLandmark) s.ask.noLocationBodyWithLandmark(landmark.trim()) else s.ask.noLocationBodyNoLandmark
+
+private fun noLocationSpeech(s: Strings, p: NoLocationPrompt, landmark: String): String =
+    s.ask.noLocationTitle + ". " + noLocationBody(s, p, landmark)
+
+/** Shown on Send when there is no fix. Never blocks: "Send without location" is always there. */
+@Composable
+private fun NoLocationDialog(
+    s: Strings, p: NoLocationPrompt, landmark: String, confirmArmed: Boolean,
+    onTurnOn: () -> Unit, onLandmark: () -> Unit, onSendAnyway: () -> Unit, onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(s.ask.noLocationTitle, modifier = Modifier.semantics { heading() }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(noLocationBody(s, p, landmark), style = MaterialTheme.typography.bodyLarge)
+                PillButton(s.ask.turnOnLocation, onTurnOn)
+                PillButton(
+                    if (p.addLandmark) s.ask.addLandmark else s.ask.changeLandmark, onLandmark, style = PillStyle.Tonal,
+                )
+                TextButton(
+                    onClick = onSendAnyway,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        if (p.confirmSendAnyway && confirmArmed) s.ask.sendAnywayConfirm else s.ask.sendWithoutLocation,
+                        color = if (confirmArmed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+    )
 }
 
 // ================================================================ bottom-sheet editors (one field each)
