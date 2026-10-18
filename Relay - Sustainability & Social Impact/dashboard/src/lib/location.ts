@@ -1,4 +1,5 @@
 import type { Ticket } from '../types';
+import { tierOf } from './sort';
 
 export type MappableTicket = Ticket & { lat: number; lon: number };
 
@@ -59,6 +60,8 @@ export function toFeatures(tickets: readonly Ticket[], selected: number | null):
         ticket_no: t.ticket_no,
         category: t.category,
         score: t.priority_score,
+        tier: tierOf(t),
+        people: t.people,
         dispatched: t.status !== 'OPEN' ? 1 : 0,
         selected: t.ticket_no === selected ? 1 : 0,
       },

@@ -210,6 +210,7 @@ def test_ticket_json_shape_and_detail(client):
     det = client.get("/v1/tickets/101").json()
     assert det["packets"] == [{"msg_id": need.msg_id.hex(), "origin_node": need.origin_node.hex(),
                                "gateway_node": GATEWAY, "hops": 2, "loc_acc": 1, "received_at": T0 + 60,
+                               "reported_at": T0,
                                "summary": "mother needs insulin"}]
     assert {k: v for k, v in det.items() if k != "packets"} == lst
     assert client.get("/v1/tickets/12345").status_code == 404
@@ -227,6 +228,18 @@ def test_stats_and_gateway_online_window(client, clock):
     assert client.get("/v1/stats").json()["open_by_category"]["MEDICAL"] == 0
     clock.t += 61
     assert client.get("/v1/stats").json()["gateways_online"] == 0
+
+
+def test_gateways_list(client, clock):
+    assert client.get("/v1/gateways").json()["gateways"] == []
+    sync(client, [need_frame(category=0)[0]])
+    clock.t += 30
+    sync(client, [], gateway="0f1e2d3c4b5a6978")
+    g = client.get("/v1/gateways").json()
+    assert [x["node"] for x in g["gateways"]] == ["0f1e2d3c4b5a6978", GATEWAY]
+    assert all(x["online"] for x in g["gateways"])
+    clock.t += 45
+    assert [x["online"] for x in client.get("/v1/gateways").json()["gateways"]] == [True, False]
 
 
 def test_hops_clamped_and_bad_device_clock_sanitised(client, clock):

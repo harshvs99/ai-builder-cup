@@ -20,6 +20,7 @@ CONTROL_ROOM = [
     ("POST", "/v1/sitreps/run"),
     ("GET", "/v1/sitreps/latest"),
     ("GET", "/v1/stats"),
+    ("GET", "/v1/gateways"),
 ]
 
 
