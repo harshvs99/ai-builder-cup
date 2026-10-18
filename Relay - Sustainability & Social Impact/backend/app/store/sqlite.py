@@ -21,6 +21,7 @@ from .base import (
     ADVANCE_FROM,
     HintIn,
     JSON_COLUMNS,
+    TEXT_COLUMNS,
     TICKET_COLUMNS,
     AckSpec,
     AdvanceResult,
@@ -234,7 +235,7 @@ class SqliteStore:
             conn.executescript(SCHEMA)
             _widen_status_check(conn)
             have = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
-            for col in JSON_COLUMNS:  # databases created before these columns existed
+            for col in (*JSON_COLUMNS, *TEXT_COLUMNS):  # databases created before these columns existed
                 if col not in have:
                     conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
             conn.execute(_SEED_SEQUENCE)

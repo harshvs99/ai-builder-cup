@@ -56,6 +56,9 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
 | `BROADCAST_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates broadcasts into the five app languages and, in a separate call, checks each translation against the source |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
+| `RELAY_EMBED_MERGE` | on | `off` disables embedding-based duplicate merging (rules only). Also off when no Gemini credentials. Embeddings replace only the exact item-text test; category, 200 m, 6 h and no-fix gates still apply |
+| `RELAY_EMBED_MODEL` | `gemini-embedding-001` | embedding model (256 dims, `SEMANTIC_SIMILARITY`); uses `GEMINI_API_KEY` or Vertex like the agent |
+| `RELAY_EMBED_THRESHOLD` | `0.80` | cosine similarity at which two items count as the same need. A starting guess: tune on multilingual pairs before the demo |
 | `PORT` | `8080` | Docker/Cloud Run listen port |
 
 ## Layout
