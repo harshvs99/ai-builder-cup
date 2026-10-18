@@ -1,6 +1,6 @@
 import type { Ticket } from '../types';
 import { formatRelative } from '../lib/time';
-import { isMappable } from '../lib/location';
+import { hasMeshEstimate, isMappable, meshEstimateShort } from '../lib/location';
 import {
   QUEUE_FILTERS,
   SORT_LABEL,
@@ -29,6 +29,7 @@ interface Props {
 
 function where(t: Ticket): string {
   const lm = t.landmark?.trim() ? `near ${t.landmark.trim()}` : null;
+  if (hasMeshEstimate(t)) return [lm, `no GPS · approx. ${meshEstimateShort(t.geo)}`].filter(Boolean).join(' · ');
   if (!isMappable(t)) return [lm, 'no location'].filter(Boolean).join(' · ');
   return [lm, t.loc_acc_m ? `GPS ${t.loc_acc_m.replace('<', '±')}` : 'GPS'].filter(Boolean).join(' · ');
 }

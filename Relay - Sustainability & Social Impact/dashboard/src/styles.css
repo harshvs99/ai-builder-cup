@@ -321,3 +321,24 @@ code { font-family: var(--mono); font-size: 12px; }
   .grid { display: block; overflow-x: auto; }
   .page { padding: 18px 16px 32px; }
 }
+
+/* Mesh-estimated position: approximate, never a GPS fix */
+.approx-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 650;
+  color: var(--warn); border: 1px dashed currentColor;
+}
+.est-line { margin-top: 6px; }
+/* Dashed centre marker on the map; --c is the urgency colour, as for GPS dots */
+.est-marker {
+  --c: #9aa3ad;
+  width: 22px; height: 22px; border-radius: 50%; cursor: pointer; position: relative;
+  border: 3px dashed var(--c);
+  background: color-mix(in srgb, var(--c) 28%, transparent);
+  box-shadow: 0 0 0 1.5px var(--panel);
+}
+.est-marker::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px;
+  margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--c);
+}
+.est-marker.selected { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--panel); }
+.est-marker.dispatched { opacity: 0.5; }

@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import {
   LngLatBounds,
   Map as MapLibreMap,
+  Marker,
   setWorkerUrl,
   type ExpressionSpecification,
   type GeoJSONSource,
@@ -13,8 +14,11 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Team, Ticket } from '../types';
 import type { Theme } from '../hooks';
 import { PULSE_MS } from '../hooks';
-import { boundsOf, isMappable, toFeatures } from '../lib/location';
+import {
+  estimateBounds, estimatedTickets, hasMeshEstimate, isMappable, plottableBounds, toEstimateAreas, toFeatures,
+} from '../lib/location';
 import { tierOf } from '../lib/sort';
+import { ticketRef } from '../lib/triage';
 
 setWorkerUrl(workerUrl);
 
@@ -99,6 +103,7 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
   const freshRef = useRef(fresh);
   const onSelectRef = useRef(onSelect);
   const raf = useRef<number | null>(null);
+  const estMarkers = useRef(new Map<number, { marker: Marker; el: HTMLDivElement }>());
   ticketsRef.current = tickets;
   teamsRef.current = teams;
   layersRef.current = layers;
@@ -109,7 +114,7 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
 
   const fitAll = () => {
     const map = mapRef.current;
-    const box4 = boundsOf(ticketsRef.current); // only tickets with a GPS fix
+    const box4 = plottableBounds(ticketsRef.current); // GPS fixes + mesh-estimate circles
     if (!map || !box4) return;
     const b = new LngLatBounds([box4[0], box4[1]], [box4[2], box4[3]]);
     const ne = b.getNorthEast();
@@ -122,7 +127,55 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
   };
   const centreOn = (t: Ticket) => {
     const map = mapRef.current;
-    if (map && isMappable(t)) map.easeTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 13), duration: 500 });
+    if (!map) return;
+    if (isMappable(t)) {
+      map.easeTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 13), duration: 500 });
+    } else if (hasMeshEstimate(t)) {
+      // Zoom to the whole uncertainty disc (a point when the backend sent no radius).
+      map.resize(); // the detail panel may have just narrowed the map pane
+      const [w, s, e, n] = estimateBounds(t.geo);
+      if (e - w < 1e-7 && n - s < 1e-7) {
+        map.easeTo({ center: [t.geo.lon, t.geo.lat], zoom: Math.max(map.getZoom(), 15), duration: 500 });
+      } else {
+        map.fitBounds([[w, s], [e, n]], { padding: 90, maxZoom: 18, duration: 500 });
+      }
+    }
+  };
+
+  /** Dashed centre markers for mesh-estimated tickets (circle layers cannot be dashed). */
+  const syncEstimateMarkers = (map: MapLibreMap) => {
+    const live = new Set<number>();
+    for (const t of estimatedTickets(ticketsRef.current)) {
+      live.add(t.ticket_no);
+      let entry = estMarkers.current.get(t.ticket_no);
+      if (!entry) {
+        const el = document.createElement('div');
+        el.className = 'est-marker';
+        el.setAttribute('role', 'button');
+        const no = t.ticket_no;
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          onSelectRef.current(no);
+        });
+        entry = { marker: new Marker({ element: el }).setLngLat([t.geo.lon, t.geo.lat]).addTo(map), el };
+        estMarkers.current.set(no, entry);
+      }
+      const d = Math.round(peopleRadius(t.people) * 2);
+      entry.marker.setLngLat([t.geo.lon, t.geo.lat]);
+      entry.el.style.setProperty('--c', TIER_COLOR[tierOf(t)]);
+      entry.el.style.width = entry.el.style.height = `${d}px`;
+      entry.el.style.display = layersRef.current.requests ? '' : 'none';
+      entry.el.classList.toggle('selected', t.ticket_no === selectedRef.current);
+      entry.el.classList.toggle('dispatched', t.status !== 'OPEN');
+      entry.el.title = `${ticketRef(t.ticket_no)}: approximate location (estimate, not a GPS fix)`;
+      entry.el.setAttribute('aria-label', `${ticketRef(t.ticket_no)} approximate location`);
+    }
+    for (const [no, { marker }] of estMarkers.current) {
+      if (!live.has(no)) {
+        marker.remove();
+        estMarkers.current.delete(no);
+      }
+    }
   };
   useImperativeHandle(ref, () => ({
     fitAll,
@@ -135,7 +188,11 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
     if (!map || !ready.current) return;
     (map.getSource('tickets') as GeoJSONSource | undefined)?.setData(toFeatures(ticketsRef.current, selectedRef.current));
     (map.getSource('teams') as GeoJSONSource | undefined)?.setData(teamFeatures(teamsRef.current));
-    if (!fitted.current && ticketsRef.current.some(isMappable)) {
+    (map.getSource('estimates') as GeoJSONSource | undefined)?.setData(
+      toEstimateAreas(ticketsRef.current, selectedRef.current),
+    );
+    syncEstimateMarkers(map);
+    if (!fitted.current && ticketsRef.current.some((t) => isMappable(t) || hasMeshEstimate(t))) {
       fitted.current = true; // first load only
       fitAll();
     }
@@ -146,9 +203,10 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
     if (!map || !ready.current) return;
     const l = layersRef.current;
     const vis = (on: boolean) => (on ? 'visible' : 'none');
-    for (const id of ['tickets-circle', 'pulse-ring']) map.setLayoutProperty(id, 'visibility', vis(l.requests));
+    for (const id of ['tickets-circle', 'pulse-ring', 'estimate-fill', 'estimate-line']) map.setLayoutProperty(id, 'visibility', vis(l.requests));
     map.setLayoutProperty('teams-base', 'visibility', vis(l.teams));
     map.setLayoutProperty('heat', 'visibility', vis(l.heat));
+    syncEstimateMarkers(map);
   };
 
   const applyTheme = () => {
@@ -209,6 +267,28 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
       map.addSource('tickets', { type: 'geojson', data: EMPTY });
       map.addSource('pulses', { type: 'geojson', data: EMPTY });
       map.addSource('teams', { type: 'geojson', data: EMPTY });
+      map.addSource('estimates', { type: 'geojson', data: EMPTY });
+      // Mesh-estimate uncertainty discs: translucent fill + dashed outline, beneath the GPS dots.
+      map.addLayer({
+        id: 'estimate-fill',
+        type: 'fill',
+        source: 'estimates',
+        paint: {
+          'fill-color': colorExpr,
+          'fill-opacity': ['case', ['==', ['get', 'selected'], 1], 0.2, ['==', ['get', 'dispatched'], 1], 0.07, 0.14],
+        },
+      });
+      map.addLayer({
+        id: 'estimate-line',
+        type: 'line',
+        source: 'estimates',
+        paint: {
+          'line-color': colorExpr,
+          'line-width': ['case', ['==', ['get', 'selected'], 1], 3, 2],
+          'line-dasharray': [2, 2],
+          'line-opacity': ['case', ['==', ['get', 'dispatched'], 1], 0.45, 0.95],
+        },
+      });
       map.addLayer({
         id: 'heat',
         type: 'heatmap',
@@ -267,6 +347,12 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
         const no = f?.properties?.ticket_no;
         if (typeof no === 'number') onSelectRef.current(no);
       });
+      map.on('click', 'estimate-fill', (e: MapMouseEvent) => {
+        // A GPS dot on top wins; the disc only handles clicks on its own area.
+        if (map.queryRenderedFeatures(e.point, { layers: ['tickets-circle'] }).length > 0) return;
+        const no = map.queryRenderedFeatures(e.point, { layers: ['estimate-fill'] })[0]?.properties?.ticket_no;
+        if (typeof no === 'number') onSelectRef.current(no);
+      });
       map.on('mouseenter', 'tickets-circle', () => (map.getCanvas().style.cursor = 'pointer'));
       map.on('mouseleave', 'tickets-circle', () => (map.getCanvas().style.cursor = ''));
       ready.current = true;
@@ -281,6 +367,7 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
 
     return () => {
       ro.disconnect();
+      estMarkers.current.clear();
       if (raf.current !== null) cancelAnimationFrame(raf.current);
       raf.current = null;
       ready.current = false;

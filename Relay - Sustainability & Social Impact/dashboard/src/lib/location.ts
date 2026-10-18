@@ -197,6 +197,7 @@ export function toEstimateAreas(tickets: readonly Ticket[], selected: number | n
       properties: {
         ticket_no: t.ticket_no,
         category: t.category,
+        tier: tierOf(t),
         radius_m: r,
         dispatched: t.status !== 'OPEN' ? 1 : 0,
         selected: t.ticket_no === selected ? 1 : 0,

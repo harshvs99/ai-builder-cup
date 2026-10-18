@@ -208,7 +208,7 @@ describe('estimate geometry for the map', () => {
     expect(fc.features).toHaveLength(1);
     const f = fc.features[0]!;
     expect(f.id).toBe(9);
-    expect(f.properties).toMatchObject({ ticket_no: 9, selected: 1, radius_m: 130, category: 'MEDICAL' });
+    expect(f.properties).toMatchObject({ ticket_no: 9, selected: 1, radius_m: 130, category: 'MEDICAL', tier: 'P2' });
     expect(f.geometry.type).toBe('Polygon');
     const ring = (f.geometry as GeoJSON.Polygon).coordinates[0]!;
     expect(ring[0]).toEqual(ring[ring.length - 1]);

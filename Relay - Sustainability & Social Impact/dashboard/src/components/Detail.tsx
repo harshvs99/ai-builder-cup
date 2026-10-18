@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { Team, Ticket } from '../types';
 import { formatRelative } from '../lib/time';
-import { accuracyLabel, isMappable } from '../lib/location';
+import { accuracyLabel, hasMeshEstimate, isMappable, meshEstimateLabel } from '../lib/location';
 import {
   capitalise,
   clockTime,
@@ -125,9 +125,19 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
               <button type="button" className="link" onClick={onCentre}>Centre map</button>
             </>
           ) : (
-            <span className="warn"> · no GPS fix, locate through the landmark or ward office</span>
+            <span className="warn"> · no GPS fix{hasMeshEstimate(t) ? '' : ', locate through the landmark or ward office'}</span>
           )}
         </p>
+        {hasMeshEstimate(t) && (
+          <p className="est-line">
+            <span className="approx-badge" title="Estimated from nearby relay phones, not a GPS fix">Approximate</span>{' '}
+            <b>{meshEstimateLabel(t.geo)}</b>{' '}
+            <button type="button" className="link" onClick={onCentre}>Zoom to area</button>
+            <span className="muted small block">
+              Dashed circle on the map, around {t.geo.lat.toFixed(4)}, {t.geo.lon.toFixed(4)}. Confirm with the ward office before sending a team.
+            </span>
+          </p>
+        )}
 
         <h3>Mesh path</h3>
         <p className="path">

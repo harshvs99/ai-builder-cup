@@ -6,7 +6,7 @@ import { Detail, type DetailAction } from './components/Detail';
 import { GatewaysView, SitrepView, TeamsView } from './components/Views';
 import { useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
 import { sortTickets } from './lib/sort';
-import { isMappable } from './lib/location';
+import { countEstimated, hasMeshEstimate, isMappable } from './lib/location';
 import { QUEUE_FILTERS, matchesFilter, matchesSearch, orderQueue, ticketRef, type SortKey } from './lib/triage';
 import type { Ticket } from './types';
 
@@ -162,9 +162,14 @@ export function App() {
             {noLocation.length > 0 && (
               <div className="noloc-strip">
                 <span className="muted">No location:</span>
+                {countEstimated(noLocation) > 0 && (
+                  <span className="muted small" title="Approximate position from nearby phones, not a GPS fix">
+                    ({countEstimated(noLocation)} approx.)
+                  </span>
+                )}
                 {noLocation.slice(0, 2).map((t) => (
                   <button key={t.ticket_no} type="button" className="chip" onClick={() => select(t.ticket_no)}>
-                    {ticketRef(t.ticket_no)}{t.landmark ? ` · ${t.landmark}` : ''}
+                    {hasMeshEstimate(t) ? '≈ ' : ''}{ticketRef(t.ticket_no)}{t.landmark ? ` · ${t.landmark}` : ''}
                   </button>
                 ))}
                 {noLocation.length > 2 && (
