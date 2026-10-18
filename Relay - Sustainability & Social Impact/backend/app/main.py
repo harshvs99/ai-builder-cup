@@ -128,7 +128,7 @@ def _ticket_json(row: dict[str, Any], links: list[dict[str, Any]]) -> dict[str, 
     if not loc["has_location"]:  # rows triaged before no-fix handling carry "0.00000, 0.00000" in their text
         draft_en, draft_local = (scrub_legacy_draft(d, row["landmark"]) for d in (draft_en, draft_local))
         reason = add_no_fix_note(reason, row["landmark"])
-    return {
+    out = {
         "ticket_no": row["ticket_no"],
         "category": row["category"],
         "item": row["item"],
@@ -150,6 +150,12 @@ def _ticket_json(row: dict[str, Any], links: list[dict[str, Any]]) -> dict[str, 
         "gateways": gateways,
         "msg_ids": [lk["msg_id"] for lk in links],
     }
+    # Optional fields, absent when unset. ``geo`` is an estimate from the landmark for a ticket with no
+    # GPS fix (has_location stays false); ``reclass`` is {from, to, reason} and ``category`` is the new one.
+    for key in ("geo", "reclass"):
+        if row.get(key):
+            out[key] = row[key]
+    return out
 
 
 def _packet_json(p: dict[str, Any]) -> dict[str, Any]:

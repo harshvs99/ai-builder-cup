@@ -32,7 +32,11 @@ TICKET_COLUMNS = {
     "vuln_flags", "lang", "report_count", "priority_score", "priority_tier", "tier_adjust",
     "priority_reason", "status", "dispatch_draft_en", "dispatch_draft_local",
     "first_reported_at", "max_hops", "created_at", "updated_at",
+    # JSON objects, null when unset: estimated location from a landmark; category correction
+    "geo", "reclass",
 }
+# Columns added after the first release: SQLite adds them to existing databases on connect.
+JSON_COLUMNS = ("geo", "reclass")
 
 # What a sync said about one frame in ``record_packets``.
 RecordStatus = Literal["new", "pending", "done"]

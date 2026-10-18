@@ -279,7 +279,8 @@ class FirestoreStore:
             snap = tref.get(transaction=txn)
             if not snap.exists or snap.get("status") != "OPEN" or snap.get("report_count") != report_count:
                 return False
-            txn.update(tref, fields)
+            # the ticket is OPEN here, so its merge-lookup category follows a reclassification
+            txn.update(tref, {**fields, "open_category": fields["category"]} if "category" in fields else fields)
             return True
 
         return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
