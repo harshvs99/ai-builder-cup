@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .codec import VULN_NAMES
+from .codec import PHOTO_TAG_NAMES, VULN_NAMES
 
 CATEGORY_WEIGHTS = {
     "RESCUE": 5.0,
@@ -55,6 +55,22 @@ def shift_tier(tier: str, delta: int) -> str:
     """Move ``delta`` steps (negative = more urgent), clamped to P1..P4."""
     idx = TIERS.index(tier) + delta
     return TIERS[max(0, min(len(TIERS) - 1, idx))]
+
+
+def photo_note(photo_tags: dict[str, int] | None) -> str:
+    """"Photo shows: people stranded, floodwater." from a ticket's tag counts, most-reported first (bit order breaks
+    ties). A note on the reason only: tags are what a phone's classifier saw, so they never move the score."""
+    if not photo_tags:
+        return ""
+    order = {k: i for i, k in enumerate(PHOTO_TAG_NAMES)}
+    keys = sorted(photo_tags, key=lambda k: (-photo_tags[k], order.get(k, len(order))))[:4]
+    return "Photo shows: " + ", ".join(k.replace("_", " ") for k in keys) + "."
+
+
+def add_photo_note(reason: str, photo_tags: dict[str, int] | None) -> str:
+    """Priority reason plus the photo note (idempotent)."""
+    note = photo_note(photo_tags)
+    return reason if not note or "Photo shows:" in reason else f"{reason} {note}"
 
 
 def vuln_names(flags: int) -> list[str]:

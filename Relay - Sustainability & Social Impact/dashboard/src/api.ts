@@ -1,7 +1,7 @@
 import { parseLanguages, type Language } from './lib/languages';
 import { loadOperatorKey } from './lib/operatorKey';
 import type {
-  Announcement, CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, ShelterEntry, ShelterList, ShelterPublishResult, Sitrep, Stats, Team, Ticket,
+  Announcement, CapImportResult, DamageMap, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, RecoverReport, ShelterEntry, ShelterList, ShelterPublishResult, Sitrep, Stats, Team, Ticket,
 } from './types';
 
 export class ApiError extends Error {
@@ -57,6 +57,18 @@ export function createClient(base: string, operatorKey?: string | null) {
     }
   }
 
+  /** A file download (evidence pack): fetched with the operator key, so it cannot be a bare link. */
+  async function requestBlob(path: string): Promise<Blob> {
+    let res: Response;
+    try {
+      res = await fetch(`${root}${path}`, operatorKey ? { headers: { 'X-Operator-Key': operatorKey } } : undefined);
+    } catch (e) {
+      throw new ApiError(0, `Backend unreachable (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.blob();
+  }
+
   return {
     async listTickets(signal?: AbortSignal): Promise<Ticket[]> {
       const body = await request<{ tickets?: Ticket[] }>('/v1/tickets', { signal });
@@ -75,6 +87,10 @@ export function createClient(base: string, operatorKey?: string | null) {
     },
     resolve(no: number): Promise<Ticket> {
       return request<Ticket>(`/v1/tickets/${no}/resolve`, { method: 'POST' });
+    },
+    /** Estimate a no-fix ticket's position from its landmark now (gazetteer, then Google Maps). */
+    locate(no: number): Promise<Ticket> {
+      return request<Ticket>(`/v1/tickets/${no}/locate`, { method: 'POST' });
     },
     /** Propose a team for one open ticket; other tickets' proposals are left alone. */
     proposeDispatch(ticketNo: number): Promise<{ proposals: unknown[] }> {
@@ -153,6 +169,20 @@ export function createClient(base: string, operatorKey?: string | null) {
     },
     previewPlan(body: PlanRequest): Promise<ReadyPlan> {
       return request<ReadyPlan>('/v1/ready/plan/preview', post(body));
+    },
+    /** Damage map by village for a district id or "all". */
+    getDamage(district: string, signal?: AbortSignal): Promise<DamageMap> {
+      return request<DamageMap>(`/v1/recover/damage?district=${encodeURIComponent(district)}`, { signal });
+    },
+    /** Relief and insurer report, generated now and not stored. */
+    recoverReport(district: string): Promise<RecoverReport> {
+      return request<RecoverReport>(`/v1/recover/report?district=${encodeURIComponent(district)}`, { method: 'POST' });
+    },
+    ticketEvidence(no: number): Promise<Blob> {
+      return requestBlob(`/v1/recover/evidence/${no}?download=1`);
+    },
+    areaEvidence(areaId: string, district: string): Promise<Blob> {
+      return requestBlob(`/v1/recover/evidence?area=${encodeURIComponent(areaId)}&district=${encodeURIComponent(district)}&download=1`);
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });

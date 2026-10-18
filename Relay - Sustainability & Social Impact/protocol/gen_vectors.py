@@ -73,16 +73,31 @@ def answers_bytes(answers):
     return bytes([answer_byte(q, v) for q, v in answers] + [0] * (3 - len(answers)))
 
 
+# Photo tag table (SPEC 5.1): bit -> JSON key. The phone classifies a photo on-device into these; only the
+# 16-bit mask travels, never pixels. Bits are never renumbered; bit 15 is reserved and must be 0.
+PHOTO_TAGS = (
+    "floodwater", "house_damaged", "house_collapsed", "roof_damaged", "person_injured", "people_stranded",
+    "road_blocked", "tree_fallen", "power_line_down", "boat_damaged", "crops_damaged", "livestock_lost",
+    "vehicle_damaged", "fire", "landslide",
+)
+
+
+def tags_mask(keys):
+    return sum(1 << PHOTO_TAGS.index(k) for k in keys)
+
+
 def need_payload(n):
     answers = n.get("answers") or []
+    tags = tags_mask(n.get("photo_tags") or [])
     return (
         struct.pack(
             ">B8s8sIBBBBiiBB",
-            2 if answers else 1, n["msg_id"], n["origin_node"], n["created_at"], n["category"], n["urgency"],
+            3 if tags else 2 if answers else 1, n["msg_id"], n["origin_node"], n["created_at"], n["category"], n["urgency"],
             n["people"], n["vuln_flags"], e5(n["lat"]), e5(n["lon"]), n["loc_acc"], n["lang"],
         )
         + lp(n["item"], 16) + lp(n["landmark"], 24) + lp(n["summary"], 40)
-        + (answers_bytes(answers) if answers else b"")
+        + (answers_bytes(answers) if answers or tags else b"")
+        + (struct.pack(">H", tags) if tags else b"")
     )
 
 
@@ -266,6 +281,49 @@ need5 = dict(
 p5 = v2_vector("need_v2_max_size", need5, 7, TS + 40, B)
 assert len(p5) == 121
 
+# NEED payload_version 3: v1 layout + 3 answer bytes (all-empty allowed) + photo_tags u16 BE. Appended after the v2 vectors.
+def v3_vector(name, need, ttl, ts, sender):
+    pl = need_payload(need)
+    vectors.append({
+        "name": name, "kind": "NEED",
+        "fields": {**{k: (H(v) if isinstance(v, bytes) else v) for k, v in need.items() if k not in ("answers", "photo_tags")},
+                   "lat_e5": e5(need["lat"]), "lon_e5": e5(need["lon"]),
+                   "answers": answers_json(need.get("answers") or []),
+                   "photo_tags": list(need["photo_tags"]), "photo_tags_mask": tags_mask(need["photo_tags"])},
+        "frame": {"type": NEED, "ttl": ttl, "timestamp_ms": ts, "sender_id": H(sender), "recipient_id": None},
+        "payload_hex": H(pl), "frame_hex": H(frame(NEED, ttl, ts, sender, pl)),
+    })
+    return pl
+
+
+# Tags only: three empty answer slots, then mask 0x0021 (floodwater + people_stranded).
+need6 = dict(
+    msg_id=bytes.fromhex("1112131415161718"), origin_node=A, created_at=1_790_000_300,
+    category=1, urgency=2, people=4, vuln_flags=0b10000, lat=20.296123, lon=85.824509,
+    loc_acc=2, lang=0, item="boat", landmark="temple", summary="water in house, stuck on roof",
+    photo_tags=["floodwater", "people_stranded"],
+)
+p6 = v3_vector("need_v3_tags_only", need6, 7, TS + 45, A)
+
+# Answers and tags together, non-ASCII strings; mask 0x400A (house_damaged + roof_damaged + landslide).
+need7 = dict(
+    msg_id=bytes.fromhex("2122232425262728"), origin_node=B, created_at=1_790_000_400,
+    category=4, urgency=2, people=6, vuln_flags=0b00110, lat=-0.000005, lon=179.999995,
+    loc_acc=3, lang=2, item="ଆଶ୍ରୟ", landmark="ସ୍କୁଲ", summary="roof gone",
+    answers=[(7, 1), (6, 2)], photo_tags=["house_damaged", "roof_damaged", "landslide"],
+)
+v3_vector("need_v3_answers_and_tags", need7, 5, TS + 46, B)
+
+# Largest v3 NEED: every string at its byte limit, 3 answers, every defined tag. 118 + 3 + 2 = 123 byte payload, 145 byte frame.
+need8 = dict(
+    msg_id=bytes.fromhex("ffffffffffffffff"), origin_node=B, created_at=0xFFFFFFFF,
+    category=6, urgency=3, people=255, vuln_flags=0xFF, lat=21.0, lon=86.0, loc_acc=5, lang=5,
+    item="i" * 16, landmark="l" * 24, summary="s" * 40, answers=[(8, 1), (7, 2), (1, 0)],
+    photo_tags=list(PHOTO_TAGS),
+)
+p8 = v3_vector("need_v3_max_size", need8, 7, TS + 47, B)
+assert len(p8) == 123 and tags_mask(PHOTO_TAGS) == 0x7FFF
+
 # LOC_HINT (SPEC 5.5): a relay with a fix vouches that it heard a no-fix NEED directly from its origin.
 def hint_vector(name, h, ttl, ts):
     pl = loc_hint_payload(h)
@@ -354,7 +412,15 @@ bad_need = {
     "v2_missing_answer_byte": p3[:-1],
     "v2_four_answer_bytes": p3 + b"\x00",
     "v1_with_answer_bytes": bytes([1]) + v1_body + answers_bytes([(1, 2)]),
-    "version_3": bytes([3]) + p3[1:],
+    "version_3": bytes([3]) + p3[1:],  # a v2 body labelled v3: the photo_tags u16 is missing
+    "version_4": bytes([4]) + p6[1:],
+    "v3_photo_tags_zero": p6[:-2] + b"\x00\x00",
+    "v3_photo_tag_bit15": p6[:-2] + struct.pack(">H", 0x8000 | tags_mask(["floodwater"])),
+    "v3_missing_tag_byte": p6[:-1],
+    "v3_extra_trailing_byte": p6 + b"\x00",
+    "v3_no_tag_bytes": p6[:-2],
+    "v2_with_photo_tags": bytes([2]) + p6[1:],
+    "v1_with_photo_tags": bytes([1]) + p6[1:],
 }
 
 # LOC_HINT payloads (a frame's payload bytes) every decoder must reject.
@@ -374,11 +440,12 @@ print(json.dumps({
     "vectors": vectors,
     "must_reject_frames": {k: H(v) for k, v in bad.items()},
     "sizes": {"need1_payload": len(p), "need2_payload": len(p2), "ack1_payload": len(pa),
-              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1), "broadcast_payload": len(pb1)},
+              "need_v2_max_payload": len(p5), "need_v3_max_payload": len(p8),"loc_hint_payload": len(ph1), "broadcast_payload": len(pb1)},
     "answer_bank": [
         {"id": qid, "key": key, "options": [{"value": v, "key": k} for k, v in opts.items()]}
         for qid, (key, opts) in BANK.items()
     ],
+    "photo_tag_bank": [{"bit": i, "key": k} for i, k in enumerate(PHOTO_TAGS)],
     "must_reject_need_payloads": {k: H(v) for k, v in bad_need.items()},
     "must_reject_loc_hint_payloads": {k: H(v) for k, v in bad_hint.items()},
     "loc_hint_acc_max_m": {str(k): v for k, v in HINT_ACC_MAX_M.items()},

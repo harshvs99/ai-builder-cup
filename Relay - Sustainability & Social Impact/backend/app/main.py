@@ -17,6 +17,7 @@ from typing import Any, Callable, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -25,6 +26,7 @@ from . import announcements
 from . import dispatch as dispatching
 from . import districts, languages
 from . import ready as readiness
+from . import recover
 from . import shelters as shelter_lists
 from . import sitrep as sitreps
 from . import teams as team_data
@@ -56,10 +58,13 @@ from .codec import (
     encode_frame,
     encode_loc_hint,
     encode_need,
+    photo_tags_from_json,
+    photo_tags_to_json,
     to_e5,
 )
-from .location import add_no_fix_note, scrub_legacy_draft, ticket_location
-from .priority import vuln_names
+from .geocode import Geocoder
+from .location import add_no_fix_note, best_loc_acc, scrub_legacy_draft, ticket_location
+from .priority import add_photo_note, vuln_names
 from .pubsub import (
     Publisher,
     PubSubPublisher,
@@ -143,6 +148,7 @@ class NeedJson(BaseModel):
     loc_acc: int = Field(default=1, ge=0, le=5)  # extra, optional
     created_at: int | None = Field(default=None, ge=0, lt=1 << 32)  # extra, optional (unix s)
     answers: dict[str, str] = Field(default_factory=dict)  # extra, optional: {question key: answer key}, max 3
+    photo_tags: list[str] = Field(default_factory=list)  # extra, optional: on-device photo tags (SPEC 5.1 table)
     mesh_hints: list[MeshHintJson] = Field(default_factory=list, max_length=8)  # extra, optional: needs loc_acc 0
 
     @field_validator("category")
@@ -169,6 +175,15 @@ class NeedJson(BaseModel):
             raise ValueError("at most 3 answers")
         try:
             answers_from_json(v)
+        except CodecError as e:
+            raise ValueError(str(e)) from e
+        return v
+
+    @field_validator("photo_tags")
+    @classmethod
+    def _photo_tags(cls, v: list[str]) -> list[str]:
+        try:
+            photo_tags_from_json(v)
         except CodecError as e:
             raise ValueError(str(e)) from e
         return v
@@ -301,6 +316,7 @@ def _ticket_json(
     if not loc["has_location"]:  # rows triaged before no-fix handling carry "0.00000, 0.00000" in their text
         draft_en, draft_local = (scrub_legacy_draft(d, row["landmark"]) for d in (draft_en, draft_local))
         reason = add_no_fix_note(reason, row["landmark"])
+    reason = add_photo_note(reason, row.get("photo_tags"))  # a note only: the score never reads photo tags
     out = {
         "ticket_no": row["ticket_no"],
         "category": row["category"],
@@ -325,8 +341,9 @@ def _ticket_json(
     }
     # Optional fields, absent when unset. ``geo`` is an estimate from the landmark for a ticket with no
     # GPS fix (has_location stays false); ``reclass`` is {from, to, reason} and ``category`` is the new one;
-    # ``answers`` is {question key: answer key} from the intake follow-up questions.
-    for key in ("geo", "reclass", "answers"):
+    # ``answers`` is {question key: answer key} from the intake follow-up questions; ``photo_tags`` is
+    # {tag key: reports that carried it}, what the requesters' phones saw in their photos (no pixels travel).
+    for key in ("geo", "reclass", "answers", "photo_tags"):
         if row.get(key):
             out[key] = row[key]
     for key in ("proposal", "dispatch"):  # optional: absent until proposed / approved
@@ -346,7 +363,7 @@ def _broadcast_json(b: Broadcast) -> dict[str, Any]:
 
 
 def _packet_json(p: dict[str, Any]) -> dict[str, Any]:
-    return {
+    out = {
         "msg_id": p["msg_id"],
         "origin_node": p["origin_node"],
         "gateway_node": p["gateway_node"],
@@ -356,6 +373,14 @@ def _packet_json(p: dict[str, Any]) -> dict[str, Any]:
         "reported_at": p["reported_at"],
         "summary": p["summary"],
     }
+    # Tags are not a column: read them back from the stored frame (v3 NEED payload).
+    try:
+        tags = photo_tags_to_json(decode_need(decode_frame(bytes(p["frame"])).payload).photo_tags)
+    except (CodecError, KeyError, TypeError):
+        tags = []
+    if tags:
+        out["photo_tags"] = tags
+    return out
 
 
 def decode_frames(b64_frames: list[str]) -> tuple[list[IncomingNeed], int]:
@@ -454,14 +479,21 @@ def create_app(
     ready_textgen: TextGen | None = None,
     speech: Speech | None = None,
     shelter_finder: shelter_lists.ShelterFinder | None = None,
+    recover_textgen: TextGen | None = None,
+    evidence_salt: str | None = None,
+    geocoder: Geocoder | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
     orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default the Pro alias, Flash fallback);
     ``announcement_textgen`` translates and checks announcements (``ANNOUNCEMENT_GEMINI_MODEL``); ``ready_textgen`` writes
-    the Ready-mode household plan (``READY_GEMINI_MODEL``); all default to Gemini when the environment enables
+    the Ready-mode household plan (``READY_GEMINI_MODEL``); ``recover_textgen`` writes the Recover-mode relief report
+    (``RECOVER_GEMINI_MODEL``, default ``GEMINI_MODEL``); all default to Gemini when the environment enables
     it, else to templates. ``speech`` reads plans aloud (``RELAY_TTS_MODEL``, off by default).
-    ``shelter_finder`` is the Search-grounded call that drafts a shelter list (``SHELTER_GEMINI_MODEL``)."""
+    ``shelter_finder`` is the Search-grounded call that drafts a shelter list (``SHELTER_GEMINI_MODEL``).
+    ``evidence_salt`` (``RELAY_EVIDENCE_SALT``) salts the reporter pseudonyms in Recover evidence packs.
+    ``geocoder`` (Maps-grounded landmark lookup, also used by ``POST /v1/tickets/{no}/locate``) defaults to
+    ``RELAY_GEOCODER``."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
     operator_key = operator_key if operator_key is not None else os.environ.get("RELAY_OPERATOR_KEY", "")
@@ -487,6 +519,10 @@ def create_app(
     )
     ready_textgen = ready_textgen if ready_textgen is not None else textgen_from_env("READY_GEMINI_MODEL")
     speech = speech if speech is not None else speech_from_env()
+    recover_textgen = (
+        recover_textgen if recover_textgen is not None else textgen_from_env("RECOVER_GEMINI_MODEL", timeout_s=45.0)
+    )
+    salt = evidence_salt if evidence_salt is not None else os.environ.get("RELAY_EVIDENCE_SALT", recover.DEFAULT_SALT)
     store = store if store is not None else open_store(db_path=db_path)
     shelter_finder = shelter_finder if shelter_finder is not None else shelter_lists.shelter_finder_from_env()
     plans = readiness.PlanService(ready_textgen, clock, store)
@@ -495,6 +531,7 @@ def create_app(
         agent if agent is not None else agent_from_env(),
         clock=clock,
         enrich_budget_s=enrich_budget_s if enrich_budget_s is not None else float(os.environ.get("RELAY_AGENT_BUDGET_S", "20")),
+        geocoder=geocoder,
         embedder=embedder if embedder is not None else embedder_from_env(),
     )
 
@@ -690,6 +727,32 @@ def create_app(
         out["packets"] = [_packet_json(p) for p in packets]
         return out
 
+    @app.post("/v1/tickets/{ticket_no}/locate", dependencies=operator)
+    def locate(ticket_no: int) -> dict[str, Any]:
+        """Estimate where a no-fix ticket is from its landmark now: the gazetteer, then the Maps geocoder. Writes
+        ``geo`` (replacing an earlier landmark estimate) and returns the ticket. 409 for a ticket with a GPS fix or
+        a mesh estimate, 503 if only the (unconfigured) Maps geocoder could help, 422 if nothing confident was found."""
+        row = ticket_or_404(ticket_no)
+        packets = store.ticket_packets(ticket_no)
+        if best_loc_acc(p["loc_acc"] for p in packets) != 0:
+            raise HTTPException(status_code=409, detail="ticket has a GPS fix")
+        if (row.get("geo") or {}).get("source") == "mesh":
+            raise HTTPException(status_code=409, detail="ticket already has a mesh location estimate")
+        landmark = (row["landmark"] or "").strip()
+        if not landmark:
+            raise HTTPException(status_code=422, detail="ticket has no landmark to locate")
+        geo = pipeline.gazetteer.locate(landmark)
+        if geo is None:
+            if pipeline.geocoder.name == "none":
+                raise HTTPException(status_code=503, detail="no Maps geocoder configured (RELAY_GEOCODER=gemini_maps)")
+            geo = pipeline.geocoder.locate(landmark, pipeline.ticket_district(packets))
+        if geo is None:
+            raise HTTPException(status_code=422, detail="could not place that landmark with confidence")
+        if not store.set_geo(ticket_no, geo):  # a fix or a mesh estimate arrived since the reads above
+            raise HTTPException(status_code=409, detail="ticket has a GPS fix or a mesh location estimate")
+        row = ticket_or_404(ticket_no)
+        return _ticket_json(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
+
     @app.post("/v1/tickets/{ticket_no}/approve", dependencies=operator)
     def approve(ticket_no: int, body: ApproveRequest | None = None) -> dict[str, Any]:
         body = body or ApproveRequest()
@@ -830,6 +893,45 @@ def create_app(
         if latest is None:
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
+
+    # ------------------------------------------------------------------ recover (after the towers return)
+    def district_param(district: str) -> str:
+        try:
+            return recover.check_district(district)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    def pack_response(body: dict[str, Any], download: bool, kind: str, ident: str) -> JSONResponse:
+        headers = {}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{recover.download_name(kind, ident)}"'
+        return JSONResponse(body, headers=headers)
+
+    @app.get("/v1/recover/damage", dependencies=operator)
+    def recover_damage(district: str = "all") -> dict[str, Any]:
+        district = district_param(district)
+        return recover.damage_map(recover.load_cases(store, district), district, int(clock()))
+
+    @app.get("/v1/recover/evidence/{ticket_no}", dependencies=operator)
+    def recover_ticket_evidence(ticket_no: int, download: int = Query(default=0)) -> JSONResponse:
+        row = ticket_or_404(ticket_no)
+        case = recover.make_case(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
+        return pack_response(recover.ticket_evidence(case, salt), bool(download), "ticket", str(ticket_no))
+
+    @app.get("/v1/recover/evidence", dependencies=operator)
+    def recover_area_evidence(area: str, district: str = "all", download: int = Query(default=0)) -> JSONResponse:
+        district = district_param(district)
+        cases = recover.load_cases(store, district)
+        found = next((c.area for c in cases if c.area.area_id == area), None)
+        if found is None:
+            raise HTTPException(status_code=404, detail="area not found")
+        return pack_response(recover.area_evidence(cases, found, district, salt, int(clock())), bool(download), "area", area)
+
+    @app.post("/v1/recover/report", dependencies=operator)
+    def recover_report(district: str = "all") -> dict[str, Any]:
+        """Generated now from the store and returned; nothing is persisted (unlike sitreps)."""
+        district = district_param(district)
+        return recover.build_report(recover.load_cases(store, district), district, salt, recover_textgen, int(clock()))
 
     # ------------------------------------------------------------------ announcements
     def announcement_or_404(announcement_id: int) -> dict[str, Any]:
@@ -1152,7 +1254,7 @@ def create_app(
                     category=CATEGORY_NAMES.index(nj.category), urgency=nj.urgency, people=nj.people,
                     vuln_flags=flags, lat=nj.lat, lon=nj.lon, loc_acc=nj.loc_acc,
                     lang=LANG_CODES.index(nj.lang), item=nj.item, landmark=nj.landmark, summary=nj.summary,
-                    answers=answers_from_json(nj.answers),
+                    answers=answers_from_json(nj.answers), photo_tags=photo_tags_from_json(nj.photo_tags),
                 )
                 frame = encode_frame(TYPE_NEED, INITIAL_TTL, int(now * 1000), origin, encode_need(need))
                 # round-trip through the decoder so injected needs see exactly what the wire would carry

@@ -20,6 +20,7 @@ def _need_from_fields(f) -> codec.Need:
         urgency=f["urgency"], people=f["people"], vuln_flags=f["vuln_flags"], lat=f["lat"], lon=f["lon"],
         loc_acc=f["loc_acc"], lang=f["lang"], item=f["item"], landmark=f["landmark"], summary=f["summary"],
         answers=tuple((a["id"], a["value"]) for a in f.get("answers", [])),
+        photo_tags=f.get("photo_tags_mask", 0),
     )
 
 
@@ -92,6 +93,8 @@ def test_golden_vector_encode_decode(v):
         assert n.summary == f.get("summary_decoded", f["summary"])
         assert n.answers == tuple((a["id"], a["value"]) for a in f.get("answers", []))
         assert codec.answers_to_json(n.answers) == {a["question"]: a["answer"] for a in f.get("answers", [])}
+        assert n.photo_tags == f.get("photo_tags_mask", 0)
+        assert codec.photo_tags_to_json(n.photo_tags) == f.get("photo_tags", [])
     elif kind == "ACK":
         a = codec.decode_ack(fr.payload)
         assert a.ack_id.hex() == f["ack_id"] and a.ref_msg_id.hex() == f["ref_msg_id"]
@@ -117,13 +120,21 @@ def test_reference_sizes():
     assert len(bytes.fromhex(_vec("need_truncation_negative_coords")["payload_hex"])) == s["need2_payload"]
     assert len(bytes.fromhex(_vec("ack_received_directed")["payload_hex"])) == s["ack1_payload"]
     assert len(bytes.fromhex(_vec("need_v2_max_size")["payload_hex"])) == s["need_v2_max_payload"] == 121
+    assert len(bytes.fromhex(_vec("need_v3_max_size")["payload_hex"])) == s["need_v3_max_payload"] == 123
     assert len(bytes.fromhex(_vec("loc_hint_basic")["payload_hex"])) == s["loc_hint_payload"] == 31
 
 
-def test_v1_vectors_stay_v1_and_answer_vectors_are_v2():
+def test_v1_vectors_stay_v1_answer_vectors_are_v2_and_tag_vectors_are_v3():
     for v in VECTORS["vectors"]:
         if v["kind"] == "NEED":
-            assert bytes.fromhex(v["payload_hex"])[0] == (2 if "answers" in v["fields"] else 1), v["name"]
+            want = 3 if "photo_tags" in v["fields"] else 2 if "answers" in v["fields"] else 1
+            assert bytes.fromhex(v["payload_hex"])[0] == want, v["name"]
+
+
+def test_photo_tag_table_matches_shared_table():
+    bank = VECTORS["photo_tag_bank"]
+    assert [(t["bit"], t["key"]) for t in bank] == list(enumerate(codec.PHOTO_TAG_NAMES))
+    assert len(bank) == 15  # bit 15 is reserved
 
 
 def test_question_bank_matches_shared_table():

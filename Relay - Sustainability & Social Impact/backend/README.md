@@ -42,7 +42,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
-| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, `POST /v1/announcements`, `GET /v1/announcements`, `POST /v1/announcements/{id}/approve\|withdraw`, `GET\|POST /v1/ready/warnings*`, `GET /v1/ready/shelters` and `POST /v1/ready/plan/preview` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve\|locate`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, the Recover routes (`GET /v1/recover/damage`, `GET /v1/recover/evidence[/{no}]`, `POST /v1/recover/report`), `POST /v1/announcements`, `GET /v1/announcements`, `POST /v1/announcements/{id}/approve\|withdraw`, `GET\|POST /v1/ready/warnings*`, `GET /v1/ready/shelters` and `POST /v1/ready/plan/preview` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
 | `RELAY_LANGS` | `en,hi` | comma list of enabled languages (must include `en`; codes from `en,hi,or,tl,war,ceb`). Only enabled languages get templates, model output and announcement translations; anything else falls back to English. A typo fails at start. See [Languages](#languages) |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
@@ -52,9 +52,11 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_TRIAGE_BUDGET_S` | `50` | wall-clock cap for one push delivery (phase 1 + Gemini); over budget returns 503 and Pub/Sub redelivers |
 | `GEMINI_API_KEY` | unset | enables Gemini with a Google AI Studio key; this is the production path (Cloud Run gets it from Secret Manager). Use a **paid-tier** key: free-tier prompts may be used to improve Google products, not acceptable for disaster victims' data. Unset (and no Vertex) = deterministic agent |
 | `GOOGLE_GENAI_USE_VERTEXAI` | unset | optional alternative: `true` uses Gemini on Vertex AI via ADC (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, default `global`); wins over `GEMINI_API_KEY` if both are set. Not used by the Terraform deploy |
-| `RELAY_GEOCODER` | unset | `gemini_maps` opts in to Maps-grounded landmark geocoding (works with `GEMINI_API_KEY` or Vertex; `GEMINI_GEOCODE_MODEL` overrides the model). **Do not enable for real use:** Google's Maps-grounding docs bar "high risk activities including emergency response services", on the Gemini API and Vertex AI alike. The built-in gazetteer stays the default |
+| `RELAY_GEOCODER` | unset | `gemini_maps` opts in to Gemini + Google Maps grounding for no-fix landmarks the gazetteer does not know, and for `POST /v1/tickets/{no}/locate` (billed, hence opt-in). Works with `GEMINI_API_KEY` or Vertex AI (Vertex wins if both are set); `GEMINI_GEOCODE_MODEL` (then `GEMINI_MODEL`) overrides the model. An answer without a Maps grounding chunk, or outside the ticket's district bounding box, is dropped. **Do not enable for real use:** Google's Maps-grounding docs bar "high risk activities including emergency response services", on the Gemini API and Vertex AI alike. The built-in gazetteer stays the default |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
+| `RECOVER_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the Recover relief and insurer report (set a Pro-tier name here, e.g. `gemini-pro-latest`); same Vertex / API-key switch as the other writers, 45 s client timeout |
+| `RELAY_EVIDENCE_SALT` | `relay-evidence-v1` | salt of the reporter pseudonyms in evidence packs (SHA-256 of salt + origin node); **change in prod**, and keep it stable, because digests depend on it |
 | `ANNOUNCEMENT_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates announcements into the five app languages and, in a separate call, checks each translation against the source |
 | `SHELTER_GEMINI_MODEL` | `gemini-3.8-flash` | model for the Google Search-grounded shelter list discovery (`POST /v1/ready/shelter-lists/discover`, 60 s timeout); no Gemini credentials = 503, enter the list by hand |
 | `READY_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the Ready-mode household plan (text validated, else template); no Gemini credentials = templates |
@@ -69,6 +71,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 
 ```
 app/codec.py            wire frame + NEED/ACK/HELLO/INVENTORY/LOC_HINT codec (strict; raises CodecError)
+app/districts.py        districts (Puri, Delhi): id, name, bounding box, centre; nearest / containing lookups (pure)
+app/geocode.py          landmark -> approximate point: Puri gazetteer, optional Maps-grounded Gemini (district-aware)
 app/meshgeo.py          approximate position from LOC_HINTs: intersection of discs, RSSI as a weak weight (pure)
 app/store/base.py       Store interface (ingest, approve_ticket, acks, ...) and shared types
 app/store/sqlite.py     SqliteStore (local dev, tests)
@@ -83,7 +87,8 @@ app/teams.py            dispatch teams: seed file (data/teams_puri.json), derive
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
 app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
 app/announcements.py        announcement in the enabled languages: translate, deterministic + model check, human approval
-app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
+app/textgen.py          structured-JSON Gemini client for dispatch orders, sitreps and the Recover report
+app/recover.py          Recover mode: village areas, damage map, evidence packs (SHA-256), relief report
 app/ready.py            Ready mode: shelters, warnings + CAP parser, offline pack, validated household plan
 app/tts.py              optional Gemini text-to-speech (PCM to WAV), off unless RELAY_TTS_MODEL is set
 app/data/               teams_puri.json, gazetteer_puri.json (landmarks with Hindi/Odia aliases), shelters_*.json (DEMO placeholders)
@@ -118,6 +123,37 @@ asks Gemini, one structured-JSON call per touched ticket (8 s hard timeout), for
 a tier adjustment clamped to one tier, and a polished + translated dispatch draft. The score is
 never model-written; ACK text is never model-written; any error or invalid field falls back to
 the deterministic value and is logged.
+
+## Landmark location (gazetteer, Google Maps)
+
+A NEED with no GPS fix and a landmark gets an approximate `geo` (never a fix: `lat`/`lon`/`has_location` stay as
+reported). Phase 1 tries the gazetteer. With `RELAY_GEOCODER=gemini_maps`, phase 2 asks Gemini with the Google Maps
+grounding tool, and `POST /v1/tickets/{no}/locate` does both on demand (409 for a ticket with a GPS fix or a mesh
+estimate, 503 without a Maps geocoder when the gazetteer has no match, 422 for an empty or unplaceable landmark).
+
+- **District**: the ticket's district is the one nearest to the median position of the GPS-fixed tickets its gateway
+  uploaded (`geocode.gateway_district`, from `list_tickets_with_links`). Known: the prompt names that district, the
+  Maps search is biased to its centre and the answer must lie in its bounding box. Unknown: the prompt names every
+  district and the answer must lie in any of them. The table is `app/districts.py`.
+- **Grounding required**: the answer is dropped unless the response has a Maps grounding chunk
+  (`grounding_metadata.grounding_chunks[].maps`). The chunk whose title best matches the name the model gave supplies
+  `name`, `place_id` and `maps_uri` for the `geo` record (SPEC section 7), which the dashboard shows with a Google Maps credit.
+- Landmark text only reaches the model as quoted JSON; the call has a 6 s hard timeout and never raises.
+- `set_geo` is the one guarded store write: refused for a ticket with a fix, and a landmark estimate never replaces a mesh one.
+
+## Photo tags (NEED v3)
+
+A requester can photograph the scene, but pixels never leave the phone: an on-device classifier maps the photo to a
+fixed tag vocabulary (`protocol/SPEC.md` §5.1: `floodwater`, `house_damaged`, `people_stranded`, ...) and only a 16-bit
+bitmask travels in a v3 NEED. The backend decodes it at sync and serves it on the ticket as
+`photo_tags: {tag key: number of reports that carried it}` (omitted when empty; a merged ticket adds one per
+report that carried the tag). `GET /v1/tickets/{n}` also lists `photo_tags: [keys]` on each packet, read back
+from the stored frame (no column). Tags are what the phone's classifier saw, an observation and not a verified
+assessment, so they never change `priority_score` or the tier: the priority reason only gains a note,
+"Photo shows: people stranded, floodwater." (added when the ticket is served, so it also follows a Gemini reason).
+
+`POST /v1/dev/inject` takes `photo_tags: ["floodwater", ...]` (unknown keys are a 422), and `scripts/seed_district.py`
+gives 14 of its 40 synthetic reports tags.
 
 ## Mesh-assisted location (LOC_HINT)
 
@@ -256,6 +292,49 @@ it first, set `RELAY_LANGS=en,hi,<code>`). 3) Add tests: update the "default" ex
 `tests/test_templates_priority.py`, `test_dispatch.py`, `test_sitrep.py`, `test_ready.py` and
 `test_announcements.py`, and keep a test that the language is off when it is not listed. 4) Mirror the
 change in `dashboard/src/lib/languages.ts`.
+
+## Recover mode
+
+After the towers return, every ticket and dispatch becomes evidence: a damage map by village, households reached, and a
+log for the state and insurers. Everything is computed on request from the store (`app/recover.py`); **nothing is
+persisted**, so a report or pack reflects the store at the moment it is generated.
+
+- **Areas.** A ticket's position is its GPS fix, else its approximate `geo` (landmark lookup or mesh estimate). The area is
+  the nearest gazetteer place within 3 km ("Pipili Bus Stand, Pipili"), else a ~2 km grid cell named after its district and
+  nearest place (or "Delhi: area near 28.61, 77.21"). A ticket with no position is the **Unlocated** bucket: always counted,
+  shown under every district filter. The district is the nearest centre (`districts.py`).
+- `GET /v1/recover/damage?district=puri|delhi|all` returns per-area `tickets`, `reports`, `duplicates_merged`
+  (reports minus tickets), `households` (distinct origin phones), `households_reached` (distinct phones on RESOLVED tickets),
+  `open` / `dispatched` / `resolved`, `by_category`, summed `photo_tags`, `houses_damaged`, `damage_level` and
+  `damage_reason`, plus `totals` with `median_minutes_to_dispatch`, `share_with_location` (GPS fix or approximate position,
+  0 to 1; `share_with_gps_fix` is the strict figure) and `needs_confirmed_closed`. Deterministic, no model.
+  Damage level: **severe** = a collapsed house, or >= 3 tickets with a damaged house, or >= 8 reports; **moderate** = a
+  damaged house, or >= 4 reports, or a hazard tag (floodwater, road blocked, landslide, fire, power line down); **light** =
+  any other area with a ticket. A damaged house is a `house_damaged` / `house_collapsed` / `roof_damaged` tag or the intake
+  answer `house_damaged = yes`. Photo tags are unverified observations from the requester's phone.
+  A plain approval (no team, no ETA) stores no dispatch record, hence no approval time: it is left out of the median
+  and the evidence timeline.
+- `GET /v1/recover/evidence/{ticket_no}` and `GET /v1/recover/evidence?area=<area_id>&district=` return an evidence record per
+  ticket (an area pack wraps them); `?download=1` adds `Content-Disposition: attachment`. A record holds the ticket facts,
+  area, **location provenance** (GPS accuracy bucket, or landmark lookup with query and, for Maps, name + link, or mesh
+  radius and hint count, or none), the reports (msg id, hops, gateway, times; origin phones as salted SHA-256 pseudonyms,
+  never raw ids), the timeline (first reported, received, dispatched with team and ETA, on the way, resolved), intake
+  answers, photo tags ("classified on the requester's phone; tags only, no image") and the priority score, tier and reason.
+- **Integrity.** `integrity = {algorithm: "sha256", digest}` is the SHA-256 of the record's canonical JSON (sorted keys,
+  compact separators) without the `integrity` field; an area pack's digest is taken over the list of its ticket digests.
+  That is **tamper-evidence of the export, not authenticity**: nothing is signed, so it does not show who produced it.
+  Signing is future work.
+- `POST /v1/recover/report?district=` generates, and returns without storing, `{generated_at, district, counts, text_en,
+  text_local, local_lang, model, evidence_digests}`. `counts` is the damage map's totals and rows with integer figures only.
+  Gemini (`RECOVER_GEMINI_MODEL`) writes English and the district's `local_lang` (`districts.py`: Odia for Puri when `or` is enabled, else Hindi, as for Delhi; `all` reads as Puri) in the format a relief commissioner or insurer
+  expects: summary, damage by village, households reached, response times, provenance and limitations (demo data is
+  synthetic, photo tags are unverified, locations are approximate). Same rule as the sitrep: the text is used only if every
+  number in it is one it was handed and the request count is stated, for both languages; otherwise the deterministic
+  template (`model: "template"`). Without a Gemini backend it is always the template.
+
+The district pilot measures map onto it: minutes from ask to dispatch (`median_minutes_to_dispatch`), tickets with a usable
+location (`share_with_location`), duplicates merged before dispatch (`duplicates_merged`), needs confirmed closed by village
+(`resolved` per area) and households reached.
 
 ## Deploy
 

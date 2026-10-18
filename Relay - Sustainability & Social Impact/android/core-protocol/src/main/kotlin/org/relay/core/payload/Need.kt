@@ -10,7 +10,36 @@ data class NeedAnswer(val questionId: Int, val value: Int) {
     val wireByte: Int get() = (questionId shl 3) or value
 }
 
-/** NEED payload (SPEC 5.1). Encoded as payload_version 1, or 2 when [answers] is not empty. */
+/**
+ * The photo tag table (SPEC 5.1): bit -> JSON key. A photo is classified on the phone into these and only the
+ * 16-bit mask travels, never pixels. Bits are never renumbered; bit 15 is reserved and must be 0. Checked against
+ * `photo_tag_bank` in protocol/vectors.json.
+ */
+object PhotoTags {
+    val KEYS: List<String> = listOf(
+        "floodwater", "house_damaged", "house_collapsed", "roof_damaged", "person_injured", "people_stranded",
+        "road_blocked", "tree_fallen", "power_line_down", "boat_damaged", "crops_damaged", "livestock_lost",
+        "vehicle_damaged", "fire", "landslide",
+    )
+    /** Every defined bit; bit 15 is reserved. */
+    const val ALL_MASK = 0x7FFF
+
+    /** Tag keys of [mask] in bit order, e.g. 0x21 -> floodwater, people_stranded. */
+    fun toKeys(mask: Int): List<String> = KEYS.filterIndexed { i, _ -> (mask shr i) and 1 == 1 }
+
+    /** Inverse of [toKeys]; null if a key is not in the table. */
+    fun fromKeys(keys: List<String>): Int? {
+        var mask = 0
+        for (k in keys) {
+            val bit = KEYS.indexOf(k)
+            if (bit < 0) return null
+            mask = mask or (1 shl bit)
+        }
+        return mask
+    }
+}
+
+/** NEED payload (SPEC 5.1). Encoded as payload_version 1, 2 when [answers] is not empty, or 3 when [photoTags] is not 0. */
 data class Need(
     val msgId: ByteArray,
     val originNode: ByteArray,
@@ -32,6 +61,8 @@ data class Need(
     val summary: String,
     /** At most [QuestionBank.MAX_ANSWERS], distinct question ids; empty = a v1 payload on the wire. */
     val answers: List<NeedAnswer> = emptyList(),
+    /** Bitmask over [PhotoTags.KEYS], 0..[PhotoTags.ALL_MASK]; 0 = no photo (a v1 or v2 payload on the wire). */
+    val photoTags: Int = 0,
 ) {
     val lat: Double get() = Geo.fromE5(latE5)
     val lon: Double get() = Geo.fromE5(lonE5)
@@ -45,7 +76,8 @@ data class Need(
             createdAt == other.createdAt && category == other.category && urgency == other.urgency &&
             people == other.people && vulnFlags == other.vulnFlags && latE5 == other.latE5 &&
             lonE5 == other.lonE5 && locAcc == other.locAcc && lang == other.lang &&
-            item == other.item && landmark == other.landmark && summary == other.summary && answers == other.answers
+            item == other.item && landmark == other.landmark && summary == other.summary && answers == other.answers &&
+            photoTags == other.photoTags
     }
 
     override fun hashCode(): Int {
@@ -64,6 +96,7 @@ data class Need(
         h = 31 * h + landmark.hashCode()
         h = 31 * h + summary.hashCode()
         h = 31 * h + answers.hashCode()
+        h = 31 * h + photoTags
         return h
     }
 }
@@ -73,6 +106,9 @@ object NeedCodec {
     /** v1 layout followed by exactly [ANSWER_BYTES] answer bytes. */
     const val VERSION_WITH_ANSWERS = 2
     const val ANSWER_BYTES = 3
+    /** v2 layout followed by [PHOTO_TAG_BYTES] (a u16 big-endian bitmask, never 0, bit 15 clear). */
+    const val VERSION_WITH_PHOTO_TAGS = 3
+    const val PHOTO_TAG_BYTES = 2
     const val MAX_ITEM = 16
     const val MAX_LANDMARK = 24
     const val MAX_SUMMARY = 40
@@ -80,6 +116,7 @@ object NeedCodec {
     /** Fixed part + 3 length bytes + 80 string bytes. */
     const val MAX_PAYLOAD = FIXED_SIZE + 3 + MAX_ITEM + MAX_LANDMARK + MAX_SUMMARY
     const val MAX_PAYLOAD_V2 = MAX_PAYLOAD + ANSWER_BYTES
+    const val MAX_PAYLOAD_V3 = MAX_PAYLOAD_V2 + PHOTO_TAG_BYTES
 
     /**
      * Encode a NEED. Strings are truncated on a code point boundary to their limits. Throws
@@ -96,12 +133,15 @@ object NeedCodec {
         require(need.answers.size <= ANSWER_BYTES) { "at most $ANSWER_BYTES answers" }
         require(need.answers.all { QuestionBank.isValid(it.questionId, it.value) }) { "unknown question id or answer value" }
         require(need.answers.map { it.questionId }.toSet().size == need.answers.size) { "duplicate question id" }
-        val v2 = need.answers.isNotEmpty()
+        require(need.photoTags in 0..PhotoTags.ALL_MASK) { "photo_tags out of range or uses the reserved bit" }
+        val v3 = need.photoTags != 0
+        val v2 = v3 || need.answers.isNotEmpty() // v3 carries the 3 answer slots too (all empty is fine)
         val item = Utf8.truncateToBytes(need.item, MAX_ITEM)
         val landmark = Utf8.truncateToBytes(need.landmark, MAX_LANDMARK)
         val summary = Utf8.truncateToBytes(need.summary, MAX_SUMMARY)
-        val buf = ByteBuffer.allocate(FIXED_SIZE + 3 + item.size + landmark.size + summary.size + (if (v2) ANSWER_BYTES else 0))
-        buf.put((if (v2) VERSION_WITH_ANSWERS else VERSION).toByte())
+        val buf = ByteBuffer.allocate(FIXED_SIZE + 3 + item.size + landmark.size + summary.size +
+            (if (v2) ANSWER_BYTES else 0) + (if (v3) PHOTO_TAG_BYTES else 0))
+        buf.put((if (v3) VERSION_WITH_PHOTO_TAGS else if (v2) VERSION_WITH_ANSWERS else VERSION).toByte())
         buf.put(need.msgId)
         buf.put(need.originNode)
         buf.putInt(need.createdAt.toInt())
@@ -117,15 +157,16 @@ object NeedCodec {
         buf.put(landmark.size.toByte()); buf.put(landmark)
         buf.put(summary.size.toByte()); buf.put(summary)
         if (v2) for (i in 0 until ANSWER_BYTES) buf.put((need.answers.getOrNull(i)?.wireByte ?: 0).toByte())
+        if (v3) buf.putShort(need.photoTags.toShort())
         return buf.array()
     }
 
-    /** Null if invalid (SPEC 5.1 validation) or `payload_version` is not 1 or 2. Never throws. */
+    /** Null if invalid (SPEC 5.1 validation) or `payload_version` is not 1, 2 or 3. Never throws. */
     fun decode(p: ByteArray): Need? {
         try {
-            if (p.size < FIXED_SIZE + 3 || p.size > MAX_PAYLOAD_V2) return null
+            if (p.size < FIXED_SIZE + 3 || p.size > MAX_PAYLOAD_V3) return null
             val version = p[0].toInt() and 0xFF
-            if (version != VERSION && version != VERSION_WITH_ANSWERS) return null
+            if (version != VERSION && version != VERSION_WITH_ANSWERS && version != VERSION_WITH_PHOTO_TAGS) return null
             val buf = ByteBuffer.wrap(p)
             buf.position(1)
             val msgId = ByteArray(8).also { buf.get(it) }
@@ -145,8 +186,10 @@ object NeedCodec {
             val landmark = readString(p, buf, MAX_LANDMARK) ?: return null
             val summary = readString(p, buf, MAX_SUMMARY) ?: return null
             val answers = ArrayList<NeedAnswer>()
-            if (version == VERSION_WITH_ANSWERS) {
-                if (buf.remaining() != ANSWER_BYTES) return null
+            var photoTags = 0
+            if (version != VERSION) {
+                val tail = ANSWER_BYTES + (if (version == VERSION_WITH_PHOTO_TAGS) PHOTO_TAG_BYTES else 0)
+                if (buf.remaining() != tail) return null
                 var empty = false
                 for (i in 0 until ANSWER_BYTES) {
                     val b = buf.get().toInt() and 0xFF
@@ -156,11 +199,15 @@ object NeedCodec {
                     if (!QuestionBank.isValid(a.questionId, a.value) || answers.any { it.questionId == a.questionId }) return null
                     answers += a
                 }
-                if (answers.isEmpty()) return null // v2 means "has answers"; encoders emit v1 otherwise
+                if (answers.isEmpty() && version == VERSION_WITH_ANSWERS) return null // v2 means "has answers"; encoders emit v1 otherwise
+                if (version == VERSION_WITH_PHOTO_TAGS) {
+                    photoTags = buf.getShort().toInt() and 0xFFFF
+                    if (photoTags == 0 || photoTags and PhotoTags.ALL_MASK.inv() != 0) return null // v3 means "has tags", bit 15 reserved
+                }
             }
             if (buf.hasRemaining()) return null
             return Need(msgId, origin, createdAt, category, urgency, people, vuln, lat, lon, locAcc,
-                lang, item, landmark, summary, answers)
+                lang, item, landmark, summary, answers, photoTags)
         } catch (e: RuntimeException) {
             return null
         }

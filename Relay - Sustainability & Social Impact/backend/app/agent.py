@@ -49,7 +49,8 @@ from .codec import (
     Need,
     encode_ack,
 )
-from .geocode import Gazetteer, Geocoder, default_gazetteer, geocoder_from_env
+from .districts import District
+from .geocode import Gazetteer, Geocoder, default_gazetteer, gateway_district, geocoder_from_env
 from .location import add_no_fix_note, best_loc_acc
 from .meshgeo import HintView
 from .meshgeo import estimate as mesh_estimate
@@ -567,7 +568,7 @@ class TriagePipeline:
                 return False
             rows = self.store.hints_for([p["msg_id"] for p in packets])
             geo = mesh_estimate([HintView.from_row(r) for r in rows])
-            return geo is not None and self.store.set_mesh_geo(ticket_no, geo)
+            return geo is not None and self.store.set_geo(ticket_no, geo)
         except Exception:
             log.exception("mesh location estimate failed for ticket %s", ticket_no)
             return False
@@ -644,21 +645,35 @@ class TriagePipeline:
             "updated_at": now_i,
         }
 
+    def ticket_district(
+        self, packets: list[dict[str, Any]], everyone: list[tuple[dict[str, Any], list[dict[str, Any]]]] | None = None
+    ) -> District | None:
+        """The district of a no-fix ticket (its ``packets`` from ``Store.ticket_packets``), judged from the gateways that
+        carried it; None when those gateways uploaded nothing with a GPS fix. ``everyone`` is
+        ``Store.list_tickets_with_links()`` if the caller already has it."""
+        if everyone is None:
+            everyone = self.store.list_tickets_with_links()
+        return gateway_district(everyone, {p["gateway_node"] for p in packets})
+
     def _enrich(self, ticket_nos: list[int], budget_s: float) -> None:
         deadline = time.monotonic() + budget_s
         now = self.clock()
         rows = [r for n in ticket_nos if (r := self.store.get_ticket(n)) is not None]
         rows.sort(key=lambda r: -r["priority_score"])
+        everyone: list[tuple[dict[str, Any], list[dict[str, Any]]]] | None = None  # read once, only if a landmark needs it
         for r in rows:
             if time.monotonic() >= deadline:
                 log.warning("agent enrichment budget exhausted; remaining tickets keep deterministic output")
                 break
             try:
-                has_fix = best_loc_acc(p["loc_acc"] for p in self.store.ticket_packets(r["ticket_no"])) != 0
+                packets = self.store.ticket_packets(r["ticket_no"])
+                has_fix = best_loc_acc(p["loc_acc"] for p in packets) != 0
                 fields: dict[str, Any] = {}
                 # An estimate for a landmark the gazetteer did not know. Never for a ticket with a fix.
                 if not has_fix and not r.get("geo") and r["landmark"] and self.geocoder.name != "none":
-                    if geo := self.geocoder.locate(r["landmark"]):
+                    if everyone is None:
+                        everyone = self.store.list_tickets_with_links()
+                    if geo := self.geocoder.locate(r["landmark"], self.ticket_district(packets, everyone)):
                         fields["geo"] = geo
                 if self.agent.enriches:
                     fields.update(self._assess_fields(r, has_fix, now))
