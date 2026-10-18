@@ -39,4 +39,24 @@ class DisasterStoreTest {
         assertEquals(l, DisasterStore.decode(DisasterStore.encode(l)))
         assertTrue(DisasterStore.decode("flood:1:2:3").isEmpty()) // wrong field count
     }
+
+    @Test fun anAllClearSwitchesOffWhateverOrderTheBroadcastsArriveIn() {
+        val flood = d(DisasterType.FLOOD, 2)
+        val cleared = DisasterStore.withCleared(emptyMap(), DisasterType.FLOOD, now - 3600, now)
+        // the declaration reaches this phone after its all-clear (another neighbour, the start-up replay): ignored
+        assertEquals(emptyList<DisasterContext>(), DisasterStore.withDeclaration(emptyList(), flood, now, cleared))
+        // declared again after the all-clear: on again
+        val again = d(DisasterType.FLOOD, 0)
+        assertEquals(listOf(again), DisasterStore.withDeclaration(emptyList(), again, now, cleared))
+        // other disasters are not touched
+        assertEquals(1, DisasterStore.withDeclaration(emptyList(), d(DisasterType.CYCLONE, 2), now, cleared).size)
+    }
+
+    @Test fun allClearsKeepTheLatestPerTypeAndAreForgottenAfterADay() {
+        var m = DisasterStore.withCleared(emptyMap(), DisasterType.FLOOD, now - 100, now)
+        m = DisasterStore.withCleared(m, DisasterType.FLOOD, now - 500, now)
+        assertEquals(now - 100, m[DisasterType.FLOOD])
+        assertEquals(m, DisasterStore.decodeCleared(DisasterStore.encodeCleared(m)))
+        assertTrue(DisasterStore.withCleared(m, DisasterType.CYCLONE, now + 25 * 3600, now + 25 * 3600).keys == setOf(DisasterType.CYCLONE))
+    }
 }

@@ -323,7 +323,11 @@ what is left, and nothing circulates for ever). A node drops a `BROADCAST` that 
    other ACKs and NEEDs: it is about 50 bytes on the wire.
 4. A phone that holds a live `DISASTER` of type T (and, when `radius_km > 0`, knows it is inside the area) treats T as
    declared. A phone that does not know where it is treats an area-limited declaration as applying to it. A `DISASTER_CLEARED`
-   for T ends every declaration of T issued at or before its `issued_at`. Between 12 h and 24 h after issue a
+   for T ends every declaration of T issued at or before its `issued_at`, at once: the control room switches a disaster
+   off without waiting for the 24 h. Broadcasts arrive in any order, so a node remembers the latest `DISASTER_CLEARED`
+   time per disaster (for 24 h) and ignores a `DISASTER` of T issued at or before it whenever it arrives; one issued after
+   it switches T on again. The backend stops handing out a declaration once an all-clear supersedes it (it keeps handing
+   out the all-clear), and stamps a declaration made in the same second as an all-clear one second later. Between 12 h and 24 h after issue a
    declaration still counts but is marked *aging*, so the phone confirms with the person before relying on it.
 
 **Validation on decode:** `payload_version = 1`, exactly 25 bytes, `kind` in {1, 2}, `disaster` in 0..3, `|lat_e5| ≤ 9 000 000`,
@@ -426,6 +430,10 @@ Response:
   maps the operator's words onto what §5.6 can carry. A place found in the gazetteer sets the centre; the model's own
   coordinates are used only within 300 km of `district` and come back with `source: "model"` for the operator to check;
   with no usable place the centre is the district's. Sends nothing: the operator confirms with `POST /v1/broadcasts`.
+- `GET /v1/mappack?lat=&lon=&radius_km=` (device key, `X-Relay-Key`; `radius_km` 1..100, default 30) → `{ "version": 1,
+  "generated_at", "centre": { "lat", "lon" }, "radius_km", "places": [ { "name", "kind": "shelter" | "hospital" | "water",
+  "lat_e5", "lon_e5", "names"?: { "hi"?, "or"? } } ] }`. The offline map a phone fetches in normal times and keeps for a
+  disaster (never while one is declared in its area). Only gazetteer places whose name says what they are are included.
 - `GET /v1/stats` → `{ "open_by_category": {...}, "gateways_online": n, "tickets": n }`
   (a gateway is online if it synced in the last 60 s).
 - `POST /v1/dev/inject` → body `{ "needs": [NeedJson...] }`; dev only.

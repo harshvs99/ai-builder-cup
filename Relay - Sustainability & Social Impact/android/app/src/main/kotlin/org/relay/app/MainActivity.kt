@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.relay.app.location.MapPackUpdater
 import org.relay.app.ui.RelayRoot
 import org.relay.app.ui.network.CarryPolicy
 import org.relay.app.ui.i18n.LocalStrings
@@ -32,6 +33,12 @@ class MainActivity : ComponentActivity() {
                 ) { RelayRoot() }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Normal times: keep an offline map of the surroundings for the day a disaster hits (never during one).
+        MapPackUpdater.maybeUpdate(applicationContext)
     }
 
     override fun onStop() {

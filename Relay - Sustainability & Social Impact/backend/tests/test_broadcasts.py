@@ -98,3 +98,30 @@ def test_a_broadcast_does_not_disturb_need_traffic(client):
     client.post("/v1/broadcasts", json={"disaster": "flood"})
     r = sync(client, [need_frame()[0]])
     assert r.json()["accepted"] == 1 and len(payloads(r)) == 1
+
+
+def test_an_ended_declaration_stops_being_handed_out_at_once(client, clock):
+    client.post("/v1/broadcasts", json={"disaster": "flood"})
+    client.post("/v1/broadcasts", json={"disaster": "cyclone"})
+    clock.t += 60
+    client.post("/v1/broadcasts", json={"kind": "cleared", "disaster": "flood"})
+    got = [(b.kind, b.disaster) for b in payloads(sync(client, []))]
+    assert got == [("disaster", "cyclone"), ("cleared", "flood")]
+    clock.t += 60   # declared again later: on again, and the old all-clear does not touch it
+    client.post("/v1/broadcasts", json={"disaster": "flood"})
+    got = [(b.kind, b.disaster) for b in payloads(sync(client, []))]
+    assert got == [("disaster", "cyclone"), ("cleared", "flood"), ("disaster", "flood")]
+
+
+def test_without_superseded_keeps_order_and_skips_garbage():
+    d = codec.encode_broadcast(codec.Broadcast(bytes(8), "disaster", "flood", T0))
+    c = codec.encode_broadcast(codec.Broadcast(bytes([1]) * 8, "cleared", "flood", T0))   # same second: ends it
+    assert codec.without_superseded([d, b"junk", c]) == [c]
+
+
+def test_declaring_again_in_the_same_second_as_the_all_clear_still_counts(client):
+    client.post("/v1/broadcasts", json={"disaster": "flood"})
+    client.post("/v1/broadcasts", json={"kind": "cleared", "disaster": "flood"})
+    again = client.post("/v1/broadcasts", json={"disaster": "flood"}).json()
+    got = [(b.kind, b.issued_at) for b in payloads(sync(client, []))]
+    assert got == [("cleared", T0 + 60), ("disaster", T0 + 61)] and again["issued_at"] == T0 + 61

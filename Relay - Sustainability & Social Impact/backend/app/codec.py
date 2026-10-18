@@ -598,3 +598,21 @@ def decode_broadcast(payload: bytes) -> Broadcast:
     if not _coords_ok(lat_e5, lon_e5):
         raise CodecError("coordinates out of range")
     return Broadcast(bid, BROADCAST_KINDS[kind], DISASTER_CODES[disaster], issued_at, lat_e5, lon_e5, radius)
+
+
+def without_superseded(payloads: list[bytes]) -> list[bytes]:
+    """Drop every declaration that a later (or same-second) "cleared" of the same disaster has ended; keep the cleared.
+
+    Gateways then stop putting an ended declaration into the mesh at once, instead of carrying it, next to its
+    all-clear, for the rest of its 24 h. Payloads that do not decode are left out."""
+    decoded = []
+    for p in payloads:
+        try:
+            decoded.append((p, decode_broadcast(p)))
+        except CodecError:
+            continue
+    cleared: dict[str, int] = {}
+    for _, b in decoded:
+        if b.kind == "cleared":
+            cleared[b.disaster] = max(cleared.get(b.disaster, -1), b.issued_at)
+    return [p for p, b in decoded if b.kind == "cleared" or b.issued_at > cleared.get(b.disaster, -1)]

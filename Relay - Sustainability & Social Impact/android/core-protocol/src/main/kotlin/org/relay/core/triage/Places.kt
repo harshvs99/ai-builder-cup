@@ -60,6 +60,9 @@ data class MapContext(val shelter: PlaceRef? = null, val hospital: PlaceRef? = n
             return MapContext(nearest(PlaceKind.SHELTER), nearest(PlaceKind.HOSPITAL), nearest(PlaceKind.WATER))
         }
 
+        /** Great-circle metres between two positions in degrees ×1e5. */
+        fun distanceM(a: Pair<Int, Int>, b: Pair<Int, Int>): Double = PlaceGeo.distanceM(a, b)
+
         /** Under 1 km to 50 m, under 10 km to 0.5 km, beyond to whole km: no false precision from a phone fix. */
         fun roundForSpeech(m: Double): Int = when {
             m < 1_000 -> maxOf(50, (Math.round(m / 50) * 50).toInt())

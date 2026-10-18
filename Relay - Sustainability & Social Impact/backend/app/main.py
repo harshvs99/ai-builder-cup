@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import declare as declaring
+from . import mappack
 from . import dispatch as dispatching
 from . import sitrep as sitreps
 from . import teams as team_data
@@ -48,6 +49,7 @@ from .codec import (
     decode_loc_hint,
     decode_need,
     encode_broadcast,
+    without_superseded,
     encode_frame,
     encode_loc_hint,
     encode_need,
@@ -498,7 +500,8 @@ def create_app(
         hint_res = pipeline.process_hints(gateway, hints) if hints else None
 
         cursor = store.clamp_ack_cursor(req.ack_cursor)  # beyond the newest ack = store was reset
-        live_broadcasts = store.live_broadcasts(int(clock()) - BROADCAST_TTL_S)
+        # An ended declaration is no longer handed out; its all-clear is, so phones holding it drop it (SPEC 5.6).
+        live_broadcasts = without_superseded(store.live_broadcasts(int(clock()) - BROADCAST_TTL_S))
         acks = store.acks_after(cursor, MAX_ACKS_PER_SYNC)
         out = {
             "accepted": accepted,
@@ -759,6 +762,15 @@ def create_app(
         if has_area and (body.lat is None or body.lon is None):
             raise HTTPException(status_code=422, detail="radius_km needs lat and lon")
         now = int(clock())
+        if body.kind == "disaster":
+            # An all-clear ends declarations issued at or before it: one declared again in the same second must still
+            # count, so it is stamped just after the latest all-clear of that disaster.
+            from .codec import decode_broadcast
+
+            for p in store.live_broadcasts(now - BROADCAST_TTL_S):
+                prev = decode_broadcast(p)
+                if prev.kind == "cleared" and prev.disaster == body.disaster and prev.issued_at >= now:
+                    now = prev.issued_at + 1
         b = Broadcast(
             bcast_id=os.urandom(8), kind=body.kind, disaster=body.disaster, issued_at=now,
             lat_e5=to_e5(body.lat) if has_area and body.lat is not None else 0,
@@ -777,6 +789,15 @@ def create_app(
         labels = store.broadcast_labels(since)
         out = [decode_broadcast(p) for p in store.live_broadcasts(since)]
         return {"broadcasts": [_broadcast_json(b, labels.get(b.bcast_id.hex(), "")) for b in out]}
+
+    # ------------------------------------------------------------------ offline map packs for phones
+    @app.get("/v1/mappack", dependencies=[Depends(require_key)])
+    def map_pack(
+        lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+        radius_km: int = Query(default=mappack.DEFAULT_RADIUS_KM, ge=1, le=mappack.MAX_RADIUS_KM),
+    ) -> dict[str, Any]:
+        """Shelters, hospitals and rivers around a phone, fetched in normal times and kept for when a disaster hits."""
+        return mappack.build(mappack.gazetteer_entries(), lat, lon, radius_km, int(clock()))
 
     @app.post("/v1/broadcasts/interpret", dependencies=operator)
     def interpret_declaration(body: InterpretRequest) -> dict[str, Any]:

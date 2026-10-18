@@ -17,6 +17,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import org.relay.app.DisasterStore
 import org.relay.app.MeshRepository
+import org.relay.app.location.LocationProvider
+import org.relay.app.location.MapPack
+import org.relay.app.location.MapPackUpdater
+import org.relay.core.payload.Geo
 import org.relay.core.triage.DisasterType
 
 /**
@@ -50,8 +54,33 @@ fun DisasterLab() {
                     tick++
                 }) { Text("Declare ${t.key}") }
             }
+            DisasterType.entries.forEach { t ->
+                OutlinedButton(onClick = {
+                    val engine = MeshRepository.engine
+                    if (engine != null) { engine.declareDisaster(t, cleared = true); note = "All-clear for ${t.key} sent from this phone" }
+                    else note = "Mesh not running"
+                    tick++
+                }) { Text("End ${t.key}") }
+            }
             OutlinedButton(onClick = { store.clear(); note = "Cleared on this phone"; tick++ }) { Text("Clear here") }
         }
         if (note.isNotEmpty()) Text(note, style = MaterialTheme.typography.labelMedium)
+
+        SectionTitle("Offline map (developer)")
+        tick.let {
+            val pack = MapPack.stored(ctx)
+            Text(
+                if (pack == null) "No map on this phone: triage gives no place advice. Fetched automatically outside a disaster."
+                else "${pack.places.size} places within ${pack.radiusKm} km, fetched ${(System.currentTimeMillis() - pack.fetchedAtMs) / 3_600_000} h ago",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        OutlinedButton(onClick = {
+            val fix = LocationProvider.fix.value
+            val here = fix?.let { Geo.toE5(it.lat) to Geo.toE5(it.lon) }
+            note = if (MapPackUpdater.inCrisis(ctx, here)) "A disaster is declared here: maps are not downloaded now"
+            else { MapPackUpdater.maybeUpdate(ctx, force = true); "Fetching the map in the background" }
+            tick++
+        }) { Text("Update map now") }
     }
 }
