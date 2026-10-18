@@ -87,6 +87,33 @@ leading near/by/at/behind/the/a/an dropped repeatedly, trailing Hindi "के �
 (difflib ratio). Also reported: category, urgency within +/-1, people exact match, micro-F1 over vulnerability flags, validity,
 latency, and a per-clip list of every miss (`--diff-all` for all three systems).
 
+## Gemini judge (`eval/judge.py`, five languages)
+Gemini scores Gemma's (and the rules') extractions, so quality can be tracked in languages where we have no gold labels.
+Needs `pip install google-genai` and `GEMINI_API_KEY` (or `GOOGLE_GENAI_USE_VERTEXAI=true` + `GOOGLE_CLOUD_PROJECT` /
+`GOOGLE_CLOUD_LOCATION`, same as `backend/app/agent.py`).
+```bash
+python3 -I eval/judge.py eval/work/guided_run1/results.jsonl --dry-run                  # print the first prompt, no model call
+python3 -I eval/judge.py eval/work/guided_run1/results.jsonl --out eval/work/judged.jsonl
+python3 -I eval/judge.py results.jsonl --systems gemma_audio,gemma270_text,rules --limit 20 --model gemini-flash-latest
+python3 -I eval/test_judge.py                                                           # tests with a fake judge, no network
+```
+- **What it measures.** For each extraction the judge sees only the source utterance (the reference transcript, else the
+  prompt text) and the extracted JSON, both passed as JSON data flagged untrusted, and returns a score 0/1/2 (wrong /
+  partial / right) with a reason for category, urgency, people, vuln, item and landmark, an overall 0-10 and a
+  `hallucination` flag. Temperature 0. Output: a per system x language table (mean field scores, mean overall,
+  hallucination rate, n) and every verdict in `--out`. `gemma_audio` is judged against the sentence read aloud, not the
+  audio, so ASR-level mishearings show up as wrong fields only through that reference.
+- **Reliability check.** Where gold `expected` labels exist (en/hi, 34 prompts) a second table compares the judge
+  (score 2 = right) with `summarize.py`'s exact-match scoring per field: agreement %, and the two disagreement
+  directions. Quote the judge's per-language scores for or/tl/war only as far as this agreement holds on en/hi; labels are
+  never sent to the judge.
+- **Cache / cost.** Verdicts are cached in `<out>.cache.json` keyed by sha256(model + prompt), so reruns are free and only
+  new or changed extractions are billed. One call per extraction (34 clips x 3 systems is about 100 short calls, a few
+  thousand tokens each); a flash model makes that cents. `--limit` and `--dry-run` bound a first try.
+- **Languages.** The judge already works on any language. `or` (Odia), `tl` (Filipino) and `war` (Waray) prompts do not exist
+  yet: `eval/multilingual_prompts.todo.json` is a template with the same schema as `guided_prompts.json` and
+  `"text": "TODO: native speaker"` placeholders. **These sentences (and any labels) must be written by native speakers**;
+  do not machine-generate or guess them. Fill them in, merge into `guided_prompts.json`, rebuild, record, and run the eval.
 ## Record mode (UI, "Free-form" tab)
 Pick a language chip, hold the big button (max 15 s, 16 kHz mono PCM16 via `AudioRecord`), release. The screen shows the
 Gemma transcript, the extracted JSON, a latency line (model load / audio->first token / total / PSS), and `RuleExtractor`
