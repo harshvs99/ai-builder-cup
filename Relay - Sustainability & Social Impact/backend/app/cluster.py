@@ -4,7 +4,11 @@ A new NEED joins an existing OPEN ticket iff ALL hold:
   * same category
   * haversine distance to the ticket's canonical location <= 200 m
   * its (clock-sanitised) report time is within 6 h of the ticket's first report
-  * items match: normalised-lowercase equal, or either side empty
+  * items match: normalised-lowercase equal, or either side empty, or (when both items are non-empty
+    and both have an embedding) the cosine similarity of ``"{category}: {item}"`` embeddings is
+    >= ``embed.SIMILARITY_THRESHOLD`` ("insulin" ~ "इंसुलिन"). The embedding only replaces the
+    item-text test, never the other gates. A ticket without a stored ``item_vec``, or an incoming need
+    without a vector (no embedder, timeout, error), is judged by the text rule alone.
 
 Decision (not in the brief): a NEED with loc_acc == 0 ("no fix") never merges, because its
 coordinates are meaningless (phones send 0,0) and would otherwise glue unrelated reports
@@ -21,6 +25,7 @@ import re
 from typing import Any
 
 from .codec import CATEGORY_NAMES, LANG_CODES, Need, answers_to_json, photo_tags_to_json
+from .embed import SIMILARITY_THRESHOLD, cosine, decode_vec, encode_vec
 
 MAX_DISTANCE_M = 200.0
 MAX_AGE_WINDOW_S = 6 * 3600
@@ -44,23 +49,52 @@ def items_match(a: str, b: str) -> bool:
     return not na or not nb or na == nb
 
 
-def find_match(candidates: list[dict[str, Any]], need: Need) -> dict[str, Any] | None:
-    """Nearest matching ticket among OPEN, same-category, in-window candidates (or None)."""
+def item_reason(
+    ticket: dict[str, Any], need: Need, need_vec: list[float] | None, threshold: float
+) -> str | None:
+    """Why the ticket's item counts as the need's item (``merge_reason``), or None. Pure, no I/O."""
+    if items_match(ticket["item"], need.item):
+        return "item match"
+    if need_vec is not None and normalize_item(ticket["item"]) and normalize_item(need.item):
+        tv = decode_vec(ticket.get("item_vec"))
+        if tv is not None:
+            sim = cosine(need_vec, tv)
+            if sim >= threshold:
+                return f"similar item ({sim:.2f})"
+    return None
+
+
+def find_match_reason(
+    candidates: list[dict[str, Any]], need: Need, need_vec: list[float] | None = None,
+    threshold: float = SIMILARITY_THRESHOLD,
+) -> tuple[dict[str, Any], str] | None:
+    """Nearest matching ticket among OPEN, same-category, in-window candidates, with the reason."""
     if need.loc_acc == 0:
         return None
-    best: tuple[float, int, dict[str, Any]] | None = None
+    best: tuple[float, int, dict[str, Any], str] | None = None
     for t in candidates:
         if t["lat_e5"] == 0 and t["lon_e5"] == 0:
             continue  # a no-fix ticket (phones send 0,0): its coordinates mean nothing
-        if not items_match(t["item"], need.item):
+        reason = item_reason(t, need, need_vec, threshold)
+        if reason is None:
             continue
         d = haversine_m(need.lat, need.lon, t["lat_e5"] / 1e5, t["lon_e5"] / 1e5)
         if d <= MAX_DISTANCE_M and (best is None or (d, t["ticket_no"]) < best[:2]):
-            best = (d, t["ticket_no"], t)
-    return best[2] if best else None
+            best = (d, t["ticket_no"], t, reason)
+    return (best[2], best[3]) if best else None
 
 
-def new_ticket_fields(need: Need, hops: int, reported_at: int, now: int) -> dict[str, Any]:
+def find_match(
+    candidates: list[dict[str, Any]], need: Need, need_vec: list[float] | None = None,
+    threshold: float = SIMILARITY_THRESHOLD,
+) -> dict[str, Any] | None:
+    m = find_match_reason(candidates, need, need_vec, threshold)
+    return m[0] if m else None
+
+
+def new_ticket_fields(
+    need: Need, hops: int, reported_at: int, now: int, item_vec: list[float] | None = None
+) -> dict[str, Any]:
     fields = {
         "category": CATEGORY_NAMES[need.category],
         "item": need.item,
@@ -82,10 +116,14 @@ def new_ticket_fields(need: Need, hops: int, reported_at: int, now: int) -> dict
         fields["answers"] = answers_to_json(need.answers)
     if need.photo_tags:
         fields["photo_tags"] = {k: 1 for k in photo_tags_to_json(need.photo_tags)}
+    if item_vec is not None and need.item.strip() and (enc := encode_vec(item_vec)):
+        fields["item_vec"] = enc
     return fields
 
 
-def merge_fields(ticket: dict[str, Any], need: Need, hops: int, reported_at: int, now: int) -> dict[str, Any]:
+def merge_fields(
+    ticket: dict[str, Any], need: Need, hops: int, reported_at: int, now: int, item_vec: list[float] | None = None
+) -> dict[str, Any]:
     """Field updates for merging ``need`` into ``ticket``: count+1, max urgency/people/hops,
     OR of flags, earliest first report. Empty text fields are back-filled; the summary follows
     the most urgent report."""
@@ -100,6 +138,13 @@ def merge_fields(ticket: dict[str, Any], need: Need, hops: int, reported_at: int
     }
     if not ticket["item"] and need.item:
         upd["item"] = need.item
+    # canonical item vector: set when missing and this report's item is (now) the ticket's item
+    if (
+        item_vec is not None and not ticket.get("item_vec") and need.item.strip()
+        and (not ticket["item"] or normalize_item(ticket["item"]) == normalize_item(need.item))
+        and (enc := encode_vec(item_vec))
+    ):
+        upd["item_vec"] = enc
     if not ticket["landmark"] and need.landmark:
         upd["landmark"] = need.landmark
     if need.urgency > ticket["urgency"] and need.summary:

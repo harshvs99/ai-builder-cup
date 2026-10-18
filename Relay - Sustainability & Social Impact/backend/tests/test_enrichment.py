@@ -9,7 +9,7 @@ import pytest
 
 from app import geocode, priority
 from app.agent import GeminiAgent
-from app.districts import DISTRICTS, district_by_id
+from app.districts import DISTRICTS, by_id
 from app.geocode import Found, Gazetteer, MapsGeocoder, in_bbox
 from app.store import SqliteStore
 
@@ -122,8 +122,8 @@ def at(lat, lon, name="Old Lighthouse", place_id="ChIJabc", maps_uri="https://ma
     return Found(lat, lon, name, place_id, maps_uri)
 
 
-PURI = district_by_id("puri")
-DELHI = district_by_id("delhi")
+PURI = by_id("puri")
+DELHI = by_id("delhi")
 
 
 def test_maps_geocoder_accepts_point_inside_district():
@@ -258,6 +258,12 @@ def test_geocoder_from_env_is_off_unless_explicit():
     assert geocode.geocoder_from_env({"GEMINI_API_KEY": "k", "GOOGLE_GENAI_USE_VERTEXAI": "true"}).name == "none"
     on = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GOOGLE_GENAI_USE_VERTEXAI": "true"})
     assert on.name == "gemini_maps"  # lazy client: no credentials or network needed to construct
+    keyed = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GEMINI_API_KEY": "k"})
+    assert keyed.name == "gemini_maps"
+    assert keyed._finder._kwargs == {"api_key": "k"}
+    vtx = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GEMINI_API_KEY": "k",
+                                     "GOOGLE_GENAI_USE_VERTEXAI": "true", "GOOGLE_CLOUD_PROJECT": "p"})
+    assert vtx._finder._kwargs["vertexai"] is True
 
 
 def test_geocoder_from_env_picks_vertex_or_api_key_and_model():
@@ -268,7 +274,7 @@ def test_geocoder_from_env_picks_vertex_or_api_key_and_model():
     assert key.name == "gemini_maps" and key._finder._kwargs == {"api_key": "k"}
     both = geocode.geocoder_from_env({**base, "GEMINI_API_KEY": "k", "GOOGLE_GENAI_USE_VERTEXAI": "true"})
     assert both._finder._kwargs["vertexai"] is True  # Vertex wins, as for the other Gemini clients
-    assert key._finder._model == "gemini-flash-latest"
+    assert key._finder._model == "gemini-3.8-flash"
     assert geocode.geocoder_from_env({**base, "GEMINI_API_KEY": "k", "GEMINI_MODEL": "m1"})._finder._model == "m1"
     assert geocode.geocoder_from_env(
         {**base, "GEMINI_API_KEY": "k", "GEMINI_MODEL": "m1", "GEMINI_GEOCODE_MODEL": "m2"})._finder._model == "m2"

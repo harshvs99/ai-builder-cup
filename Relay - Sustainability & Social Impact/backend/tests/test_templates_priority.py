@@ -3,10 +3,15 @@ import pytest
 from app import codec, priority, templates
 
 
+def _every(kind):
+    """Reviewed and pending-review texts together."""
+    return {**templates.TEMPLATES[kind], **templates.CONTRIB_TEMPLATES[kind]}
+
+
 @pytest.mark.parametrize("kind", list(templates.TEMPLATES))
 @pytest.mark.parametrize("lang", codec.LANG_CODES)
-def test_every_template_fits_112_bytes_untruncated(kind, lang):
-    raw = templates.TEMPLATES[kind][lang].format(n=99999, eta=999)
+def test_every_template_fits_112_bytes_untruncated(kind, lang, all_langs):
+    raw = _every(kind)[lang].format(n=99999, eta=999)
     assert len(raw.encode("utf-8")) <= codec.MAX_ACK_TEXT, (kind, lang, len(raw.encode()))
     assert templates.render(kind, lang, 99999, 999) == raw  # render() did not truncate
     # and survives a real ACK encode/decode unchanged
@@ -15,8 +20,23 @@ def test_every_template_fits_112_bytes_untruncated(kind, lang):
 
 
 def test_all_languages_have_both_templates():
-    for kind in ("RECEIVED", "DISPATCHED"):
-        assert set(templates.TEMPLATES[kind]) == set(codec.LANG_CODES)
+    for kind in templates.TEMPLATES:
+        assert set(templates.TEMPLATES[kind]) == {"en", "hi"}  # reviewed
+        assert set(_every(kind)) == set(codec.LANG_CODES)  # plus the pending-review drafts
+
+
+def test_languages_not_enabled_get_english(monkeypatch):
+    monkeypatch.delenv("RELAY_LANGS", raising=False)
+    en = templates.render("DISPATCHED", "en", 7)
+    for lang in ("or", "tl", "war", "ceb"):
+        assert templates.render("DISPATCHED", lang, 7) == en
+    assert templates.render("DISPATCHED", "hi", 7) != en
+
+
+def test_pending_review_templates_are_used_once_enabled(monkeypatch):
+    monkeypatch.setenv("RELAY_LANGS", "en,hi,or")
+    assert templates.render("RESOLVED", "or", 7) == templates.CONTRIB_TEMPLATES["RESOLVED"]["or"].format(n=7, eta=45)
+    assert templates.render("RESOLVED", "tl", 7) == templates.render("RESOLVED", "en", 7)  # still off
 
 
 def test_status_text_and_eta():

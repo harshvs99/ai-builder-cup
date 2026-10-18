@@ -180,6 +180,8 @@ export interface Sitrep {
   period_start: number;
   period_end: number;
   generated_at: number;
+  /** District id; absent on reports written before sitreps were per district. */
+  district?: string;
   counts: SitrepCounts;
   text_en: string;
   text_local: string;
@@ -251,4 +253,158 @@ export interface RecoverReport {
   local_lang: string;
   model: 'gemini' | 'template';
   evidence_digests: Array<{ ticket_no: number; digest: string }>;
+}
+
+export type AnnouncementLang = 'en' | 'hi' | 'or' | 'tl' | 'war';
+export type AnnouncementLangStatus = 'ok' | 'needs_review' | 'missing';
+
+export interface AnnouncementTranslation {
+  text: string;
+  back_translation: string;
+  faithful: boolean;
+  issues: string;
+  checks_passed: boolean;
+  status: AnnouncementLangStatus;
+  edited?: boolean;
+}
+
+export interface Announcement {
+  id: number;
+  district: string;
+  source_text: string;
+  source_lang: AnnouncementLang;
+  created_at: number;
+  translations: Record<AnnouncementLang, AnnouncementTranslation>;
+  status: 'draft' | 'approved' | 'withdrawn';
+  approved_at: number | null;
+  approved_langs: AnnouncementLang[];
+}
+
+export type WarningSource = 'IMD' | 'PAGASA' | 'NDMA' | 'manual';
+export type WarningSeverity = 'watch' | 'warning' | 'alert';
+
+/** A Ready-mode warning for one district (issued by an operator or imported from a CAP alert). */
+export interface ReadyWarning {
+  id: number;
+  district: string;
+  source: WarningSource;
+  severity: WarningSeverity;
+  headline: string;
+  /** unix seconds */
+  issued_at: number;
+  expected_landfall_at: number | null;
+  expires_at: number | null;
+  cancelled_at: number | null;
+  /** Not cancelled and not expired, as the backend sees it. */
+  active: boolean;
+  cap_identifier?: string | null;
+  area?: string;
+}
+
+export interface NewWarning {
+  district: string;
+  source: WarningSource;
+  severity: WarningSeverity;
+  headline: string;
+  expected_landfall_at?: number;
+  expires_at?: number;
+}
+
+export interface CapImportResult {
+  imported: ReadyWarning[];
+  skipped: { identifier: string | null; reason: string }[];
+}
+
+export type ShelterKind = 'cyclone_shelter' | 'school' | 'relief_camp' | 'hospital';
+
+export interface ReadyShelter {
+  id: string;
+  name: string;
+  name_en: string;
+  kind: ShelterKind;
+  lat: number;
+  lon: number;
+  capacity: number;
+  facilities: string[];
+  block: string;
+  /** Placeholder entry, not verified: replace with the official list before a pilot. */
+  demo: boolean;
+}
+
+export interface Household {
+  people: number;
+  elderly: boolean;
+  children: boolean;
+  infants: boolean;
+  pregnant: boolean;
+  disability: boolean;
+  medical_needs: string;
+  livestock: boolean;
+}
+
+export interface PlanRequest {
+  lang: string;
+  district?: string;
+  lat?: number;
+  lon?: number;
+  household: Household;
+}
+
+export interface ReadyPlan {
+  plan_id: string;
+  lang: string;
+  /** Language the steps are actually in (English when the requested one has no template). */
+  steps_lang: string;
+  district: string;
+  steps: string[];
+  source: 'gemini' | 'template';
+  warning_id: number | null;
+  nearest_shelters: { id: string; name: string; distance_km: number }[];
+  audio_url: string | null;
+}
+
+export type ShelterEntryKind = ShelterKind | 'other';
+
+/** One row of a shelter list draft (backend `app/shelters.py`). The model's text is data; `issues` come from the server's checks. */
+export interface ShelterEntry {
+  id: string;
+  name: string;
+  name_local: string | null;
+  kind: ShelterEntryKind;
+  address: string;
+  block: string | null;
+  capacity: number | null;
+  lat: number | null;
+  lon: number | null;
+  coords_from: 'source' | 'estimate' | 'officer' | 'none';
+  source_url: string | null;
+  verified: boolean;
+  issues: string[];
+}
+
+export interface ShelterSource {
+  uri: string;
+  title: string;
+}
+
+export interface ShelterList {
+  id: number;
+  district: string;
+  status: 'draft' | 'published' | 'archived';
+  created_at: number;
+  entries: ShelterEntry[];
+  sources: ShelterSource[];
+  /** Google's rendered Search Suggestions; must be shown wherever grounded results are shown. */
+  search_suggestions_html: string;
+  model: string | null;
+  notes: string[];
+  origin: 'gemini' | 'manual';
+  published_at: number | null;
+  published_by_note: string | null;
+}
+
+export interface ShelterPublishResult {
+  list: ShelterList;
+  published: number;
+  skipped: { id: string; name: string; reason: string }[];
 }

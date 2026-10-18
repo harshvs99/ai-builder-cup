@@ -13,6 +13,12 @@ look. Two sources, in order:
      the response carries a Google Maps grounding chunk (an ungrounded guess is worthless) and the
      point is inside the bounding box of the ticket's district (see ``districts.py``).
 
+     DO NOT ENABLE FOR RELAY'S REAL USE: Google's Maps-grounding docs (Gemini API and Firebase AI
+     Logic, which covers both the Gemini Developer API and Vertex AI providers) say it must not be
+     used "for high risk activities including emergency response services". Moving to Vertex AI
+     does not lift this. Kept for experiments and officer-initiated lookups; the gazetteer path
+     stays the default.
+
 The result is stored as ``geo = {lat, lon, source, query}`` (a Maps answer also carries ``name``,
 ``district`` and, when Google gave them, ``place_id`` / ``maps_uri``). It is an estimate and nothing
 else reads it as a fix:
@@ -39,7 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .districts import DISTRICTS, PURI_BBOX, District, district_containing, nearest_district
+from .districts import DISTRICTS, PURI_BBOX, District, district_containing, nearest
 from .location import tokenize
 
 log = logging.getLogger("relay.geocode")
@@ -251,7 +257,7 @@ def gateway_district(
     ]
     if not points:
         return None
-    return nearest_district(statistics.median(p[0] for p in points), statistics.median(p[1] for p in points))
+    return nearest(statistics.median(p[0] for p in points), statistics.median(p[1] for p in points))
 
 
 # --------------------------------------------------------------------------------------
@@ -450,7 +456,7 @@ def geocoder_from_env(env: dict[str, str] | None = None) -> Geocoder:
     if not use_vertex and not key:
         log.warning("RELAY_GEOCODER=gemini_maps needs Vertex AI (GOOGLE_GENAI_USE_VERTEXAI) or GEMINI_API_KEY; geocoder off")
         return NoGeocoder()
-    model = env.get("GEMINI_GEOCODE_MODEL") or env.get("GEMINI_MODEL") or "gemini-flash-latest"
+    model = env.get("GEMINI_GEOCODE_MODEL") or env.get("GEMINI_MODEL") or "gemini-3.8-flash"
     try:
         if use_vertex:
             finder = GenaiMapsFinder(

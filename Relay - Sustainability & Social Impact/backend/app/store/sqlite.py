@@ -21,6 +21,7 @@ from .base import (
     ADVANCE_FROM,
     HintIn,
     JSON_COLUMNS,
+    TEXT_COLUMNS,
     TICKET_COLUMNS,
     AckSpec,
     AdvanceResult,
@@ -166,6 +167,28 @@ CREATE TABLE IF NOT EXISTS sitreps (
     generated_at INTEGER NOT NULL,
     data         TEXT    NOT NULL            -- JSON, includes id
 );
+
+CREATE TABLE IF NOT EXISTS announcements (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    district TEXT    NOT NULL,
+    status   TEXT    NOT NULL,
+    data     TEXT    NOT NULL                -- JSON, includes id
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_district ON announcements(district, status);
+
+CREATE TABLE IF NOT EXISTS ready_warnings (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    district TEXT NOT NULL,
+    data     TEXT NOT NULL                   -- JSON, includes id
+);
+CREATE INDEX IF NOT EXISTS idx_ready_warnings_district ON ready_warnings(district, id);
+
+CREATE TABLE IF NOT EXISTS shelter_lists (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    district TEXT NOT NULL,
+    data     TEXT NOT NULL                   -- JSON, includes id
+);
+CREATE INDEX IF NOT EXISTS idx_shelter_lists_district ON shelter_lists(district, id);
 """
 
 _OLD_STATUS_CHECK = "CHECK (status IN ('OPEN','DISPATCHED'))"
@@ -236,7 +259,7 @@ class SqliteStore:
             conn.executescript(SCHEMA)
             _widen_status_check(conn)
             have = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
-            for col in JSON_COLUMNS:  # databases created before these columns existed
+            for col in (*JSON_COLUMNS, *TEXT_COLUMNS):  # databases created before these columns existed
                 if col not in have:
                     conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
             conn.execute(_SEED_SEQUENCE)
@@ -638,9 +661,109 @@ class SqliteStore:
             c.execute("UPDATE sitreps SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
             return saved
 
-    def latest_sitrep(self) -> dict[str, Any] | None:
-        rows = self._q("SELECT data FROM sitreps ORDER BY id DESC LIMIT 1")
+    def latest_sitrep(self, district: str | None = None) -> dict[str, Any] | None:
+        if district is None:
+            rows = self._q("SELECT data FROM sitreps ORDER BY id DESC LIMIT 1")
+        else:
+            rows = self._q(
+                "SELECT data FROM sitreps WHERE json_extract(data, '$.district') = ? ORDER BY id DESC LIMIT 1",
+                (district,),
+            )
         return json.loads(rows[0]["data"]) if rows else None
+
+    # ------------------------------------------------------------------ announcements
+    def add_announcement(self, announcement: dict[str, Any]) -> dict[str, Any]:
+        with self.tx() as c:
+            cur = c.execute(
+                "INSERT INTO announcements(district, status, data) VALUES (?, ?, '{}')",
+                (announcement["district"], announcement["status"]),
+            )
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in announcement.items() if k != "id"}}
+            c.execute("UPDATE announcements SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            return saved
+
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM announcements WHERE id = ?", (announcement_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def update_announcement(self, announcement_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        with self.tx() as c:
+            row = c.execute("SELECT data FROM announcements WHERE id = ?", (announcement_id,)).fetchone()
+            if row is None:
+                return None
+            saved = {**json.loads(row["data"]), **fields, "id": announcement_id}
+            c.execute(
+                "UPDATE announcements SET district = ?, status = ?, data = ? WHERE id = ?",
+                (saved["district"], saved["status"], json.dumps(saved), announcement_id),
+            )
+            return saved
+
+    def list_announcements(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        where, args = [], []
+        for col, val in (("district", district), ("status", status)):
+            if val is not None:
+                where.append(f"{col} = ?")
+                args.append(val)
+        sql = "SELECT data FROM announcements" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC"
+        return [json.loads(r["data"]) for r in self._q(sql, args)]
+
+    # ------------------------------------------------------------------ ready-mode warnings
+    def add_warning(self, warning: dict[str, Any]) -> dict[str, Any]:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO ready_warnings(district, data) VALUES (?, '{}')", (warning["district"],))
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in warning.items() if k != "id"}}
+            c.execute("UPDATE ready_warnings SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            return saved
+
+    def get_warning(self, warning_id: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM ready_warnings WHERE id = ?", (warning_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def list_warnings(self, district: str | None = None) -> list[dict[str, Any]]:
+        if district is None:
+            rows = self._q("SELECT data FROM ready_warnings ORDER BY id DESC LIMIT 200")
+        else:
+            rows = self._q("SELECT data FROM ready_warnings WHERE district = ? ORDER BY id DESC LIMIT 200", (district,))
+        return [json.loads(r["data"]) for r in rows]
+
+    def cancel_warning(self, warning_id: int, now: int) -> dict[str, Any] | None:
+        with self.tx() as c:
+            row = c.execute("SELECT data FROM ready_warnings WHERE id = ?", (warning_id,)).fetchone()
+            if row is None:
+                return None
+            w = json.loads(row["data"])
+            if w.get("cancelled_at") is None:
+                w["cancelled_at"] = int(now)
+                c.execute("UPDATE ready_warnings SET data = ? WHERE id = ?", (json.dumps(w), warning_id))
+            return w
+
+    # ------------------------------------------------------------------ shelter lists
+    def add_shelter_list(self, record: dict[str, Any]) -> dict[str, Any]:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO shelter_lists(district, data) VALUES (?, '{}')", (record["district"],))
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in record.items() if k != "id"}}
+            c.execute("UPDATE shelter_lists SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            return saved
+
+    def get_shelter_list(self, list_id: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM shelter_lists WHERE id = ?", (list_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def update_shelter_list(self, list_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        with self.tx() as c:
+            row = c.execute("SELECT data FROM shelter_lists WHERE id = ?", (list_id,)).fetchone()
+            if row is None:
+                return None
+            rec = {**json.loads(row["data"]), **{k: v for k, v in fields.items() if k not in ("id", "district")}}
+            c.execute("UPDATE shelter_lists SET data = ? WHERE id = ?", (json.dumps(rec), list_id))
+            return rec
+
+    def list_shelter_lists(self, district: str | None = None) -> list[dict[str, Any]]:
+        if district is None:
+            rows = self._q("SELECT data FROM shelter_lists ORDER BY id DESC LIMIT 200")
+        else:
+            rows = self._q("SELECT data FROM shelter_lists WHERE district = ? ORDER BY id DESC LIMIT 200", (district,))
+        return [json.loads(r["data"]) for r in rows]
 
     # ------------------------------------------------------------------ acks
     def queue_ack(

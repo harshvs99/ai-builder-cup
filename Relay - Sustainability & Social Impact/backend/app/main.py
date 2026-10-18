@@ -9,11 +9,12 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -21,10 +22,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import announcements
 from . import dispatch as dispatching
+from . import districts, languages
+from . import ready as readiness
 from . import recover
+from . import shelters as shelter_lists
 from . import sitrep as sitreps
 from . import teams as team_data
+from .embed import Embedder, embedder_from_env
 from .agent import Agent, IncomingNeed, TriagePipeline, agent_from_env, build_ack
 from .codec import (
     CATEGORY_NAMES,
@@ -68,7 +74,8 @@ from .pubsub import (
     parse_push_envelope,
 )
 from .store import Store, TeamAtCapacity, open_store
-from .textgen import TextGen, textgen_from_env
+from .textgen import TextGen, sitrep_textgen_from_env, textgen_from_env
+from .tts import Speech, speech_from_env
 
 log = logging.getLogger("relay.api")
 
@@ -203,6 +210,90 @@ class OnTheWayRequest(BaseModel):
     """Optional body of ``POST /v1/tickets/{no}/on-the-way``: the ETA for the on-the-way ACK."""
 
     eta_min: int | None = Field(default=None, ge=0, le=dispatching.MAX_ETA_MIN)
+
+
+class AnnouncementCreate(BaseModel):
+    district: str
+    text: str = Field(min_length=1, max_length=announcements.MAX_TEXT_CHARS)
+    source_lang: str = "en"
+
+    @field_validator("district")
+    @classmethod
+    def _district(cls, v: str) -> str:
+        return announcements.norm_district(v)
+
+    @field_validator("source_lang")
+    @classmethod
+    def _lang(cls, v: str) -> str:
+        if v not in announcements.active_langs():
+            raise ValueError(f"source_lang must be one of {', '.join(announcements.active_langs())}")
+        return v
+
+
+class AnnouncementApprove(BaseModel):
+    """``langs`` omitted = every language whose status is ok. ``edits`` = operator-corrected texts."""
+
+    langs: list[str] | None = Field(default=None, max_length=len(announcements.ALL_LANGS))
+    edits: dict[str, str] | None = None
+class WarningRequest(BaseModel):
+    """``POST /v1/ready/warnings``: an authority's warning, relayed by the duty officer."""
+
+    district: str
+    source: Literal["IMD", "PAGASA", "NDMA", "manual"]
+    severity: Literal["watch", "warning", "alert"]
+    headline: str = Field(min_length=1, max_length=readiness.MAX_HEADLINE_CHARS)
+    expected_landfall_at: int | None = Field(default=None, ge=0, lt=1 << 32)  # unix s
+    expires_at: int | None = Field(default=None, ge=0, lt=1 << 32)  # unix s
+
+    @field_validator("headline")
+    @classmethod
+    def _headline(cls, v: str) -> str:
+        v = readiness.clean_text(v)
+        if not v:
+            raise ValueError("headline must not be blank")
+        return v
+
+
+class CapImportRequest(BaseModel):
+    district: str
+    cap_xml: str = Field(min_length=1, max_length=readiness.MAX_CAP_CHARS)
+
+
+class PlanRequest(BaseModel):
+    """``POST /v1/ready/plan`` (device key) and ``/plan/preview`` (operator): a household and where it is."""
+
+    lang: str = "en"
+    district: str | None = None
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    household: readiness.Household = Field(default_factory=readiness.Household)
+
+    @field_validator("lang")
+    @classmethod
+    def _lang(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in LANG_CODES:
+            raise ValueError(f"lang must be one of {list(LANG_CODES)}")
+        return v
+
+
+class ShelterListRequest(BaseModel):
+    """``POST /v1/ready/shelter-lists``: a hand-entered draft. ``PATCH`` takes ``entries`` only."""
+
+    district: str
+    entries: list[dict[str, Any]] = Field(default_factory=list, max_length=shelter_lists.MAX_ENTRIES)
+
+
+class ShelterDiscoverRequest(BaseModel):
+    district: str
+
+
+class ShelterEntriesPatch(BaseModel):
+    entries: list[dict[str, Any]] = Field(max_length=shelter_lists.MAX_ENTRIES)
+
+
+class ShelterPublishRequest(BaseModel):
+    note: str = Field(default="", max_length=200)  # who verified, e.g. "checked against OSDMA PDF dated ..."
 
 
 class InjectRequest(BaseModel):
@@ -383,16 +474,26 @@ def create_app(
     triage_budget_s: float | None = None,
     textgen: TextGen | None = None,
     sitrep_textgen: TextGen | None = None,
+    announcement_textgen: TextGen | None = None,
+    embedder: Embedder | None = None,
+    ready_textgen: TextGen | None = None,
+    speech: Speech | None = None,
+    shelter_finder: shelter_lists.ShelterFinder | None = None,
     recover_textgen: TextGen | None = None,
     evidence_salt: str | None = None,
     geocoder: Geocoder | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
-    orders, ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default ``GEMINI_MODEL``) and ``recover_textgen`` the
-    Recover-mode relief report (``RECOVER_GEMINI_MODEL``, default ``GEMINI_MODEL``); ``evidence_salt``
-    (``RELAY_EVIDENCE_SALT``) salts the reporter pseudonyms in evidence packs. All three writers default to Gemini when the environment enables it, else to templates. ``geocoder`` (Maps-grounded
-    landmark lookup, also used by ``POST /v1/tickets/{no}/locate``) defaults to ``RELAY_GEOCODER``."""
+    orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default the Pro alias, Flash fallback);
+    ``announcement_textgen`` translates and checks announcements (``ANNOUNCEMENT_GEMINI_MODEL``); ``ready_textgen`` writes
+    the Ready-mode household plan (``READY_GEMINI_MODEL``); ``recover_textgen`` writes the Recover-mode relief report
+    (``RECOVER_GEMINI_MODEL``, default ``GEMINI_MODEL``); all default to Gemini when the environment enables
+    it, else to templates. ``speech`` reads plans aloud (``RELAY_TTS_MODEL``, off by default).
+    ``shelter_finder`` is the Search-grounded call that drafts a shelter list (``SHELTER_GEMINI_MODEL``).
+    ``evidence_salt`` (``RELAY_EVIDENCE_SALT``) salts the reporter pseudonyms in Recover evidence packs.
+    ``geocoder`` (Maps-grounded landmark lookup, also used by ``POST /v1/tickets/{no}/locate``) defaults to
+    ``RELAY_GEOCODER``."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
     operator_key = operator_key if operator_key is not None else os.environ.get("RELAY_OPERATOR_KEY", "")
@@ -412,18 +513,26 @@ def create_app(
         publisher = PubSubPublisher()
 
     textgen = textgen if textgen is not None else textgen_from_env("GEMINI_MODEL")
-    sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else textgen_from_env("SITREP_GEMINI_MODEL")
+    sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else sitrep_textgen_from_env()
+    announcement_textgen = (
+        announcement_textgen if announcement_textgen is not None else textgen_from_env("ANNOUNCEMENT_GEMINI_MODEL")
+    )
+    ready_textgen = ready_textgen if ready_textgen is not None else textgen_from_env("READY_GEMINI_MODEL")
+    speech = speech if speech is not None else speech_from_env()
     recover_textgen = (
         recover_textgen if recover_textgen is not None else textgen_from_env("RECOVER_GEMINI_MODEL", timeout_s=45.0)
     )
     salt = evidence_salt if evidence_salt is not None else os.environ.get("RELAY_EVIDENCE_SALT", recover.DEFAULT_SALT)
     store = store if store is not None else open_store(db_path=db_path)
+    shelter_finder = shelter_finder if shelter_finder is not None else shelter_lists.shelter_finder_from_env()
+    plans = readiness.PlanService(ready_textgen, clock, store)
     pipeline = TriagePipeline(
         store,
         agent if agent is not None else agent_from_env(),
         clock=clock,
         enrich_budget_s=enrich_budget_s if enrich_budget_s is not None else float(os.environ.get("RELAY_AGENT_BUDGET_S", "20")),
         geocoder=geocoder,
+        embedder=embedder if embedder is not None else embedder_from_env(),
     )
 
     @asynccontextmanager
@@ -431,6 +540,7 @@ def create_app(
         yield
         store.close()
 
+    languages.validate()  # a bad RELAY_LANGS fails at start, not on the first request
     app = FastAPI(title="Relay backend", version="0.1.0", lifespan=lifespan)
     app.state.store = store
     app.state.pipeline = pipeline
@@ -491,6 +601,11 @@ def create_app(
     @app.get("/v1/health")
     def healthz() -> dict[str, bool]:
         return {"ok": True}  # deliberately touches nothing: no store, no Pub/Sub
+
+    @app.get("/v1/languages")
+    def get_languages() -> list[dict[str, Any]]:
+        """No auth: the registry, so apps and the dashboard show only enabled languages."""
+        return languages.listing()
 
     # ------------------------------------------------------------------ gateway sync
     @app.post("/v1/sync", dependencies=[Depends(require_key)])
@@ -746,7 +861,7 @@ def create_app(
             raise HTTPException(status_code=409, detail="ticket is not open")
         assignments = dispatching.allocate([t for t in tickets if t["status"] == "OPEN"], views)
         assignments = [a for a in assignments if a.ticket_no == ticket_no]
-        proposals = dispatching.build_proposals(assignments, [target], textgen, int(clock()))
+        proposals = dispatching.build_proposals(assignments, [target], textgen, int(clock()), teams=views)
         if proposals:
             store.set_proposals({ticket_no: {k: v for k, v in proposals[0].items() if k != "ticket_no"}})
         elif target.get("proposal"):
@@ -754,13 +869,27 @@ def create_app(
         return {"proposals": proposals}
 
     # ------------------------------------------------------------------ sitreps
+    def district_or_404(district_id: str) -> districts.District:
+        d = districts.by_id(district_id)
+        if d is None:
+            raise HTTPException(status_code=404, detail=f"unknown district {district_id!r}")
+        return d
+
     @app.post("/v1/sitreps/run", dependencies=operator)
-    def run_sitrep() -> dict[str, Any]:
-        return sitreps.run(store, sitrep_textgen, clock())
+    def run_sitrep(district: str | None = None) -> dict[str, Any]:
+        """One district's sitrep (``?district=puri``), or with no district every district's, written
+        in parallel (the hourly scheduler): ``{"sitreps": [...]}``."""
+        now = clock()
+        tickets = [_ticket_json(r, links) for r, links in store.list_tickets_with_links()]
+        if district is not None:
+            return sitreps.run(store, sitrep_textgen, now, tickets, district_or_404(district))
+        with ThreadPoolExecutor(max_workers=len(districts.DISTRICTS)) as pool:
+            out = list(pool.map(lambda d: sitreps.run(store, sitrep_textgen, now, tickets, d), districts.DISTRICTS))
+        return {"sitreps": out}
 
     @app.get("/v1/sitreps/latest", dependencies=operator)
-    def latest_sitrep() -> dict[str, Any]:
-        latest = store.latest_sitrep()
+    def latest_sitrep(district: str | None = None) -> dict[str, Any]:
+        latest = store.latest_sitrep(district_or_404(district).id if district is not None else None)
         if latest is None:
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
@@ -803,6 +932,259 @@ def create_app(
         """Generated now from the store and returned; nothing is persisted (unlike sitreps)."""
         district = district_param(district)
         return recover.build_report(recover.load_cases(store, district), district, salt, recover_textgen, int(clock()))
+
+    # ------------------------------------------------------------------ announcements
+    def announcement_or_404(announcement_id: int) -> dict[str, Any]:
+        row = store.get_announcement(announcement_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="announcement not found")
+        return row
+
+    @app.post("/v1/announcements", dependencies=operator)
+    def create_announcement(body: AnnouncementCreate) -> dict[str, Any]:
+        """Draft only: translations are checked but nothing is served until /approve."""
+        translations = announcements.draft(
+            body.text, body.source_lang, body.district, announcement_textgen, announcement_textgen
+        )
+        return store.add_announcement({
+            "district": body.district, "source_text": body.text.strip(), "source_lang": body.source_lang,
+            "created_at": int(clock()), "translations": translations, "status": "draft",
+            "approved_at": None, "approved_langs": [],
+        })
+
+    @app.get("/v1/announcements", dependencies=operator)
+    def list_announcements(district: str | None = None, status: str | None = None) -> dict[str, Any]:
+        if status is not None and status not in ("draft", "approved", "withdrawn"):
+            raise HTTPException(status_code=422, detail="status must be draft, approved or withdrawn")
+        try:
+            district = announcements.norm_district(district) if district else None
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"announcements": store.list_announcements(district, status)}
+
+    @app.post("/v1/announcements/{announcement_id}/approve", dependencies=operator)
+    def approve_announcement(announcement_id: int, body: AnnouncementApprove | None = None) -> dict[str, Any]:
+        row = announcement_or_404(announcement_id)
+        if row["status"] != "draft":
+            raise HTTPException(status_code=409, detail=f"announcement is {row['status']}, not a draft")
+        body = body or AnnouncementApprove()
+        try:
+            fields = announcements.apply_approval(row, body.langs, body.edits)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        saved = store.update_announcement(
+            announcement_id, {**fields, "status": "approved", "approved_at": int(clock())}
+        )
+        return saved or row
+
+    @app.post("/v1/announcements/{announcement_id}/withdraw", dependencies=operator)
+    def withdraw_announcement(announcement_id: int) -> dict[str, Any]:
+        announcement_or_404(announcement_id)
+        return store.update_announcement(announcement_id, {"status": "withdrawn"}) or announcement_or_404(announcement_id)
+
+    @app.get("/v1/announcements/active", dependencies=[Depends(require_key)])
+    def active_announcements(district: str) -> dict[str, Any]:
+        """For phones with signal (device key): approved, not withdrawn, approved languages only."""
+        try:
+            district = announcements.norm_district(district)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"announcements": [
+            {
+                "id": b["id"], "district": b["district"], "source_lang": b["source_lang"],
+                "created_at": b["created_at"], "approved_at": b["approved_at"],
+                "texts": {lang: b["translations"][lang]["text"] for lang in b["approved_langs"] if languages.is_enabled(lang)},
+            }
+            for b in store.list_announcements(district, "approved")
+        ]}
+    # ------------------------------------------------------------------ ready mode (before landfall)
+    def resolve_district(district: str | None, lat: float | None, lon: float | None) -> districts.District:
+        if district is not None:
+            return district_or_404(district)
+        if lat is not None and lon is not None:
+            return districts.nearest(lat, lon)
+        raise HTTPException(status_code=422, detail="give district, or lat and lon")
+
+    def check_lang(lang: str) -> str:
+        lang = lang.strip().lower()
+        if lang not in LANG_CODES:
+            raise HTTPException(status_code=422, detail=f"lang must be one of {list(LANG_CODES)}")
+        return lang
+
+    def district_warning(district_id: str, now: float) -> dict[str, Any] | None:
+        return readiness.active_warning(store.list_warnings(district_id), now)
+
+    @app.post("/v1/ready/warnings", dependencies=operator)
+    def issue_warning(body: WarningRequest) -> dict[str, Any]:
+        district = district_or_404(body.district)
+        now = clock()
+        if body.expires_at is not None and body.expires_at <= now:
+            raise HTTPException(status_code=422, detail="expires_at is already in the past")
+        w = store.add_warning({
+            "district": district.id, "source": body.source, "severity": body.severity, "headline": body.headline,
+            "expected_landfall_at": body.expected_landfall_at, "expires_at": body.expires_at,
+            "issued_at": int(now), "cancelled_at": None,
+        })
+        return readiness.warning_view(w, now)
+
+    @app.get("/v1/ready/warnings", dependencies=operator)
+    def list_warnings(district: str | None = None, active: bool = False) -> dict[str, Any]:
+        """Newest first; ``?active=true`` leaves out cancelled and expired ones."""
+        did = district_or_404(district).id if district is not None else None
+        now = clock()
+        views = [readiness.warning_view(w, now) for w in store.list_warnings(did)]
+        return {"warnings": [w for w in views if w["active"] or not active]}
+
+    @app.post("/v1/ready/warnings/import-cap", dependencies=operator)
+    def import_cap(body: CapImportRequest) -> dict[str, Any]:
+        """Paste a CAP 1.2 alert (IMD / NDMA SACHET / PAGASA): its actual, unexpired alerts become warnings."""
+        district = district_or_404(body.district)
+        try:
+            return readiness.import_cap(store, district.id, body.cap_xml, clock())
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.post("/v1/ready/warnings/{warning_id}/cancel", dependencies=operator)
+    def cancel_warning(warning_id: int) -> dict[str, Any]:
+        now = clock()
+        w = store.cancel_warning(warning_id, int(now))
+        if w is None:
+            raise HTTPException(status_code=404, detail="warning not found")
+        return readiness.warning_view(w, now)
+
+    @app.get("/v1/ready/shelters", dependencies=operator)
+    def ready_shelters(district: str, lang: str = "en") -> dict[str, Any]:
+        """The district's shelter list as phones get it in the pack (the pack itself needs the device key)."""
+        d = district_or_404(district)
+        lang = check_lang(lang)
+        return {"district": d.id, "shelters": [readiness.shelter_view(s, lang, d) for s in readiness.shelters_for(d, store)]}
+
+    # ------------------------------------------------------------------ shelter lists (Discover -> Verify -> Publish)
+    shelter_lock = threading.Lock()
+
+    def draft_list_or_error(list_id: int) -> dict[str, Any]:
+        rec = store.get_shelter_list(list_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="shelter list not found")
+        if rec["status"] != "draft":
+            raise HTTPException(status_code=409, detail=f"list is {rec['status']}; only a draft can change")
+        return rec
+
+    @app.post("/v1/ready/shelter-lists/discover", dependencies=operator)
+    def discover_shelters(body: ShelterDiscoverRequest) -> dict[str, Any]:
+        """Gemini + Google Search drafts the district's official shelter list. Every entry starts unverified."""
+        d = district_or_404(body.district)
+        if shelter_finder is None:
+            raise HTTPException(status_code=503, detail="no Gemini credentials: set GEMINI_API_KEY (or Vertex AI) to discover shelters, or enter the list manually")
+        try:
+            rec = shelter_lists.discover(d.id, d.name, shelter_finder, clock())
+        except Exception as e:
+            log.warning("shelter discovery failed: %s: %s", type(e).__name__, e)
+            raise HTTPException(status_code=502, detail=f"shelter discovery failed ({type(e).__name__}); try again or enter the list manually") from e
+        return store.add_shelter_list(rec)
+
+    @app.post("/v1/ready/shelter-lists", dependencies=operator)
+    def create_shelter_list(body: ShelterListRequest) -> dict[str, Any]:
+        d = district_or_404(body.district)
+        entries, notes = shelter_lists.validate_entries(body.entries, d.id, [])
+        return store.add_shelter_list(shelter_lists.new_record(d.id, entries, clock(), notes=notes))
+
+    @app.get("/v1/ready/shelter-lists", dependencies=operator)
+    def list_shelter_lists(district: str | None = None) -> dict[str, Any]:
+        did = district_or_404(district).id if district is not None else None
+        return {"lists": store.list_shelter_lists(did)}
+
+    @app.patch("/v1/ready/shelter-lists/{list_id}", dependencies=operator)
+    def patch_shelter_list(list_id: int, body: ShelterEntriesPatch) -> dict[str, Any]:
+        with shelter_lock:
+            rec = draft_list_or_error(list_id)
+            entries, notes = shelter_lists.validate_entries(body.entries, rec["district"], rec.get("sources", []))
+            return store.update_shelter_list(list_id, {"entries": entries, "notes": notes}) or rec
+
+    @app.post("/v1/ready/shelter-lists/{list_id}/publish", dependencies=operator)
+    def publish_shelter_list(list_id: int, body: ShelterPublishRequest | None = None) -> dict[str, Any]:
+        """Publishes the verified entries that have in-district coordinates; archives the previous list."""
+        with shelter_lock:
+            rec = draft_list_or_error(list_id)
+            ok, skipped = shelter_lists.split_for_publish(rec)
+            if not any(e.get("verified") for e in rec["entries"]):
+                raise HTTPException(status_code=422, detail="verify at least one entry before publishing")
+            if not ok:
+                raise HTTPException(status_code=422, detail="no verified entry has coordinates inside the district; set them on the map first")
+            for old in store.list_shelter_lists(rec["district"]):
+                if old["status"] == "published":
+                    store.update_shelter_list(old["id"], {"status": "archived"})
+            saved = store.update_shelter_list(list_id, {
+                "status": "published", "published_at": int(clock()),
+                "published_by_note": (body.note.strip() if body else "") or None,
+            })
+        return {"list": saved, "published": len(ok), "skipped": skipped}
+
+    @app.get("/v1/public/shelters")
+    def public_shelters(district: str) -> dict[str, Any]:
+        """No auth: anyone can look up the district's published, officer-verified shelters."""
+        d = district_or_404(district)
+        rec = shelter_lists.current_published(store, d.id)
+        items = shelter_lists.published_shelters(rec) if rec else []
+        if not items:
+            raise HTTPException(status_code=404, detail=f"no published shelter list for {d.id}")
+        return {
+            "district": d.id, "published_at": rec["published_at"],
+            "shelters": [{k: v for k, v in s.items() if k != "block"} for s in items],
+            "source_note": "Verified by the control room against the district disaster management authority's list; confirm with local officials before travelling.",
+        }
+
+    @app.get("/v1/ready/pack", dependencies=[Depends(require_key)])
+    def ready_pack(
+        district: str | None = None,
+        lang: str = "en",
+        lat: float | None = Query(default=None, ge=-90, le=90),
+        lon: float | None = Query(default=None, ge=-180, le=180),
+    ) -> dict[str, Any]:
+        """What a phone caches for offline use: the active warning (or null), the district's shelters named
+        in ``lang`` where a local name exists, a checklist, and ``version`` (hash of the content)."""
+        d = resolve_district(district, lat, lon)
+        now = clock()
+        return readiness.build_pack(d, check_lang(lang), district_warning(d.id, now), now, store)
+
+    def make_plan(body: PlanRequest) -> dict[str, Any]:
+        d = resolve_district(body.district, body.lat, body.lon)
+        return plans.make(d, body.lang, body.household, body.lat, body.lon, district_warning(d.id, clock()))
+
+    @app.post("/v1/ready/plan", dependencies=[Depends(require_key)])
+    def ready_plan(body: PlanRequest) -> dict[str, Any]:
+        out = make_plan(body)
+        if speech is not None and speech.supports(out["steps_lang"]):
+            out["audio_url"] = f"/v1/ready/plan/{out['plan_id']}/audio"
+        return out
+
+    @app.post("/v1/ready/plan/preview", dependencies=operator)
+    def ready_plan_preview(body: PlanRequest) -> dict[str, Any]:
+        """The control room's view of the same plan (operator key instead of the device key; no audio)."""
+        return make_plan(body)
+
+    audio_cache: dict[str, bytes] = {}
+
+    @app.get("/v1/ready/plan/{plan_id}/audio", dependencies=[Depends(require_key)])
+    def ready_plan_audio(plan_id: str) -> Response:
+        """WAV (PCM16 mono 24 kHz) of a cached plan. 404 when TTS is off, the language has no server voice,
+        or the plan is not cached (ask for it again); 503 when synthesis fails (use on-device TTS)."""
+        if speech is None:
+            raise HTTPException(status_code=404, detail="server audio is off; use on-device text-to-speech")
+        plan = plans.get(plan_id)
+        if plan is None or not speech.supports(plan["lang"]):
+            raise HTTPException(status_code=404, detail="no audio for this plan")
+        wav = audio_cache.get(plan_id)
+        if wav is None:
+            try:
+                wav = speech.synthesize(" ".join(plan["steps"]), plan["lang"])
+            except Exception as e:
+                log.warning("ready plan TTS failed: %s: %s", type(e).__name__, e)
+                raise HTTPException(status_code=503, detail="speech synthesis failed; use on-device text-to-speech") from e
+            if len(audio_cache) >= 64:
+                audio_cache.pop(next(iter(audio_cache)))
+            audio_cache[plan_id] = wav
+        return Response(content=wav, media_type="audio/wav")
 
     @app.get("/v1/gateways", dependencies=operator)
     def list_gateways() -> dict[str, Any]:

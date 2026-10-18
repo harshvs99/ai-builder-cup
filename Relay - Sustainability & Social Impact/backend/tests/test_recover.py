@@ -300,7 +300,7 @@ def good_text(prompt):
     }
 
 
-def test_report_without_a_model_is_the_template(client):
+def test_report_without_a_model_is_the_template(client, all_langs):
     seed(client)
     r = client.post("/v1/recover/report")
     assert r.status_code == 200
@@ -316,6 +316,17 @@ def test_report_without_a_model_is_the_template(client):
     assert rep["evidence_digests"][0]["digest"] == client.get("/v1/recover/evidence/101").json()["integrity"]["digest"]
     assert [a["name"] for a in rep["counts"]["areas"]][0] == "Jagannath Temple, Puri Sadar"
     assert client.post("/v1/recover/report").json()["text_en"] == rep["text_en"]          # nothing persisted or stateful
+
+
+def test_report_local_language_follows_the_languages_registry(client, monkeypatch):
+    seed(client)
+    # Odia is dormant by default, so Puri's report falls back to Hindi (District.local_lang); "all" reads as Puri
+    for q in ("", "?district=puri"):
+        rep = client.post(f"/v1/recover/report{q}").json()
+        assert rep["local_lang"] == "hi" and "राहत" in rep["text_local"]
+    monkeypatch.setenv("RELAY_LANGS", "en,hi,or")
+    assert client.post("/v1/recover/report?district=puri").json()["local_lang"] == "or"
+    assert client.post("/v1/recover/report?district=delhi").json()["local_lang"] == "hi"
 
 
 def test_report_for_delhi_is_in_hindi(client):
@@ -335,7 +346,7 @@ def test_templates_pass_their_own_validation(client):
             assert recover.valid_text(text, counts, allowed) == text
 
 
-def test_valid_model_text_is_used(make_client):
+def test_valid_model_text_is_used(make_client, all_langs):
     fake = FakeTextGen(good_text)
     c = make_client(recover_textgen=fake)
     seed(c)

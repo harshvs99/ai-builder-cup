@@ -1,0 +1,15 @@
+[
+  {"id": "or_01", "lang": "or", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "or_02", "lang": "or", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "or_03", "lang": "or", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "tl_01", "lang": "tl", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "tl_02", "lang": "tl", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "tl_03", "lang": "tl", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "war_01", "lang": "war", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "war_02", "lang": "war", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "war_03", "lang": "war", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "hi_new_01", "lang": "hi", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "hi_new_02", "lang": "hi", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "en_new_01", "lang": "en", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}},
+  {"id": "en_new_02", "lang": "en", "text": "TODO: native speaker", "expected": {"category": "TODO", "urgency": 0, "people": 0, "vuln": [], "item": "", "landmark": ""}}
+]

@@ -39,7 +39,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from . import cluster, priority, reclass, templates
+from . import cluster, embed, languages, priority, reclass, templates
 from .codec import (
     CATEGORY_NAMES,
     INITIAL_TTL,
@@ -136,7 +136,7 @@ def with_location_note(reason: str, f: TicketFacts) -> str:
 
 def local_draft_fallback(en: str, lang: str) -> str:
     """No dispatch-draft translation templates exist: reuse English, marked as untranslated."""
-    return en if lang == "en" else f"[EN] {en}"
+    return en if languages.effective(lang) == "en" else f"[EN] {en}"
 
 
 # --------------------------------------------------------------------------------------
@@ -187,7 +187,7 @@ class GenaiClient:
     """
 
     def __init__(
-        self, api_key: str | None = None, model: str = "gemini-flash-latest", timeout_s: float = 8.0, *,
+        self, api_key: str | None = None, model: str = "gemini-3.8-flash", timeout_s: float = 8.0, *,
         vertexai: bool = False, project: str | None = None, location: str | None = None,
     ):
         from google.genai import types
@@ -226,7 +226,6 @@ class GenaiClient:
         return resp.text or ""
 
 
-_LANG_NAMES = {"en": "English", "hi": "Hindi", "or": "Odia", "tl": "Tagalog", "war": "Waray", "ceb": "Cebuano"}
 _TIER_PREFIX = re.compile(r"^\s*\[P[1-4]\]\s*")
 _ANY_TIER_TAG = re.compile(r"\[P[1-4]\]")  # also finds the tag behind a "[EN] " marker
 
@@ -320,7 +319,7 @@ class GeminiAgent:
                 en_body = None
         dispatch_en = f"[{tier}] {en_body}" if en_body else build_dispatch(facts, tier)
 
-        if facts.lang == "en":
+        if languages.effective(facts.lang) == "en":  # requester language not enabled: English, no translation
             dispatch_local = dispatch_en
         else:
             local_body = _clean_text(data.get("dispatch_local"), 800)
@@ -355,7 +354,7 @@ class GeminiAgent:
                 'this ticket has NO GPS fix: write "Location: unknown (no GPS fix)" verbatim, add the landmark '
                 "if any, and give no coordinates,"
             ),
-            lang_name=_LANG_NAMES.get(facts.lang, "English"),
+            lang_name=languages.name(languages.effective(facts.lang)),
             category=facts.category,
             categories=", ".join(CATEGORY_NAMES),
         )
@@ -376,7 +375,7 @@ def agent_from_env(env: dict[str, str] | None = None) -> Agent:
     location from ``GOOGLE_CLOUD_PROJECT`` / ``GOOGLE_CLOUD_LOCATION``) or ``GEMINI_API_KEY``
     is set. Vertex wins if both are present. Otherwise the deterministic agent."""
     env = os.environ if env is None else env
-    model = env.get("GEMINI_MODEL") or "gemini-flash-latest"
+    model = env.get("GEMINI_MODEL") or "gemini-3.8-flash"
     use_vertex = env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1")
     key = env.get("GEMINI_API_KEY")
     try:
@@ -459,9 +458,11 @@ def sanitize_reported_at(created_at: int, received_at: int) -> int:
 class TriagePipeline:
     def __init__(
         self, store: Store, agent: Agent | None = None, clock=time.time, enrich_budget_s: float = 20.0,
-        gazetteer: Gazetteer | None = None, geocoder: Geocoder | None = None,
+        gazetteer: Gazetteer | None = None, geocoder: Geocoder | None = None, embedder: embed.Embedder | None = None,
     ):
         self.store = store
+        self.embedder = embedder
+        self.embed_threshold = embed.threshold_from_env()
         self.agent: Agent = agent or DeterministicAgent()
         self.clock = clock
         self.enrich_budget_s = enrich_budget_s
@@ -494,15 +495,16 @@ class TriagePipeline:
             packet = self.to_packet(it, now_i)
             hops, reported_at = packet.hops, packet.reported_at
             lookup = None
+            need_vec = None
             if need.loc_acc != 0:
                 # cluster under the category the ticket will carry, so a reclassified ticket is found
-                lookup = (
-                    reclass.effective_category(CATEGORY_NAMES[need.category], need.item),
-                    reported_at, cluster.MAX_AGE_WINDOW_S,
-                )
+                category = reclass.effective_category(CATEGORY_NAMES[need.category], need.item)
+                lookup = (category, reported_at, cluster.MAX_AGE_WINDOW_S)
+                # embedded BEFORE the transaction (bounded; None on any failure -> text rule only)
+                need_vec = embed.embed_item(self.embedder, category, need.item)
             out = self.store.ingest(
                 packet=packet, gateway_node=gateway_node,
-                received_at=now_i, lookup=lookup, plan=self._planner(need, hops, reported_at, now),
+                received_at=now_i, lookup=lookup, plan=self._planner(need, hops, reported_at, now, need_vec),
             )
             if out.status == "duplicate":
                 res.duplicates += 1
@@ -579,16 +581,17 @@ class TriagePipeline:
         )
 
     # ------------------------------------------------------------------
-    def _planner(self, need: Need, hops: int, reported_at: int, now: float):
+    def _planner(self, need: Need, hops: int, reported_at: int, now: float, need_vec: list[float] | None = None):
         """The deterministic part of phase 1 for one packet, as a pure function of the
         candidate tickets (the store may call it again if its transaction is retried)."""
         now_i = int(now)
         msg_hex = need.msg_id.hex()
 
         def plan(candidates: list[dict[str, Any]]) -> Plan:
-            match = cluster.find_match(candidates, need) if need.loc_acc != 0 else None
+            found = cluster.find_match_reason(candidates, need, need_vec, self.embed_threshold)
+            match = found[0] if found else None
             if match is None:
-                fields = cluster.new_ticket_fields(need, hops, reported_at, now_i)
+                fields = cluster.new_ticket_fields(need, hops, reported_at, now_i, need_vec)
                 rc = reclass.deterministic(fields["category"], need.item)
                 if rc:
                     fields.update(category=rc["to"], reclass=rc)
@@ -596,7 +599,8 @@ class TriagePipeline:
                     fields["geo"] = geo
                 row = dict(fields)
             else:
-                fields = cluster.merge_fields(match, need, hops, reported_at, now_i)
+                fields = cluster.merge_fields(match, need, hops, reported_at, now_i, need_vec)
+                log.info("merged NEED %s into ticket %s: %s", msg_hex, match["ticket_no"], found[1])
                 row = {**match, **fields}
             # No-fix packets never merge, and a merge needs a fix, so a merged ticket has one
             facts = TicketFacts.from_row(row, now, has_location=match is not None or need.loc_acc != 0)

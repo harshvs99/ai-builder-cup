@@ -45,9 +45,12 @@ TICKET_COLUMNS = {
     # JSON objects, null when unset: estimated location from a landmark; category correction;
     # intake answers {question key: answer key}; photo tags {tag key: reports that carried it}
     "geo", "reclass", "answers", "photo_tags",
+    # base64 float16 unit vector of "{category}: {item}" for embedding-based clustering (see embed.py); null if unset
+    "item_vec",
 }
 # Columns added after the first release: SQLite adds them to existing databases on connect.
 JSON_COLUMNS = ("geo", "reclass", "answers", "photo_tags")
+TEXT_COLUMNS = ("item_vec",)  # plain nullable TEXT columns added the same way
 
 # Ticket status -> the statuses it may be entered from (DISPATCHED comes from ``approve_ticket``).
 ADVANCE_FROM: dict[str, tuple[str, ...]] = {
@@ -266,7 +269,55 @@ class Store(Protocol):
         """Store a sitrep (without ``id``) and return it with the id assigned (1, 2, ...)."""
         ...
 
-    def latest_sitrep(self) -> dict[str, Any] | None: ...
+    def latest_sitrep(self, district: str | None = None) -> dict[str, Any] | None:
+        """The newest sitrep, or the newest whose ``district`` is ``district`` (sitreps stored
+        before districts existed have none and only show up unfiltered)."""
+        ...
+
+    # ------------------------------------------------------------------ announcements
+    def add_announcement(self, announcement: dict[str, Any]) -> dict[str, Any]:
+        """Store an announcement (without ``id``) and return it with the id assigned (1, 2, ...)."""
+        ...
+
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None: ...
+
+    def update_announcement(self, announcement_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge top-level ``fields`` into the announcement; returns it, or None if it does not exist."""
+        ...
+
+    def list_announcements(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        """Newest first, optionally only one district and/or status."""
+        ...
+
+    # ------------------------------------------------------------------ ready-mode warnings
+    def add_warning(self, warning: dict[str, Any]) -> dict[str, Any]:
+        """Store a warning (without ``id``) and return it with the id assigned (1, 2, ...)."""
+        ...
+
+    def get_warning(self, warning_id: int) -> dict[str, Any] | None: ...
+
+    def list_warnings(self, district: str | None = None) -> list[dict[str, Any]]:
+        """Newest first (at most 200), optionally only one district's. Includes cancelled and expired ones."""
+        ...
+
+    def cancel_warning(self, warning_id: int, now: int) -> dict[str, Any] | None:
+        """Set ``cancelled_at`` (kept if already set) and return the warning; None when unknown."""
+        ...
+
+    # ------------------------------------------------------------------ shelter lists (see app/shelters.py)
+    def add_shelter_list(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Store a shelter list (without ``id``, which is assigned: 1, 2, ...) and return it."""
+        ...
+
+    def get_shelter_list(self, list_id: int) -> dict[str, Any] | None: ...
+
+    def update_shelter_list(self, list_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge top-level ``fields`` into the list; returns it, or None if it does not exist."""
+        ...
+
+    def list_shelter_lists(self, district: str | None = None) -> list[dict[str, Any]]:
+        """Newest first, optionally only one district's."""
+        ...
 
     # ------------------------------------------------------------------ acks
     def clamp_ack_cursor(self, cursor: int) -> int:

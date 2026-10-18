@@ -6,7 +6,7 @@ Three read-only products built from the store, none of them persisted:
     reports merged before dispatch, response times and a damage level. Deterministic, no model.
   * an **evidence pack** per ticket, or per area (``ticket_evidence``, ``area_evidence``): a self-contained record of
     the ticket, where it was, who reported it (as pseudonyms), what happened when, and what the phones saw.
-  * a **relief and insurer report** (``write_report``): the damage map's figures, with English and Odia / Hindi prose
+  * a **relief and insurer report** (``write_report``): the damage map's figures, with English and local-language (Odia / Hindi) prose
     around them. Gemini writes the prose; text is used only if every number in it is one it was handed (the sitrep
     rule), otherwise the deterministic template.
 
@@ -14,7 +14,7 @@ Areas. A ticket's position is its GPS fix, else its approximate ``geo`` (landmar
 the nearest gazetteer place within ``PLACE_RADIUS_M`` ("<name>, <block>"), else a grid cell of about ``GRID_M``
 labelled by its district and nearest place, else "Area near lat, lon". No position at all is the "Unlocated" bucket:
 counted everywhere, never dropped, and shown under every district filter. The district is the nearest centre
-(``districts.nearest_district``).
+(``districts.nearest``).
 
 Damage level (``damage_level``), the first rule that holds:
   severe    a collapsed house is reported, or >= 3 tickets report a damaged house, or >= 8 reports in all
@@ -50,7 +50,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from .cluster import haversine_m
-from .districts import DISTRICTS, district_by_id, nearest_district
+from . import languages
+from .districts import DEFAULT_DISTRICT, DISTRICTS, by_id, nearest
 from .geocode import Gazetteer, Place, default_gazetteer
 from .location import ticket_location
 from .sitrep import numbers_in
@@ -74,7 +75,6 @@ SEVERE_HOUSES = 3
 SEVERE_REPORTS = 8
 MODERATE_REPORTS = 4
 LEVEL_ORDER = {"severe": 0, "moderate": 1, "light": 2, "none": 3}
-LOCAL_LANG = {"puri": "or", "delhi": "hi"}
 
 PHOTO_NOTE = "classified on the requester's phone; tags only, no image"
 
@@ -134,7 +134,7 @@ def assign_area(lat: float | None, lon: float | None, gazetteer: Gazetteer | Non
     if near is not None and near[1] <= PLACE_RADIUS_M:
         place = near[0]
         label = f"{_title(place.name)}, {place.block}" if place.block else _title(place.name)
-        return Area(f"place:{_slug(place.name)}", label, nearest_district(place.lat, place.lon).id)
+        return Area(f"place:{_slug(place.name)}", label, nearest(place.lat, place.lon).id)
     # ~2 km cell: latitude rows are a fixed size, longitude columns shrink with the row's latitude
     step = GRID_M / 111_320.0
     i = math.floor(lat / step)
@@ -142,7 +142,7 @@ def assign_area(lat: float | None, lon: float | None, gazetteer: Gazetteer | Non
     lstep = step / max(0.2, math.cos(math.radians(clat)))
     j = math.floor(lon / lstep)
     clon = (j + 0.5) * lstep
-    district = nearest_district(clat, clon)
+    district = nearest(clat, clon)
     cell_near = _nearest_place(clat, clon, gazetteer)
     if cell_near is not None and cell_near[1] <= GRID_NAME_RADIUS_M:
         name = f"{district.name}: near {_title(cell_near[0].name)}"
@@ -457,7 +457,7 @@ def report_figures(dm: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scope(district: str) -> str:
-    d = district_by_id(district)
+    d = by_id(district)
     return d.name if d else "all districts"
 
 
@@ -611,13 +611,14 @@ def write_report(
     counts: dict[str, Any], district: str, textgen: TextGen | None
 ) -> tuple[str, str, str, str]:
     """(english, local, local_lang, model): model prose if it passes validation, else the templates. Never raises."""
-    lang = LOCAL_LANG.get(district, "or")
-    template_local = template_hi if lang == "hi" else template_or
+    # the district's own language when enabled, else Hindi (District.local_lang); "all" reads as the default district
+    lang = (by_id(district) or DEFAULT_DISTRICT).local_lang
+    template_local = template_or if lang == "or" else template_hi
     en, local = template_en(counts, district), template_local(counts, district)
     if textgen is None:
         return en, local, lang, "template"
     figures = json.dumps({**counts, "scope": _scope(district), "limitations": LIMITATIONS}, ensure_ascii=False)
-    prompt = _PROMPT.format(figures=figures, language="Hindi" if lang == "hi" else "Odia")
+    prompt = _PROMPT.format(figures=figures, language=languages.name(lang))
     try:
         data = call_json(textgen, prompt, ReportText, timeout_s=60.0)
     except Exception as e:
@@ -649,6 +650,6 @@ def build_report(cases: list[Case], district: str, salt: str, textgen: TextGen |
 
 def check_district(district: str) -> str:
     """A ``district`` query value: ``all`` or a known district id. Raises ValueError otherwise."""
-    if district != "all" and district_by_id(district) is None:
+    if district != "all" and by_id(district) is None:
         raise ValueError(f"district must be 'all' or one of {[d.id for d in DISTRICTS]}")
     return district

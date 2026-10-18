@@ -31,6 +31,12 @@ class FakeClock:
 
 
 @pytest.fixture
+def all_langs(monkeypatch):
+    """Switch every registered language on (the dormant, pending-review ones included)."""
+    monkeypatch.setenv("RELAY_LANGS", ",".join(codec.LANG_CODES))
+
+
+@pytest.fixture
 def clock() -> FakeClock:
     return FakeClock()
 
