@@ -46,6 +46,8 @@
 	<string>$(RELAY_BACKEND_URL)</string>
 	<key>RelayDeviceKey</key>
 	<string>$(RELAY_DEVICE_KEY)</string>
+	<key>RelayDemoShelters</key>
+	<string>$(RELAY_DEMO_SHELTERS)</string>
 	<key>RelayEnabledLangs</key>
 	<string>$(RELAY_ENABLED_LANGS)</string>
 	<key>RelayHelpLocateDefault</key>

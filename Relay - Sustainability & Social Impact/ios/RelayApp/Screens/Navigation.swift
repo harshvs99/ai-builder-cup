@@ -91,6 +91,8 @@ struct RouteDestination: View {
         case .developer: DeveloperScreen(isConsole: false)
         case .ready: ReadyScreen()
         case .household: HouseholdScreen()
+        case .shelters: ShelterListScreen()
+        case .shelter(let id): ShelterDetailScreen(id: id)
         case .language, .home, .requests, .network, .settings: EmptyView()
         }
     }

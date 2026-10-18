@@ -124,6 +124,21 @@ public final class ReadyRefresher: @unchecked Sendable {
         return RefreshResult(packFetched: true, planFetched: planFetched, audioFetched: audioFetched, newWarning: fresh, error: err)
     }
 
+    /// A phone with signal, a known district and no pack at all may use the district's published list instead
+    /// (`GET /v1/public/shelters`, no key). It is stored as a pack without a warning, so the shelter screens work unchanged, and the next
+    /// real pack replaces it. Returns true when a list was stored. Never throws.
+    public func refreshPublicShelters(_ input: RefreshInput) -> Bool {
+        let before = store.load()
+        guard let district = before.district, input.connected, before.pack == nil else { return false }
+        do {
+            guard let got = PublicShelters.toPack(try api.publicShelters(district), nowSec: nowMs() / 1000) else { return false }
+            try store.savePack(got.raw, got.pack, nowMs: before.lastPackFetchMs) // keeps the pack fetch clock: this is not a pack fetch
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Call once the notification was posted, so the same warning never notifies twice.
     public func noteNotified(_ warningId: Int64) { try? store.markNotified(warningId) }
 

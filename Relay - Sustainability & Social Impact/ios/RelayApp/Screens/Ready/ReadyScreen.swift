@@ -16,6 +16,7 @@ func levelColors(_ level: WarningLevel) -> (background: Color, foreground: Color
 /// airplane mode (contract v2 section 3.4). A refresh only updates the stored copy.
 struct ReadyScreen: View {
     @Environment(AppModel.self) private var model
+    @Environment(TabNavigator.self) private var nav
     @Environment(\.strings) private var strings
     @State private var player: AVAudioPlayer?
     @State private var playing = false
@@ -141,12 +142,18 @@ struct ReadyScreen: View {
             Text(r.nearestShelters).font(.headline).accessibilityAddTraits(.isHeader)
             if near.isEmpty && pack.shelters.isEmpty { Text(r.noShelters).font(.body) }
             ForEach(Array(near.enumerated()), id: \.offset) { _, n in
-                HStack {
-                    Text(n.name).font(.body)
-                    Spacer()
-                    Text(r.kmAway(n.distanceKm)).font(.subheadline).foregroundStyle(.secondary)
+                Button { nav.push(.shelter(id: n.id)) } label: {
+                    HStack {
+                        Text(n.name).font(.body).foregroundStyle(Color.primary)
+                        Spacer()
+                        Text(r.kmAway(n.distanceKm)).font(.subheadline).foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true)
+                    }
+                    .frame(minHeight: Theme.Size.minTouch).contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
+            if !pack.shelters.isEmpty { Button(r.allShelters) { nav.push(.shelters) } }
         }
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)

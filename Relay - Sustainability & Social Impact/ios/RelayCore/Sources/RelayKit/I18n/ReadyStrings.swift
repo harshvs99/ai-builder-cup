@@ -100,6 +100,45 @@ public struct ReadyStrings: Equatable, Sendable {
     public var settingsHouseholdHelp: String { t("Tell Relay who is at home so your evacuation plan fits.", "Relay को बताएँ कि घर में कौन है, ताकि निकलने की योजना सही बने।") }
     public var settingsReady: String { t("Get ready", "तैयारी करें") }
 
+    // ---- shelters
+    public var sheltersTitle: String { t("Shelters", "आश्रय") }
+    public var sheltersRow: String { t("Shelters", "आश्रय") }
+    public var sheltersRowHelp: String { t("Find the nearest safe place", "सबसे पास की सुरक्षित जगह खोजें") }
+    public var demoBadge: String { t("Demo", "डेमो") }
+    public var noSheltersList: String { t("No verified shelter list yet. Open Relay when you have signal and it will download one.", "अभी कोई सत्यापित आश्रय सूची नहीं है। सिग्नल होने पर Relay खोलें, वह एक डाउनलोड करेगा।") }
+    public func capacity(_ n: Int) -> String { t("Holds about \(n) people", "लगभग \(n) लोगों की जगह") }
+    public func kindName(_ kind: String) -> String {
+        switch kind {
+        case "cyclone_shelter": return t("Cyclone shelter", "चक्रवात आश्रय")
+        case "school": return t("School", "स्कूल")
+        case "relief_camp": return t("Relief camp", "राहत शिविर")
+        case "hospital": return t("Hospital", "अस्पताल")
+        default: return t("Shelter", "आश्रय")
+        }
+    }
+    public func facilityName(_ f: String) -> String {
+        switch f {
+        case "water": return t("Water", "पानी")
+        case "toilets": return t("Toilets", "शौचालय")
+        case "generator": return t("Generator", "जनरेटर")
+        case "first_aid": return t("First aid", "प्राथमिक उपचार")
+        case "medical": return t("Medical care", "चिकित्सा")
+        case "kitchen": return t("Kitchen", "रसोई")
+        default: let x = f.replacingOccurrences(of: "_", with: " "); return x.prefix(1).uppercased() + x.dropFirst()
+        }
+    }
+    public var facilities: String { t("Facilities", "सुविधाएँ") }
+    public var address: String { t("Address", "पता") }
+    public var coordinates: String { t("Coordinates", "निर्देशांक") }
+    public var directions: String { t("Directions", "रास्ता") }
+    public var copyCoordinates: String { t("Copy coordinates", "निर्देशांक कॉपी करें") }
+    public var copied: String { t("Copied", "कॉपी हो गया") }
+    public var speakShelter: String { t("Speak", "बोलकर सुनाएँ") }
+    public var noMapsApp: String { t("No maps app found on this phone.", "इस फ़ोन में कोई मैप ऐप नहीं मिला।") }
+    public var mapNote: String { t("Pins are placed from the shelter coordinates. Open Directions for a full map.", "पिन आश्रय के निर्देशांक से लगाए गए हैं। पूरा नक्शा देखने के लिए रास्ता दबाएँ।") }
+    public var shelterNotFound: String { t("This shelter is not in the saved list any more.", "यह आश्रय सहेजी गई सूची में अब नहीं है।") }
+    public func mapDescription(_ n: Int) -> String { t("Map with \(n) shelters", "\(n) आश्रयों वाला नक्शा") }
+
     private var locale: Locale { lang == .hi ? Locale(identifier: "hi_IN") : Locale.autoupdatingCurrent }
     private func clock(_ sec: Int64) -> String {
         let f = DateFormatter(); f.locale = locale; f.timeZone = timeZone; f.dateStyle = .medium; f.timeStyle = .short

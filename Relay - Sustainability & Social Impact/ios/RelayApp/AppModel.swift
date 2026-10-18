@@ -90,6 +90,15 @@ final class AppModel {
     /// Ready mode (pack, plan, household, banner): see `ReadyCenter`.
     let ready: ReadyCenter
     @ObservationIgnored private let readyDelegate = ReadyNotificationDelegate()
+    /// Demo builds (every Debug build, or `RELAY_DEMO_SHELTERS = YES`) may show a demo shelter list, with a "Demo" badge; Release builds never do.
+    let demoBuild: Bool
+    private static var isDebug: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
 
     @ObservationIgnored private var started = false
     @ObservationIgnored private var engineStarted = false
@@ -128,6 +137,7 @@ final class AppModel {
         self.settings = settings.current
         self.villagerStatus = VillagerStatus.from(repository.snapshot.status, now: currentTimeMs())
         self.permissions = Permissions(location: location)
+        self.demoBuild = buildConfig.demoShelters || AppModel.isDebug
         self.ready = ReadyCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
         // The Bluetooth prompt needs the mesh started; Permissions calls back into the model for that.
         permissions.startBluetooth = { [weak self] in self?.startMesh() }
@@ -468,7 +478,7 @@ final class AppModel {
     /// blanked, so `BuildConfig` falls back to its defaults instead of using the literal text.
     private static func cleanedInfoDictionary() -> [String: Any]? {
         guard var info = Bundle.main.infoDictionary else { return nil }
-        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault", "RelayEnabledLangs"] {
+        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault", "RelayEnabledLangs", "RelayDemoShelters"] {
             if let v = info[key] as? String, v.contains("$(") { info[key] = "" }
         }
         return info

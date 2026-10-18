@@ -67,14 +67,19 @@ public struct BuildConfig: Equatable, Sendable {
     /// Languages this build can offer (Android `ENABLED_LANGS`, Gradle property `relay.enabledLangs`); the picker also needs
     /// the language on in the backend's `/v1/languages`. English and Hindi by default.
     public var enabledLanguages: [Lang]
+    /// A demo shelter list (placeholders no officer verified) shows only in demo builds, with a "Demo" badge (Android `DEMO_SHELTERS`,
+    /// Gradle property `relay.demoShelters`). The app also treats every debug build as a demo build.
+    public var demoShelters: Bool
 
     public init(defaultBackend: String = BackendDefaults.productionUrl, defaultKey: String = BuildConfig.fallbackDeviceKey,
-                lockConnection: Bool = false, helpLocateDefault: Bool = true, enabledLanguages: [Lang] = LanguageCatalog.buildDefault) {
+                lockConnection: Bool = false, helpLocateDefault: Bool = true, enabledLanguages: [Lang] = LanguageCatalog.buildDefault,
+                demoShelters: Bool = false) {
         self.defaultBackend = defaultBackend
         self.defaultKey = defaultKey
         self.lockConnection = lockConnection
         self.helpLocateDefault = helpLocateDefault
         self.enabledLanguages = enabledLanguages
+        self.demoShelters = demoShelters
     }
 
     /// Debug-style defaults: production backend, dev key, connection editable.
@@ -96,7 +101,8 @@ public struct BuildConfig: Equatable, Sendable {
             defaultKey: key.isEmpty ? BuildConfig.fallbackDeviceKey : key,
             lockConnection: lock,
             helpLocateDefault: help,
-            enabledLanguages: LanguageCatalog.parseBuildLanguages(info?["RelayEnabledLangs"] as? String)
+            enabledLanguages: LanguageCatalog.parseBuildLanguages(info?["RelayEnabledLangs"] as? String),
+            demoShelters: ((info?["RelayDemoShelters"] as? Bool) ?? ((info?["RelayDemoShelters"] as? String).map { ["yes", "true", "1"].contains($0.trimmed.lowercased()) } ?? false))
         )
     }
 }

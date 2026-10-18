@@ -41,6 +41,7 @@ struct HomeScreen: View {
                 headerLine(home)
                 readyBanner()
                 statusCard(home)
+                sheltersRow()
                 micSection(home)
                 requests(home)
             }
@@ -117,6 +118,29 @@ struct HomeScreen: View {
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .relayGlassCard()
+    }
+
+    /// "Shelters": the nearest safe place, from the stored list.
+    private func sheltersRow() -> some View {
+        let r = strings.ready
+        return Button { nav.push(.shelters) } label: {
+            HStack(spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(r.sheltersRow).font(.headline).foregroundStyle(Color.primary)
+                    Text(r.sheltersRowHelp).font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(Theme.Space.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .relayGlassCard()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(r.sheltersRow). \(r.sheltersRowHelp)")
+        .accessibilityAddTraits(.isButton)
     }
 
     private func micSection(_ home: HomeModel) -> some View {

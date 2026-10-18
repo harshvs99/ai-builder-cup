@@ -47,6 +47,8 @@ final class ReadyCenter {
         let result = await Task.detached(priority: .utility) { () async -> RefreshResult in
             let refresher = ReadyRefresher(api: HttpReadyApi(baseUrl: ctx.backend, deviceKey: ctx.key), store: store)
             let r = refresher.refresh(trigger, ctx.input)
+            // no pack and no way to get one (or none yet): the district's published list needs no key and may still be there
+            if r.error != nil || r.skipped { _ = refresher.refreshPublicShelters(ctx.input) }
             if let w = r.newWarning {
                 let district = store.load().pack?.district ?? ""
                 if await ReadyNotifier.post(w, district: district, lang: ctx.input.lang) { refresher.noteNotified(w.id) }
@@ -54,7 +56,7 @@ final class ReadyCenter {
             return r
         }.value
         needsDistrict = result.needsDistrict
-        if !result.skipped { reload() }
+        reload()
         return result
     }
 }

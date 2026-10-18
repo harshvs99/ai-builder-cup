@@ -67,6 +67,9 @@ public enum Route: Hashable, Sendable {
     case ready
     /// "My household", pushed from Settings.
     case household
+    /// The shelter list, and one shelter's detail (pushed from Home or the Ready screen).
+    case shelters
+    case shelter(id: String)
 
     /// Routes that hide the tab bar: the ask flow and the first-run language screen.
     public var hidesTabBar: Bool {
@@ -87,7 +90,7 @@ public enum Route: Hashable, Sendable {
     /// Which tab a route belongs to (Request detail counts as Requests). Nil = none.
     public var tab: AppTab? {
         switch self {
-        case .home, .ready: return .home
+        case .home, .ready, .shelters, .shelter: return .home
         case .requests, .request: return .requests
         case .network, .console: return .network
         case .settings, .developer, .household: return .settings
@@ -111,6 +114,8 @@ public enum Route: Hashable, Sendable {
         case .developer: return "settings/developer"
         case .ready: return "ready"
         case .household: return "settings/household"
+        case .shelters: return "shelters"
+        case .shelter(let id): return "shelter/" + (id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id)
         }
     }
 
@@ -129,6 +134,7 @@ public enum Route: Hashable, Sendable {
         case "settings/developer": self = .developer
         case "ready": self = .ready
         case "settings/household": self = .household
+        case "shelters": self = .shelters
         case "ask":
             var mode: String?
             var from: String?
@@ -141,6 +147,11 @@ public enum Route: Hashable, Sendable {
             }
             self = .ask(mode: AskMode(arg: mode), prefillFrom: from)
         default:
+            if base.hasPrefix("shelter/"), base.count > "shelter/".count {
+                let raw = String(base.dropFirst("shelter/".count))
+                self = .shelter(id: raw.removingPercentEncoding ?? raw)
+                return
+            }
             guard base.hasPrefix("request/"), base.count > "request/".count else { return nil }
             self = .request(msgId: String(base.dropFirst("request/".count)))
         }

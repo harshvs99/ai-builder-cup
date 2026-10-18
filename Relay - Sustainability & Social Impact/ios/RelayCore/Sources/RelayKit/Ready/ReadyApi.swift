@@ -25,6 +25,12 @@ public protocol ReadyApi: Sendable {
     func plan(lang: String, lat: Double?, lon: Double?, district: String?, household: Household) throws -> String
     /// `GET {audio_url}` (device key) → the WAV, or nil when the backend has none (404) or failed to make it (503): use on-device speech.
     func audio(_ audioUrl: String) throws -> [UInt8]?
+    /// `GET /v1/public/shelters?district=` (no key) → the body, or nil when nothing is published yet (404).
+    func publicShelters(_ district: String) throws -> String?
+}
+
+extension ReadyApi {
+    public func publicShelters(_ district: String) throws -> String? { nil }
 }
 
 /// `ReadyApi` over the injectable `HTTPTransport` (real `URLSession` by default). Blocking; call from a worker queue.
@@ -66,9 +72,15 @@ public final class HttpReadyApi: ReadyApi {
         return (r.status == 404 || r.status == 503) ? nil : r.body
     }
 
-    private func request(_ method: String, _ path: String, _ body: [UInt8]?, okStatuses: Set<Int> = []) throws -> HTTPResponse {
+    public func publicShelters(_ district: String) throws -> String? {
+        let r = try request("GET", "/v1/public/shelters?district=" + Self.encode(district), nil, okStatuses: [404], sendKey: false)
+        return r.status == 404 ? nil : String(decoding: r.body, as: UTF8.self)
+    }
+
+    private func request(_ method: String, _ path: String, _ body: [UInt8]?, okStatuses: Set<Int> = [], sendKey: Bool = true) throws -> HTTPResponse {
         guard let url = SyncClient.endpoint(baseUrl, path) else { throw ReadyApiError("bad backend URL '\(baseUrl)'") }
-        var headers = ["Accept": path.contains("/audio") ? "audio/wav" : "application/json", "X-Relay-Key": deviceKey]
+        var headers = ["Accept": path.contains("/audio") ? "audio/wav" : "application/json"]
+        if sendKey { headers["X-Relay-Key"] = deviceKey }
         if body != nil { headers["Content-Type"] = "application/json" }
         let response: HTTPResponse
         do {
