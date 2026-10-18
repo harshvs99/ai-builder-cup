@@ -207,6 +207,7 @@ def _packet_json(p: dict[str, Any]) -> dict[str, Any]:
         "hops": p["hops"],
         "loc_acc": p["loc_acc"],
         "received_at": p["received_at"],
+        "reported_at": p["reported_at"],
         "summary": p["summary"],
     }
 
@@ -598,6 +599,17 @@ def create_app(
         if latest is None:
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
+
+    @app.get("/v1/gateways", dependencies=operator)
+    def list_gateways() -> dict[str, Any]:
+        """Every gateway phone that has synced: when it was last seen and whether that counts as online."""
+        now = clock()
+        return {
+            "gateways": [
+                {**g, "online": g["last_seen"] >= now - GATEWAY_ONLINE_WINDOW_S} for g in store.list_gateways()
+            ],
+            "online_window_s": GATEWAY_ONLINE_WINDOW_S,
+        }
 
     @app.get("/v1/stats", dependencies=operator)
     def stats() -> dict[str, Any]:

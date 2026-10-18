@@ -146,6 +146,11 @@ class FirestoreStore:
     def gateways_online(self, now: float, window_s: float = 60.0) -> int:
         return self._count(self._eq(self._col("gateways"), "last_seen", ">=", now - window_s))
 
+    def list_gateways(self) -> list[dict[str, Any]]:
+        out = [{"node": d.id, "last_seen": d.to_dict()["last_seen"]} for d in self._col("gateways").stream()]
+        out.sort(key=lambda g: (-g["last_seen"], g["node"]))
+        return out
+
     # ------------------------------------------------------------------ packets
     def record_packets(self, packets: list[PacketIn], gateway_node: str, received_at: int) -> list[RecordStatus]:
         from google.api_core.exceptions import AlreadyExists

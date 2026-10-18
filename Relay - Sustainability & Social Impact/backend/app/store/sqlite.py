@@ -267,6 +267,9 @@ class SqliteStore:
     def gateways_online(self, now: float, window_s: float = 60.0) -> int:
         return self._q("SELECT COUNT(*) AS n FROM gateways WHERE last_seen >= ?", (now - window_s,))[0]["n"]
 
+    def list_gateways(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q("SELECT node, last_seen FROM gateways ORDER BY last_seen DESC, node")]
+
     # ------------------------------------------------------------------ packets
     def record_packets(self, packets: list[PacketIn], gateway_node: str, received_at: int) -> list[RecordStatus]:
         out: list[RecordStatus] = []
