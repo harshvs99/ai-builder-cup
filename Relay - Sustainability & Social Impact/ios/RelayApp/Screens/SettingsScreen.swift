@@ -144,7 +144,7 @@ private struct LanguagePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let rows = LanguageScreenModel.make(selected: model.settings.language, strings: strings).rows
+        let rows = LanguageScreenModel.make(selected: model.settings.effectiveLanguage, offered: model.settings.offeredLanguages, strings: strings).rows
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             Text(strings.network.chooseLanguage).font(.title2.bold()).accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {

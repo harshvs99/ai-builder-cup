@@ -6,10 +6,10 @@ final class ScreenModelsTests: XCTestCase {
     private let now = UI.at(18, 14, 0)
 
     // ---- Language
-    func testLanguageModelListsTheFiveLanguages() {
+    func testLanguageModelListsTheOfferedLanguagesOnly() {
         let m = LanguageScreenModel.make(selected: .hi, strings: UI.strings(.hi))
-        XCTAssertEqual([Lang.en, .hi, .or, .tl, .war], m.rows.map { $0.lang })
-        XCTAssertEqual([false, true, false, false, false], m.rows.map { $0.isSelected })
+        XCTAssertEqual([Lang.en, .hi], m.rows.map { $0.lang })
+        XCTAssertEqual([false, true], m.rows.map { $0.isSelected })
         XCTAssertEqual("अपनी भाषा चुनें", m.title)
         XCTAssertEqual("हिन्दी", m.rows[1].nativeName)
         XCTAssertEqual("Hindi", m.rows[1].englishName)
@@ -19,21 +19,18 @@ final class ScreenModelsTests: XCTestCase {
         XCTAssertEqual("No Waray-Waray voice is installed on this phone.", LanguageScreenModel.noVoiceMessage(.war, strings: UI.strings(.en)))
     }
 
-    func testFirstRunShowsEnglishHindiAndOffersTheRestToAdd() {
-        let m = LanguageScreenModel.make(selected: .en, strings: UI.strings(.en))
-        XCTAssertEqual([Lang.en, .hi], m.shownRows.map { $0.lang })
-        XCTAssertEqual([Lang.or, .tl, .war], m.addableRows.map { $0.lang })
-        XCTAssertEqual("Add a language", m.addLanguageLabel)
-        // A language chosen from the added ones stays on the list.
-        let o = LanguageScreenModel.make(selected: .or, strings: UI.strings(.or))
-        XCTAssertEqual([Lang.en, .hi, .or], o.shownRows.map { $0.lang })
-        XCTAssertEqual([Lang.tl, .war], o.addableRows.map { $0.lang })
+    func testTheLanguageListFollowsWhatIsOffered() {
+        // Odia switched on in the build and on the backend: it joins the list. Filipino and Waray stay hidden.
+        let m = LanguageScreenModel.make(selected: .en, offered: [.en, .hi, .or], strings: UI.strings(.en))
+        XCTAssertEqual([Lang.en, .hi, .or], m.rows.map { $0.lang })
+        XCTAssertEqual(["English", "हिन्दी", "ଓଡ଼ିଆ"], m.rows.map { $0.nativeName })
     }
 
-    func testAddedLanguagesStayOnTheFirstRunList() {
-        let m = LanguageScreenModel.make(selected: .en, added: [.or], strings: UI.strings(.en))
-        XCTAssertEqual([Lang.en, .hi, .or], m.shownRows.map { $0.lang })
-        XCTAssertEqual([Lang.tl, .war], m.addableRows.map { $0.lang })
+    func testTheNotAvailableLineIsEnglishAndNamesTheLanguage() {
+        XCTAssertEqual("Odia is not available yet; showing English.", UI.strings(.en).home.languageUnavailable("Odia"))
+        XCTAssertEqual("Odia अभी उपलब्ध नहीं है; अंग्रेज़ी दिखाई जा रही है।", UI.strings(.hi).home.languageUnavailable("Odia"))
+        // hidden languages show English rather than an invented translation
+        XCTAssertEqual("Odia is not available yet; showing English.", UI.strings(.or).home.languageUnavailable("Odia"))
     }
 
     // ---- Home

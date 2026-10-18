@@ -46,6 +46,8 @@
 	<string>$(RELAY_BACKEND_URL)</string>
 	<key>RelayDeviceKey</key>
 	<string>$(RELAY_DEVICE_KEY)</string>
+	<key>RelayEnabledLangs</key>
+	<string>$(RELAY_ENABLED_LANGS)</string>
 	<key>RelayHelpLocateDefault</key>
 	<string>$(RELAY_HELP_LOCATE_DEFAULT)</string>
 	<key>RelayLockConnection</key>

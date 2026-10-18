@@ -43,21 +43,18 @@ final class SettingsTests: TempDirTestCase {
         XCTAssertEqual(true, store.boolValue(forKey: "offline"))
     }
 
-    func testPreferredLanguagesAreEnglishHindiThenWhatTheUserAdded() {
-        XCTAssertEqual([Lang.en, .hi], Settings().preferredLanguages)
-        // An install from before this setting: only the app language is known.
-        XCTAssertEqual([Lang.en, .hi, .or], Settings(language: .or).preferredLanguages)
-
+    func testSwitchingLanguageKeepsTheStoredChoiceAndHindiIsUsedWhenOffered() {
         let store = InMemoryKeyValueStore()
         let a = settings(store)
         a.update { $0.withLanguage(.war) }
-        a.update { $0.withLanguage(.en) }          // back to English: Waray stays preferred
+        a.update { $0.withLanguage(.en) }          // back to English: Waray stays remembered
         a.update { $0.withLanguage(.or) }
         a.update { $0.withLanguage(.war) }         // repeat: no duplicate
-        XCTAssertEqual([Lang.war, .or], a.current.extraLanguages)
-        XCTAssertEqual([Lang.en, .hi, .war, .or], a.current.preferredLanguages)
+        XCTAssertEqual([Lang.war, .or], a.current.extraLanguages) // remembered, so they return if a reviewer switches them on
+        XCTAssertEqual([Lang.en, .hi], a.current.preferredLanguages) // but are not offered, so speech stays en and hi
         XCTAssertEqual("war,or", store.stringValue(forKey: "extra_langs"))
-        XCTAssertEqual([Lang.en, .hi, .war, .or], settings(store).current.preferredLanguages)
+        XCTAssertEqual([Lang.en, .hi], settings(store).current.preferredLanguages)
+        XCTAssertEqual(.hi, Settings().withLanguage(.hi).effectiveLanguage)
         XCTAssertEqual([Lang.en, .hi], Settings().withLanguage(.hi).preferredLanguages)
     }
 

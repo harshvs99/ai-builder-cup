@@ -178,6 +178,7 @@ final class AppModel {
             }
         })
         tasks.append(Task { [weak self] in await self?.permissions.refresh() })
+        refreshLanguages()
 
         if CBManager.authorization != .notDetermined { startMesh() }
     }
@@ -205,6 +206,18 @@ final class AppModel {
 
     func openAppSettings() { permissions.openAppSettings() }
 
+    // ================================================================== languages
+
+    /// Which languages the backend offers (`GET /v1/languages`, no key); best effort. The cached copy, or the build default
+    /// while there is none, is used offline.
+    func refreshLanguages() {
+        let backend = settings.backendUrl
+        Task.detached(priority: .utility) { [weak self] in
+            guard let body = LanguageClient().fetch(backend) else { return }
+            await MainActor.run { self?.updateSettings { var s = $0; s.serverLanguagesJson = body; return s } }
+        }
+    }
+
     // ================================================================== scene phase
 
     /// Forward SwiftUI's `scenePhase`. `.active`/`.inactive` count as foreground (continuous scanning, no flapping
@@ -221,6 +234,7 @@ final class AppModel {
             }
             location.refreshAuthorization()
             Task { await permissions.refresh() }
+            refreshLanguages()
         } else {
             speech.cancel()
             speaker.stop()
@@ -271,7 +285,7 @@ final class AppModel {
         transcript = ""
         transcriptIsFinal = false
         speaker.stop()
-        let lang = settings.language
+        let lang = settings.effectiveLanguage
         guard await permissions.ensureMicrophone() else {
             speech.fail(text: SpeechLogic.onError(SpeechLogic.errorInsufficientPermissions, lang: lang, offlineAttempt: true,
                                                   online: false, alreadyRetried: true).message ?? "",
@@ -327,7 +341,7 @@ final class AppModel {
     @discardableResult
     func speak(_ text: String, lang: Lang? = nil) -> Bool {
         speaker.speed = settings.voiceSpeed
-        return speaker.speak(text, lang: lang ?? settings.language)
+        return speaker.speak(text, lang: lang ?? settings.effectiveLanguage)
     }
 
     /// Speaks `lines` in a row in `lang` and calls `onDone` after the last one. False when there is no voice (then `onDone`
@@ -374,7 +388,7 @@ final class AppModel {
     }
 
     private func applySettings(_ s: RelaySettings) {
-        let languageChanged = s.language != settings.language
+        let languageChanged = s.effectiveLanguage != settings.effectiveLanguage
         settings = s
         speaker.speed = s.voiceSpeed
         if languageChanged { speech.cancel() }
@@ -429,7 +443,7 @@ final class AppModel {
     /// blanked, so `BuildConfig` falls back to its defaults instead of using the literal text.
     private static func cleanedInfoDictionary() -> [String: Any]? {
         guard var info = Bundle.main.infoDictionary else { return nil }
-        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault"] {
+        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault", "RelayEnabledLangs"] {
             if let v = info[key] as? String, v.contains("$(") { info[key] = "" }
         }
         return info

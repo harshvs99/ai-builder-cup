@@ -49,7 +49,7 @@ public enum BackendDefaults {
 
 /// Build-time connection defaults. Android bakes these in with `buildConfigField` from Gradle properties
 /// (`relay.backendUrl`, `relay.deviceKey` from `local.properties` / environment). On iOS the same values come from
-/// the app's Info.plist (`RelayBackendURL`, `RelayDeviceKey`, `RelayLockConnection`, `RelayHelpLocateDefault`), which an untracked `.xcconfig`
+/// the app's Info.plist (`RelayBackendURL`, `RelayDeviceKey`, `RelayLockConnection`, `RelayHelpLocateDefault`, `RelayEnabledLangs`), which an untracked `.xcconfig`
 /// fills in so the shared gateway key is never committed.
 public struct BuildConfig: Equatable, Sendable {
     /// Local-development gateway key, used when none was configured.
@@ -64,13 +64,17 @@ public struct BuildConfig: Equatable, Sendable {
     /// Default of the opt-in "Help locate neighbours" setting (Android `HELP_LOCATE_DEFAULT`, Gradle property
     /// `relay.helpLocateDefault`): on in demo builds, off in village builds.
     public var helpLocateDefault: Bool
+    /// Languages this build can offer (Android `ENABLED_LANGS`, Gradle property `relay.enabledLangs`); the picker also needs
+    /// the language on in the backend's `/v1/languages`. English and Hindi by default.
+    public var enabledLanguages: [Lang]
 
     public init(defaultBackend: String = BackendDefaults.productionUrl, defaultKey: String = BuildConfig.fallbackDeviceKey,
-                lockConnection: Bool = false, helpLocateDefault: Bool = true) {
+                lockConnection: Bool = false, helpLocateDefault: Bool = true, enabledLanguages: [Lang] = LanguageCatalog.buildDefault) {
         self.defaultBackend = defaultBackend
         self.defaultKey = defaultKey
         self.lockConnection = lockConnection
         self.helpLocateDefault = helpLocateDefault
+        self.enabledLanguages = enabledLanguages
     }
 
     /// Debug-style defaults: production backend, dev key, connection editable.
@@ -91,7 +95,8 @@ public struct BuildConfig: Equatable, Sendable {
             defaultBackend: backend.isEmpty ? BackendDefaults.productionUrl : backend,
             defaultKey: key.isEmpty ? BuildConfig.fallbackDeviceKey : key,
             lockConnection: lock,
-            helpLocateDefault: help
+            helpLocateDefault: help,
+            enabledLanguages: LanguageCatalog.parseBuildLanguages(info?["RelayEnabledLangs"] as? String)
         )
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import RelayCore
 import RelayKit
 
 /// First-run Language screen until a language is chosen, then the four tabs. Also the one place that turns settings
@@ -6,10 +7,12 @@ import RelayKit
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var router = AppRouter()
+    /// The "X is not available yet; showing English." line, shown once per disabled language.
+    @State private var languageNotice: String?
 
     var body: some View {
         let settings = model.settings
-        let strings = Strings(settings.language)
+        let strings = Strings(settings.effectiveLanguage)
         Group {
             if settings.languageConfirmed {
                 MainTabs()
@@ -22,8 +25,18 @@ struct RootView: View {
         .tint(Theme.Palette.accent)
         .modifier(LargerTextModifier(enabled: settings.largerText))
         .preferredColorScheme(settings.themeMode.colorScheme)
-        .onChange(of: settings.language, initial: true) { _, lang in
+        .onChange(of: settings.effectiveLanguage, initial: true) { _, lang in
             model.ackNotificationText = Self.ackText(Strings(lang))
+        }
+        .onChange(of: settings.languageResolution, initial: true) { _, resolution in
+            // The stored language was switched off (backend or build): say so once, then keep showing English.
+            guard LanguageCatalog.shouldAnnounce(resolution, alreadyAnnounced: Lang.fromTag(settings.languageNoticeFor)),
+                  let gone = resolution.unavailable else { return }
+            model.updateSettings { var s = $0; s.languageNoticeFor = gone.tag; return s }
+            languageNotice = strings.home.languageUnavailable(AppLanguages.of(gone).englishName)
+        }
+        .alert(languageNotice ?? "", isPresented: Binding(get: { languageNotice != nil }, set: { if !$0 { languageNotice = nil } })) {
+            Button(strings.common.done) { languageNotice = nil }
         }
     }
 

@@ -16,7 +16,7 @@ struct CheckScreen: View {
     @State private var showConfirmAnyway = false
 
     private var ctl: AskFlowController { nav.ensureFlow() }
-    private var lang: Lang { model.settings.language }
+    private var lang: Lang { model.settings.effectiveLanguage }
 
     var body: some View {
         let flow = ctl.flow

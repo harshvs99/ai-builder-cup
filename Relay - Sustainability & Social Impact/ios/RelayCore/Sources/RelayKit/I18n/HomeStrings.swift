@@ -23,6 +23,10 @@ public struct HomeStrings: Equatable, Sendable {
     public var addLanguage: String { tr(
         lang, "Add a language", "भाषा जोड़ें", "ଭାଷା ଯୋଡ଼ନ୍ତୁ", "Magdagdag ng wika", "Pagdugang hin pinulongan",
     ) } // needs native review
+    /// Shown once when the stored language has been switched off (contract v2 section 1). `name` is its English name.
+    public func languageUnavailable(_ name: String) -> String { trEnHi(
+        lang, "\(name) is not available yet; showing English.", "\(name) अभी उपलब्ध नहीं है; अंग्रेज़ी दिखाई जा रही है।",
+    ) } // needs native review
     public func speakLanguage(_ name: String) -> String { tr(
         lang, "Hear \(name)", "\(name) सुनें", "\(name) ଶୁଣନ୍ତୁ", "Pakinggan ang \(name)", "Pamati an \(name)",
     ) } // needs native review
