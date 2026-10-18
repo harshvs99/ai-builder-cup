@@ -7,4 +7,113 @@ class AskStrings(private val lang: Lang) {
     // Pattern: a `val` for fixed text, a `fun` for text with parameters; mark non-English `// needs native review`.
     val newRequestTitle get() = tr(lang, "New request", "नया अनुरोध", "ନୂଆ ଅନୁରୋଧ", "Bagong kahilingan", "Bag-o nga hangyo") // needs native review
     fun stepCounter(step: Int, total: Int) = tr(lang, "$step of $total", "$total में से $step", "$total ରୁ $step", "$step sa $total", "$step han $total") // needs native review
+
+    // ---- New request
+    val headline get() = tr(
+        lang, "What do you need most right now?", "अभी आपको सबसे ज़्यादा किस चीज़ की ज़रूरत है?",
+        "ଏବେ ଆପଣଙ୍କୁ ସବୁଠାରୁ ଅଧିକ କ'ଣ ଦରକାର?", "Ano ang pinakakailangan ninyo ngayon?", "Ano an pinakakinahanglan niyo yana?",
+    ) // needs native review
+    val hearItAgain get() = tr(lang, "Hear it again", "फिर से सुनें", "ପୁଣି ଶୁଣନ୍ତୁ", "Pakinggan ulit", "Pamatii liwat") // needs native review
+    val noVoiceInstalled get() = tr(
+        lang, "This phone has no voice installed for this language.", "इस फ़ोन में इस भाषा की आवाज़ नहीं है।",
+        "ଏହି ଫୋନରେ ଏହି ଭାଷାର ସ୍ୱର ନାହିଁ।", "Walang boses para sa wikang ito sa teleponong ito.", "Waray boses para hini nga yinaknan ha telepono.",
+    ) // needs native review
+    val listening get() = tr(lang, "Listening", "सुन रहा है", "ଶୁଣୁଛି", "Nakikinig", "Nagpapamati") // needs native review
+    val paused get() = tr(lang, "Paused", "रुका हुआ", "ବିରତି", "Naka-pause", "Gintigil") // needs native review
+    val sayItPrompt get() = tr(
+        lang, "Say it in your own words. For example: \"6 of us need drinking water, near the school.\"",
+        "अपने शब्दों में बोलिए। जैसे: \"हम 6 लोगों को पीने का पानी चाहिए, स्कूल के पास।\"",
+        "ନିଜ ଶବ୍ଦରେ କୁହନ୍ତୁ। ଯେପରି: \"ଆମ 6 ଜଣଙ୍କୁ ପିଇବା ପାଣି ଦରକାର, ସ୍କୁଲ ପାଖରେ।\"",
+        "Sabihin sa sarili ninyong salita. Halimbawa: \"6 kami na kailangan ng inuming tubig, malapit sa paaralan.\"",
+        "Hunga ha iyo kalugaringon nga pulong. Pananglitan: \"6 kami nga kinahanglan hin tubig nga inumon, harapit ha eskwelahan.\"",
+    ) // needs native review
+    val understoodSoFar get() = tr(lang, "Understood so far", "अब तक समझा", "ଏପର୍ଯ୍ୟନ୍ତ ବୁଝିଲି", "Naintindihan na", "Naintindihan na") // needs native review
+    val nothingYet get() = tr(lang, "Nothing yet", "अभी कुछ नहीं", "ଏପର୍ଯ୍ୟନ୍ତ କିଛି ନାହିଁ", "Wala pa", "Waray pa") // needs native review
+    fun nearLandmark(place: String) = tr(lang, "Near $place", "$place के पास", "$place ପାଖରେ", "Malapit sa $place", "Harapit ha $place") // needs native review
+    val orTapWhat get() = tr(lang, "Or tap what you need", "या चुनें कि आपको क्या चाहिए", "କିମ୍ବା ଦରକାର ଜିନିଷ ଛୁଅନ୍ତୁ", "O pindutin ang kailangan ninyo", "O pinduta an kinahanglan niyo") // needs native review
+    val stopListening get() = tr(lang, "Stop listening", "सुनना बंद करें", "ଶୁଣିବା ବନ୍ଦ କରନ୍ତୁ", "Itigil ang pakikinig", "Undanga an pagpamati") // needs native review
+    val startListening get() = tr(lang, "Start listening", "सुनना शुरू करें", "ଶୁଣିବା ଆରମ୍ଭ କରନ୍ତୁ", "Simulan ang pakikinig", "Sugdi an pagpamati") // needs native review
+    val doneCheckIt get() = tr(lang, "Done, check it", "हो गया, जाँचें", "ହୋଇଗଲା, ଯାଞ୍ଚ କରନ୍ତୁ", "Tapos na, suriin", "Human na, usisaa") // needs native review
+    val typeInstead get() = tr(lang, "Type instead", "लिखकर बताएँ", "ଲେଖି କୁହନ୍ତୁ", "Mag-type na lang", "Pagsurat la") // needs native review
+    val useVoiceInstead get() = tr(lang, "Use voice instead", "बोलकर बताएँ", "କହି କୁହନ୍ତୁ", "Gamitin ang boses", "Gamita an boses") // needs native review
+    val typeHint get() = tr(lang, "Type what you need", "लिखिए कि आपको क्या चाहिए", "ଲେଖନ୍ତୁ ଆପଣଙ୍କୁ କ'ଣ ଦରକାର", "I-type ang kailangan ninyo", "Isurat an kinahanglan niyo") // needs native review
+    val typePlaceholder get() = tr(
+        lang, "e.g. 6 of us need drinking water, near the school", "जैसे: हम 6 लोगों को पीने का पानी चाहिए, स्कूल के पास",
+        "ଯେପରି: ଆମ 6 ଜଣଙ୍କୁ ପିଇବା ପାଣି ଦରକାର, ସ୍କୁଲ ପାଖରେ", "hal. 6 kami na kailangan ng inuming tubig, malapit sa paaralan",
+        "pananglitan: 6 kami nga kinahanglan hin tubig nga inumon, harapit ha eskwelahan",
+    ) // needs native review
+
+    // Voice problems, in plain words (never an error code or developer text).
+    fun voicePackMissing(language: String) = tr(
+        lang, "Voice for $language isn't on this phone without internet. Please type what you need.",
+        "$language की आवाज़ पहचान इस फ़ोन पर बिना इंटरनेट के नहीं है। कृपया लिखकर बताएँ।",
+        "$language ଭାଷାର ସ୍ୱର ଚିହ୍ନଟ ଇଣ୍ଟରନେଟ ବିନା ଏହି ଫୋନରେ ନାହିଁ। ଦୟାକରି ଲେଖି କୁହନ୍ତୁ।",
+        "Wala sa teleponong ito ang boses para sa $language kapag walang internet. Paki-type na lang ang kailangan ninyo.",
+        "Waray ha telepono ini an boses para ha $language kon waray internet. Pagsurat la han kinahanglan niyo.",
+    ) // needs native review
+    val micDenied get() = tr(
+        lang, "The microphone is off for Relay. Please type, or allow the microphone in Settings.",
+        "Relay के लिए माइक्रोफ़ोन बंद है। कृपया लिखें, या सेटिंग्स में माइक्रोफ़ोन की अनुमति दें।",
+        "Relay ପାଇଁ ମାଇକ୍ରୋଫୋନ ବନ୍ଦ ଅଛି। ଦୟାକରି ଲେଖନ୍ତୁ, କିମ୍ବା ସେଟିଂସରେ ମାଇକ୍ରୋଫୋନ ଅନୁମତି ଦିଅନ୍ତୁ।",
+        "Nakapatay ang mikropono para sa Relay. Mag-type na lang, o payagan ang mikropono sa Settings.",
+        "Patay an mikropono para ha Relay. Pagsurat la, o tugti an mikropono ha Settings.",
+    ) // needs native review
+    val didntCatch get() = tr(
+        lang, "Didn't catch that. Tap the microphone to try again, or type.", "सुनाई नहीं दिया। फिर कोशिश करने के लिए माइक दबाएँ, या लिखें।",
+        "ଶୁଣାଗଲା ନାହିଁ। ପୁଣି ଚେଷ୍ଟା ପାଇଁ ମାଇକ ଛୁଅନ୍ତୁ, କିମ୍ବା ଲେଖନ୍ତୁ।", "Hindi narinig. Pindutin ang mikropono para subukan ulit, o mag-type.",
+        "Waray mabati. Pinduta an mikropono para pagsari liwat, o pagsurat.",
+    ) // needs native review
+    val voiceUnavailable get() = tr(
+        lang, "Voice isn't working right now. Please type what you need.", "अभी आवाज़ काम नहीं कर रही। कृपया लिखकर बताएँ।",
+        "ଏବେ ସ୍ୱର କାମ କରୁନାହିଁ। ଦୟାକରି ଲେଖି କୁହନ୍ତୁ।", "Hindi gumagana ang boses ngayon. Paki-type ang kailangan ninyo.",
+        "Diri nagagana an boses yana. Pagsurat han kinahanglan niyo.",
+    ) // needs native review
+    val openSettings get() = tr(lang, "Open settings", "सेटिंग्स खोलें", "ସେଟିଂସ ଖୋଲନ୍ତୁ", "Buksan ang Settings", "Abri an Settings") // needs native review
+
+    // ---- Check and send
+    val checkTitle get() = tr(lang, "Check and send", "जाँचें और भेजें", "ଯାଞ୍ଚ କରି ପଠାନ୍ତୁ", "Suriin at ipadala", "Usisaa ngan ipadara") // needs native review
+    val isThisRight get() = tr(lang, "Is this right?", "क्या यह सही है?", "ଏହା ଠିକ୍ ଅଛି କି?", "Tama ba ito?", "Husto ba ini?") // needs native review
+    val rowNeed get() = tr(lang, "Need", "ज़रूरत", "ଦରକାର", "Kailangan", "Kinahanglan") // needs native review
+    val rowPeople get() = tr(lang, "People", "लोग", "ଲୋକ", "Mga tao", "Mga tawo") // needs native review
+    val rowWhere get() = tr(lang, "Where", "कहाँ", "କେଉଁଠି", "Saan", "Diin") // needs native review
+    val rowNote get() = tr(lang, "Note", "टिप्पणी", "ଟିପ୍ପଣୀ", "Tala", "Sumat") // needs native review
+    val nothingChosen get() = tr(lang, "Not chosen yet", "अभी चुना नहीं", "ଏପର୍ଯ୍ୟନ୍ତ ବାଛି ନାହିଁ", "Wala pang napili", "Waray pa napili") // needs native review
+    val noLandmark get() = tr(lang, "No landmark yet", "अभी कोई पहचान की जगह नहीं", "ଏପର୍ଯ୍ୟନ୍ତ ଚିହ୍ନ ସ୍ଥାନ ନାହିଁ", "Wala pang palatandaan", "Waray pa landmark") // needs native review
+    val noNote get() = tr(lang, "No note", "कोई टिप्पणी नहीं", "କୌଣସି ଟିପ୍ପଣୀ ନାହିଁ", "Walang tala", "Waray sumat") // needs native review
+    fun locationAccuracy(meters: Int) = tr(
+        lang, "GPS · about $meters m accuracy", "GPS · लगभग $meters मी की सटीकता", "GPS · ପ୍ରାୟ $meters ମି ସଠିକତା",
+        "GPS · humigit-kumulang $meters m ang katumpakan", "GPS · mga $meters m an kaparehas",
+    ) // needs native review
+    val locationAcquiring get() = tr(lang, "Getting location…", "लोकेशन मिल रही है…", "ଲୋକେସନ ମିଳୁଛି…", "Kinukuha ang lokasyon…", "Ginkukuha an lokasyon…") // needs native review
+    val locationOff get() = tr(
+        lang, "Location is off — rescuers will rely on the landmark", "लोकेशन बंद है — बचावकर्ता पहचान की जगह पर निर्भर रहेंगे",
+        "ଲୋକେସନ ବନ୍ଦ ଅଛି — ଉଦ୍ଧାରକାରୀ ଚିହ୍ନ ସ୍ଥାନ ଉପରେ ନିର୍ଭର କରିବେ", "Naka-off ang lokasyon — aasa ang mga tagapagligtas sa palatandaan",
+        "Patay an lokasyon — an mga manluluwas magsarig ha landmark",
+    ) // needs native review
+    val quickQuestions get() = tr(lang, "A few quick questions", "कुछ छोटे सवाल", "କିଛି ଛୋଟ ପ୍ରଶ୍ନ", "Ilang mabilis na tanong", "Pira nga dagmit nga pakiana") // needs native review
+    fun hearQuestion(question: String) = tr(lang, "Hear the question: $question", "सवाल सुनें: $question", "ପ୍ରଶ୍ନ ଶୁଣନ୍ତୁ: $question", "Pakinggan ang tanong: $question", "Pamatii an pakiana: $question") // needs native review
+    val howUrgent get() = tr(lang, "How urgent is it?", "यह कितना ज़रूरी है?", "ଏହା କେତେ ଜରୁରୀ?", "Gaano ito kaapura?", "Hin-o kapagmadali ini?") // needs native review
+    val changeSomething get() = tr(lang, "Change something", "कुछ बदलें", "କିଛି ବଦଳାନ୍ତୁ", "Baguhin ang ilan", "May usbon") // needs native review
+    val footnote get() = tr(
+        lang, "Goes phone to phone until it reaches a gateway. No network needed.",
+        "फ़ोन से फ़ोन होते हुए गेटवे तक पहुँचता है। नेटवर्क की ज़रूरत नहीं।",
+        "ଫୋନରୁ ଫୋନକୁ ଯାଇ ଗେଟୱେରେ ପହଞ୍ଚେ। ନେଟୱର୍କ ଦରକାର ନାହିଁ।",
+        "Lilipat-lipat sa telepono hanggang makarating sa gateway. Hindi kailangan ng network.",
+        "Nagbabalhin-balhin ha telepono tubtob makaabot ha gateway. Diri kinahanglan an network.",
+    ) // needs native review
+    val sending get() = tr(lang, "Sending…", "भेज रहे हैं…", "ପଠାଉଛି…", "Ipinapadala…", "Ginpapadara…") // needs native review
+    val sendingGettingLocation get() = tr(lang, "Getting your location…", "आपकी लोकेशन ले रहे हैं…", "ଆପଣଙ୍କ ଲୋକେସନ ନେଉଛି…", "Kinukuha ang inyong lokasyon…", "Ginkukuha an iyo lokasyon…") // needs native review
+
+    // ---- editors (bottom sheets)
+    val editNeedTitle get() = tr(lang, "What do you need?", "आपको क्या चाहिए?", "ଆପଣଙ୍କୁ କ'ଣ ଦରକାର?", "Ano ang kailangan ninyo?", "Ano an kinahanglan niyo?") // needs native review
+    val itemLabel get() = tr(lang, "What exactly? (optional)", "ठीक-ठीक क्या? (वैकल्पिक)", "ଠିକ୍ କ'ଣ? (ଇଚ୍ଛାଧୀନ)", "Ano mismo? (opsyonal)", "Ano gud? (opsyonal)") // needs native review
+    val editPeopleTitle get() = tr(lang, "How many people?", "कितने लोग?", "କେତେ ଜଣ?", "Ilang tao?", "Pira nga tawo?") // needs native review
+    val morePeople get() = tr(lang, "More people", "और लोग", "ଅଧିକ ଲୋକ", "Dagdagan ang tao", "Dugangi an tawo") // needs native review
+    val fewerPeople get() = tr(lang, "Fewer people", "कम लोग", "କମ୍ ଲୋକ", "Bawasan ang tao", "Pakadiyuta an tawo") // needs native review
+    val whoIsWithYou get() = tr(lang, "Who is with you?", "आपके साथ कौन है?", "ଆପଣଙ୍କ ସହିତ କିଏ ଅଛି?", "Sino ang kasama ninyo?", "Hin-o an kaupod niyo?") // needs native review
+    val editWhereTitle get() = tr(lang, "Where are you?", "आप कहाँ हैं?", "ଆପଣ କେଉଁଠି ଅଛନ୍ତି?", "Nasaan kayo?", "Hain kamo?") // needs native review
+    val landmarkLabel get() = tr(lang, "A place nearby (school, temple, shop)", "पास की कोई जगह (स्कूल, मंदिर, दुकान)", "ପାଖର ଏକ ସ୍ଥାନ (ସ୍କୁଲ, ମନ୍ଦିର, ଦୋକାନ)", "Isang lugar na malapit (paaralan, templo, tindahan)", "Usa nga lugar nga harapit (eskwelahan, templo, tindahan)") // needs native review
+    val editNoteTitle get() = tr(lang, "Add a short note", "छोटी टिप्पणी जोड़ें", "ଏକ ଛୋଟ ଟିପ୍ପଣୀ ଯୋଗ କରନ୍ତୁ", "Magdagdag ng maikling tala", "Pagdugang hin mubo nga sumat") // needs native review
+    val noteLabel get() = tr(lang, "Note", "टिप्पणी", "ଟିପ୍ପଣୀ", "Tala", "Sumat") // needs native review
+    fun charsLeft(n: Int) = tr(lang, "$n characters left", "$n अक्षर बाकी", "$n ଅକ୍ଷର ବାକି", "$n karakter ang natitira", "$n ka karakter an nahibilin") // needs native review
 }
