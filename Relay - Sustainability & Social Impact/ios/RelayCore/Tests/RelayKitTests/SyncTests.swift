@@ -212,4 +212,110 @@ final class SyncTests: TempDirTestCase {
         XCTAssertEqual(Hex.encode(gatewayId), r.body?["gateway_node"] as? String)
         XCTAssertEqual("application/json", r.headers["Accept"])
     }
+
+    // ---------------------------------------------------------------- LOC_HINT upload (SPEC 5.5)
+
+    private func typesIn(_ r: FakeHTTP.Req) -> [Int] { frames(r).map { FrameCodec.decode($0)!.type } }
+
+    func testStoredHintIsUploadedWithNeedsOnceAndNotAgain() throws {
+        let store = InMemoryPacketStore()
+        let node = TestSupport.node(nodeId: gatewayId, store: store)
+        let state = GatewayState(file: nil)
+        let s = syncer(node, store, state)
+        _ = try node.originateNeed(TestSupport.need(1))
+        let hint = TestSupport.hint(1, gatewayId)
+        XCTAssertNotNil(try node.originateLocHint(hint))
+
+        let first = s.syncOnce()
+        XCTAssertTrue(first.ok); XCTAssertEqual(2, first.uploaded); XCTAssertEqual(1, first.hintsUploaded)
+        let r1 = try XCTUnwrap(http.requests.first)
+        XCTAssertEqual([FrameTypes.need, FrameTypes.locHint], typesIn(r1))
+        // the hint goes out as its exact stored raw bytes
+        XCTAssertEqual(store.all().first { $0.type == FrameTypes.locHint }?.raw, frames(r1)[1])
+        XCTAssertTrue(state.isUploaded(hint.keyHex))
+        XCTAssertTrue(s.pendingNeedKeys().isEmpty)
+
+        // Second round: nothing new, so an empty upload.
+        let second = s.syncOnce()
+        XCTAssertEqual(0, second.uploaded); XCTAssertEqual(0, second.hintsUploaded)
+        XCTAssertEqual(0, frames(http.requests[1]).count)
+
+        // A later hint uploads alone.
+        _ = try node.originateLocHint(TestSupport.hint(2, gatewayId))
+        XCTAssertEqual(1, s.syncOnce().uploaded)
+        XCTAssertEqual([FrameTypes.locHint], typesIn(http.requests[2]))
+    }
+
+    func testPendingNeedKeysIgnoreHintsAndAFailedRoundKeepsTheHintForRetry() throws {
+        let store = InMemoryPacketStore()
+        let node = TestSupport.node(nodeId: gatewayId, store: store)
+        let state = GatewayState(file: nil)
+        let s = syncer(node, store, state)
+        let hint = TestSupport.hint(1, gatewayId)
+        _ = try node.originateLocHint(hint)
+        XCTAssertTrue(s.pendingNeedKeys().isEmpty, "hints are not NEEDs")
+
+        http.status = 500
+        XCTAssertFalse(s.syncOnce().ok)
+        XCTAssertFalse(state.isUploaded(hint.keyHex))
+
+        http.status = 200
+        let ok = s.syncOnce()
+        XCTAssertTrue(ok.ok); XCTAssertEqual(1, ok.uploaded); XCTAssertEqual(1, ok.hintsUploaded)
+        XCTAssertTrue(state.isUploaded(hint.keyHex))
+    }
+
+    func testNeedsGoBeforeHintsUnderTheCapAndMoreWaitingCountsBoth() throws {
+        let store = InMemoryPacketStore()
+        let node = TestSupport.node(nodeId: gatewayId, store: store)
+        let state = GatewayState(file: nil)
+        // Hints are stored first, NEEDs after: the NEEDs must still be uploaded first.
+        _ = try node.originateLocHint(TestSupport.hint(1, gatewayId))
+        _ = try node.originateLocHint(TestSupport.hint(2, gatewayId))
+        for i in 0..<3 { _ = try node.originateNeed(TestSupport.need(10 + i)) }
+        let s = syncer(node, store, state, max: 4)
+
+        let a = s.syncOnce()
+        XCTAssertEqual(4, a.uploaded); XCTAssertEqual(1, a.hintsUploaded)
+        XCTAssertEqual([FrameTypes.need, FrameTypes.need, FrameTypes.need, FrameTypes.locHint], typesIn(http.requests[0]))
+        XCTAssertTrue(s.moreWaiting)
+
+        let b = s.syncOnce()
+        XCTAssertEqual(1, b.uploaded); XCTAssertEqual(1, b.hintsUploaded)
+        XCTAssertEqual([FrameTypes.locHint], typesIn(http.requests[1]))
+        XCTAssertFalse(s.moreWaiting)
+        XCTAssertEqual(5, state.uploadedCount())
+    }
+
+    func testOutcomeReportsHintsAcceptedOnlyWhenTheBackendSentTheHintsObject() throws {
+        let store = InMemoryPacketStore()
+        let node = TestSupport.node(nodeId: gatewayId, store: store)
+        let s = syncer(node, store, GatewayState(file: nil))
+        _ = try node.originateLocHint(TestSupport.hint(1, gatewayId))
+
+        http.respond { _ in
+            ["accepted": 0, "duplicates": 0, "rejected": 0, "acks": [String](), "ack_cursor": 1,
+             "hints": ["accepted": 1, "duplicates": 0, "rejected": 0]]
+        }
+        let withHints = s.syncOnce()
+        XCTAssertTrue(withHints.ok); XCTAssertEqual(1, withHints.hintsAccepted)
+
+        _ = try node.originateLocHint(TestSupport.hint(2, gatewayId))
+        http.respond { _ in ["accepted": 0, "duplicates": 0, "rejected": 0, "acks": [String](), "ack_cursor": 2] }
+        let without = s.syncOnce()
+        XCTAssertTrue(without.ok); XCTAssertEqual(1, without.hintsUploaded); XCTAssertNil(without.hintsAccepted)
+    }
+
+    func testClientParsingToleratesTheOptionalHintsObject() throws {
+        let c = SyncClient(transport: http)
+        let base = #""accepted":1,"duplicates":0,"rejected":0,"acks":[],"ack_cursor":2"#
+        XCTAssertNil(try c.parse("{\(base)}").hints)
+        XCTAssertEqual(HintCounts(accepted: 2, duplicates: 1, rejected: 3),
+                       try c.parse(#"{\#(base),"hints":{"accepted":2,"duplicates":1,"rejected":3}}"#).hints)
+        XCTAssertEqual(HintCounts(accepted: 4, duplicates: 0, rejected: 0), try c.parse(#"{\#(base),"hints":{"accepted":4}}"#).hints)
+        // A malformed hints value is ignored, not a failure.
+        XCTAssertNil(try c.parse(#"{\#(base),"hints":"nope"}"#).hints)
+        XCTAssertNil(try c.parse(#"{\#(base),"hints":null}"#).hints)
+        XCTAssertEqual(2, try c.parse(#"{\#(base),"hints":[1]}"#).ackCursor)
+    }
 }

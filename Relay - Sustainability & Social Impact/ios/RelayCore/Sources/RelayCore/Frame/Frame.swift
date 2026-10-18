@@ -6,6 +6,7 @@ public enum FrameTypes {
     public static let ack = 0x71
     public static let hello = 0x72
     public static let inventory = 0x73
+    public static let locHint = 0x74
 }
 
 /// Outer frame (SPEC section 3). Byte arrays compare by content.

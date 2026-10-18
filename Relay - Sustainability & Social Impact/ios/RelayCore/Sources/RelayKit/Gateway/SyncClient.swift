@@ -10,6 +10,16 @@ public struct SyncConfig: Equatable, Sendable {
     public init(baseUrl: String, deviceKey: String) { self.baseUrl = baseUrl; self.deviceKey = deviceKey }
 }
 
+/// The optional `hints` object of a sync response: counts for the LOC_HINT frames in the upload.
+public struct HintCounts: Equatable, Sendable {
+    public var accepted: Int
+    public var duplicates: Int
+    public var rejected: Int
+    public init(accepted: Int, duplicates: Int, rejected: Int) {
+        self.accepted = accepted; self.duplicates = duplicates; self.rejected = rejected
+    }
+}
+
 public struct SyncResponse: Equatable, Sendable {
     public var accepted: Int
     public var duplicates: Int
@@ -17,10 +27,12 @@ public struct SyncResponse: Equatable, Sendable {
     /// ACK payloads (not frames), oldest first.
     public var acks: [[UInt8]]
     public var ackCursor: Int64
+    /// Present only when the backend reports hints (it adds `hints` when the upload held any); nil otherwise.
+    public var hints: HintCounts?
 
-    public init(accepted: Int, duplicates: Int, rejected: Int, acks: [[UInt8]], ackCursor: Int64) {
+    public init(accepted: Int, duplicates: Int, rejected: Int, acks: [[UInt8]], ackCursor: Int64, hints: HintCounts? = nil) {
         self.accepted = accepted; self.duplicates = duplicates; self.rejected = rejected
-        self.acks = acks; self.ackCursor = ackCursor
+        self.acks = acks; self.ackCursor = ackCursor; self.hints = hints
     }
 }
 
@@ -43,7 +55,8 @@ public struct SyncException: Error, Equatable, Sendable, CustomStringConvertible
 ///
 /// Request: JSON `{"gateway_node": hex, "frames": [standard padded base64], "ack_cursor": n}` with headers
 /// `Content-Type: application/json`, `Accept: application/json`, `X-Relay-Key`.
-/// Response: JSON `{"accepted","duplicates","rejected","acks":[base64 ACK payloads],"ack_cursor"}`.
+/// Response: JSON `{"accepted","duplicates","rejected","acks":[base64 ACK payloads],"ack_cursor"}` plus an optional
+/// `"hints":{"accepted","duplicates","rejected"}` when the upload held LOC_HINT frames (SPEC section 7).
 public final class SyncClient: Sendable {
     private let transport: any HTTPTransport
     private let connectTimeoutMs: Int
@@ -71,12 +84,32 @@ public final class SyncClient: Sendable {
         let ack_cursor: Int64
     }
 
+    private struct HintsBody: Decodable {
+        let accepted: Int?
+        let duplicates: Int?
+        let rejected: Int?
+    }
+
     private struct ResponseBody: Decodable {
         let accepted: Int?
         let duplicates: Int?
         let rejected: Int?
         let acks: [String]?
         let ack_cursor: Int64
+        /// A malformed `hints` value (string, array, null) is ignored, not a failure.
+        let hints: HintsBody?
+
+        enum CodingKeys: String, CodingKey { case accepted, duplicates, rejected, acks, ack_cursor, hints }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            accepted = try c.decodeIfPresent(Int.self, forKey: .accepted)
+            duplicates = try c.decodeIfPresent(Int.self, forKey: .duplicates)
+            rejected = try c.decodeIfPresent(Int.self, forKey: .rejected)
+            acks = try c.decodeIfPresent([String].self, forKey: .acks)
+            ack_cursor = try c.decode(Int64.self, forKey: .ack_cursor)
+            hints = try? c.decodeIfPresent(HintsBody.self, forKey: .hints)
+        }
     }
 
     public func sync(_ cfg: SyncConfig, gatewayNode: [UInt8], frames: [[UInt8]], ackCursor: Int64) throws -> SyncResponse {
@@ -129,7 +162,8 @@ public final class SyncClient: Sendable {
         }
         let acks = (r.acks ?? []).compactMap { Data(base64Encoded: $0).map { [UInt8]($0) } } // skip bad entries
         return SyncResponse(accepted: r.accepted ?? 0, duplicates: r.duplicates ?? 0, rejected: r.rejected ?? 0,
-                            acks: acks, ackCursor: r.ack_cursor)
+                            acks: acks, ackCursor: r.ack_cursor,
+                            hints: r.hints.map { HintCounts(accepted: $0.accepted ?? 0, duplicates: $0.duplicates ?? 0, rejected: $0.rejected ?? 0) })
     }
 
     /// Convenience for tests and callers holding the body as text.

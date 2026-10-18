@@ -12,6 +12,8 @@ final class FakeTransport: MeshTransport, @unchecked Sendable {
     private var _hellos: [(String, [UInt8])] = []
     /// Where sent frames go: (linkId on this side, frame). Wired up by `connect`.
     var deliver: (@Sendable (String, [UInt8]) -> Void)?
+    /// What `rssiFor` answers for every link.
+    var rssi: Int?
 
     var events: (any MeshTransportEvents)? { lock.lock(); defer { lock.unlock() }; return _events }
     var environment: MeshTransportEnvironment? { lock.lock(); defer { lock.unlock() }; return _env }
@@ -28,6 +30,7 @@ final class FakeTransport: MeshTransport, @unchecked Sendable {
     func stop() { lock.lock(); _stops += 1; lock.unlock() }
     func shutdown() { lock.lock(); _shutdowns += 1; lock.unlock() }
     func onPeerHello(linkId: String, nodeId: [UInt8]) { lock.lock(); _hellos.append((linkId, nodeId)); lock.unlock() }
+    func rssiFor(linkId: String) -> Int? { lock.lock(); defer { lock.unlock() }; return rssi }
     func info() -> MeshTransportInfo { MeshTransportInfo(running: true, scanning: true, advertising: true, centralLinks: 1, peripheralLinks: 0, dutyMode: environment?.dutyMode() ?? .normal) }
     func send(linkId: String, frame: [UInt8]) {
         lock.lock(); _sent.append((linkId, frame)); let d = deliver; lock.unlock()
@@ -305,5 +308,62 @@ final class MeshEngineTests: TempDirTestCase {
         for i in 0..<150 { repo.log("line \(i)") }
         XCTAssertEqual(MeshRepository.maxLog, repo.logLines.count)
         XCTAssertTrue(repo.logLines.last?.hasSuffix("line 149") == true)
+    }
+
+    // ---- mesh-assisted location (SPEC 5.5)
+
+    private func helloFrame(from peer: [UInt8]) throws -> [UInt8] {
+        try FrameCodec.encode(Frame(type: FrameTypes.hello, ttl: 1, timestampMs: currentTimeMs(), senderId: peer,
+                                    payload: try HelloCodec.encode(Hello(nodeId: peer, caps: 0, hopsToGateway: 0xFF, appVersion: 1))))
+    }
+
+    private func noFixNeedFrame(from origin: [UInt8]) throws -> [UInt8] {
+        var n = TestSupport.need(5, origin: origin)
+        n.locAcc = 0; n.latE5 = 0; n.lonE5 = 0
+        return try FrameCodec.encode(Frame(type: FrameTypes.need, ttl: 7, timestampMs: currentTimeMs(), senderId: origin,
+                                           payload: try NeedCodec.encode(n)))
+    }
+
+    func testEngineHintsADirectlyHeardNoFixNeedAndFloodsIt() throws {
+        let repo = makeRepo("a")
+        let fake = FakeTransport(); fake.rssi = -61
+        let latest = LatestFix()
+        latest.set(Fix(lat: 20.29601, lon: 85.82433, accuracyM: 12, atMs: currentTimeMs()))
+        let engine = MeshEngine(repository: repo, transport: fake, hintFix: { latest.relayFix() })
+        engine.start()
+        let origin = TestSupport.id(0x60)
+        fake.events?.onLinkUp("c:peer")
+        fake.events?.onFrame("c:peer", try helloFrame(from: origin))
+        fake.events?.onFrame("c:peer", try noFixNeedFrame(from: origin))
+
+        XCTAssertTrue(waitUntil { repo.status.storedHints == 1 })
+        let hint = try XCTUnwrap(engine.node.storedLocHints().first?.0)
+        XCTAssertEqual(2, hint.acc); XCTAssertEqual(-61, hint.rssiDbm)
+        XCTAssertEqual(repo.nodeId, hint.relayNode)
+        XCTAssertTrue(waitUntil { fake.sent.contains { $0.0 == "c:peer" && $0.1.count > 1 && Int($0.1[1]) == FrameTypes.locHint } })
+        XCTAssertTrue(repo.logLines.contains { $0.contains("LOC_HINT stored") })
+        engine.stop()
+    }
+
+    func testEngineSendsNoHintWhenHelpLocateIsOffOrThereIsNoFix() throws {
+        for (enabled, withFix) in [(false, true), (true, false)] {
+            let repo = makeRepo("a\(enabled)\(withFix)")
+            repo.settings.update { var s = $0; s.helpLocateNeighbours = enabled; return s }
+            let fake = FakeTransport()
+            let latest = LatestFix()
+            if withFix { latest.set(Fix(lat: 20.3, lon: 85.8, accuracyM: 12, atMs: currentTimeMs())) }
+            let asked = Box(0)
+            let engine = MeshEngine(repository: repo, transport: fake, hintFix: { latest.relayFix() }, requestFix: { asked.mutate { $0 += 1 } })
+            engine.start()
+            let origin = TestSupport.id(0x60)
+            fake.events?.onLinkUp("c:peer")
+            fake.events?.onFrame("c:peer", try helloFrame(from: origin))
+            fake.events?.onFrame("c:peer", try noFixNeedFrame(from: origin))
+            XCTAssertTrue(waitUntil { repo.status.storedNeeds == 1 })
+            Thread.sleep(forTimeInterval: 0.3)
+            XCTAssertEqual(0, engine.node.storedLocHints().count)
+            XCTAssertEqual(enabled ? 1 : 0, asked.value, "an enabled phone without a fix asks the platform for one")
+            engine.stop()
+        }
     }
 }

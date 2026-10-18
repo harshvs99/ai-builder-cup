@@ -173,6 +173,18 @@ public struct NetworkSettingsStrings: Equatable, Sendable {
         "यह फ़ोन कभी अपलोड नहीं करता। फिर भी यह फ़ोन से फ़ोन संदेश पहुँचाता है।", "ଏହି ଫୋନ୍ କେବେ ଅପଲୋଡ୍ କରେ ନାହିଁ। ତଥାପି ଏହା ଫୋନ୍ ଠାରୁ ଫୋନ୍ କୁ ସନ୍ଦେଶ ପଠାଏ।",
         "Hindi nag-a-upload ang teleponong ito. Nagpapasa pa rin ito ng mensahe sa ibang telepono.", "Diri nag-a-upload ini nga telepono. Nagpapasa gihapon hin mensahe ha iba nga telepono.",
     ) } // needs native review
+    public var helpLocate: String { tr(
+        lang, "Help locate neighbours", "पड़ोसियों को ढूँढने में मदद करें", "ପଡ଼ିଶାଙ୍କୁ ଖୋଜିବାରେ ସାହାଯ୍ୟ କରନ୍ତୁ",
+        "Tulungang hanapin ang mga kapitbahay", "Bulig pagbiling han mga kapitbahay",
+    ) } // needs native review
+    public var helpLocateHelp: String { tr(
+        lang,
+        "When a neighbour's phone has no GPS, tell the control room roughly where you are so rescuers can find them. Shares your position (about 100 m or better) with nearby phones and the control room.",
+        "जब किसी पड़ोसी के फ़ोन में GPS नहीं होता, तो कंट्रोल रूम को बताएँ कि आप लगभग कहाँ हैं, ताकि बचावकर्मी उन्हें ढूँढ सकें। आपकी लोकेशन (लगभग 100 मीटर या बेहतर) पास के फ़ोन और कंट्रोल रूम को भेजी जाती है।",
+        "ଯେତେବେଳେ ପଡ଼ିଶାର ଫୋନରେ GPS ନଥାଏ, କଣ୍ଟ୍ରୋଲ୍ ରୁମକୁ ଜଣାନ୍ତୁ ଆପଣ ପ୍ରାୟ କେଉଁଠି ଅଛନ୍ତି, ଯାହାଫଳରେ ଉଦ୍ଧାରକାରୀ ସେମାନଙ୍କୁ ଖୋଜିପାରିବେ। ଆପଣଙ୍କ ସ୍ଥାନ (ପ୍ରାୟ 100 ମିଟର କିମ୍ବା ଭଲ) ପାଖ ଫୋନ୍ ଓ କଣ୍ଟ୍ରୋଲ୍ ରୁମକୁ ପଠାଯାଏ।",
+        "Kapag walang GPS ang telepono ng kapitbahay, sabihin sa control room kung nasaan ka nang halos, para mahanap sila ng mga tagapagligtas. Ibinabahagi ang posisyon mo (mga 100 m o mas mabuti) sa mga kalapit na telepono at sa control room.",
+        "Kun waray GPS an telepono han kapitbahay, sumati ha control room kun hain ka hin lapos, basi makita sinda han mga manluluwas. Ginbabahin an imo posisyon (mga 100 m o mas maupay) ha harani nga mga telepono ngan ha control room.",
+    ) } // needs native review
     public var permBluetooth: String { tr(lang, "Bluetooth", "ब्लूटूथ", "ବ୍ଲୁଟୁଥ୍", "Bluetooth", "Bluetooth") } // needs native review
     public var permLocation: String { tr(lang, "Location", "लोकेशन", "ଲୋକେସନ୍", "Lokasyon", "Lokasyon") } // needs native review
     public var permMicrophone: String { tr(lang, "Microphone", "माइक्रोफ़ोन", "ମାଇକ୍ରୋଫୋନ୍", "Mikropono", "Mikropono") } // needs native review

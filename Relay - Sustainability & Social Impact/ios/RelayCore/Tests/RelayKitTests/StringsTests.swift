@@ -174,7 +174,7 @@ final class StringsTests: XCTestCase {
                 n.iPhoneBestOpenNote, n.groupLanguageVoice, n.groupScreenBattery, n.groupNetworkPermissions, n.groupBeforeDisaster,
                 n.language, n.chooseLanguage, n.readAloud, n.voiceSpeed, n.speedSlow, n.speedNormal, n.theme, n.themeLight, n.themeDark,
                 n.themeAuto, n.largerText, n.darkNote, n.yourArea, n.areaNotSet, n.areaHelp, n.save, n.gatewayMode, n.gatewayAutomatic,
-                n.gatewayNever, n.gatewayAutomaticHelp, n.gatewayNeverHelp, n.permBluetooth, n.permLocation, n.permMicrophone,
+                n.gatewayNever, n.gatewayAutomaticHelp, n.gatewayNeverHelp, n.helpLocate, n.helpLocateHelp, n.permBluetooth, n.permLocation, n.permMicrophone,
                 n.permAllowed, n.permWhileUsing, n.permAsk, n.permNotAllowed, n.permOpensSettings, n.householdPlan, n.householdPlanHelp,
                 n.setUp, n.comingSoon, n.comingSoonTitle, n.comingSoonBody, n.developer,
             ]

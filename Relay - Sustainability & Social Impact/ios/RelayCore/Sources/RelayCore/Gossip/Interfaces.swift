@@ -23,6 +23,8 @@ public protocol GossipListener {
     func onNeed(_ need: Need, frame: Frame, fromLink: String?)
     func onAckForMe(_ ack: Ack, frame: Frame)
     func onAckSeen(_ ack: Ack, frame: Frame)
+    /// A LOC_HINT (SPEC 5.5) was stored for the first time; [fromLink] is nil for a hint this node originated.
+    func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?)
     func onPeerHello(linkId: String, hello: Hello)
     func onLog(_ msg: String)
 }
@@ -31,6 +33,7 @@ extension GossipListener {
     public func onNeed(_ need: Need, frame: Frame, fromLink: String?) {}
     public func onAckForMe(_ ack: Ack, frame: Frame) {}
     public func onAckSeen(_ ack: Ack, frame: Frame) {}
+    public func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) {}
     public func onPeerHello(linkId: String, hello: Hello) {}
     public func onLog(_ msg: String) {}
 }
@@ -64,12 +67,12 @@ public enum DuplicateLinkPolicy {
     }
 }
 
-/// One stored NEED/ACK frame. [raw] is the encoded frame as received (or originated).
+/// One stored NEED/ACK/LOC_HINT frame. [raw] is the encoded frame as received (or originated).
 public struct StoredPacket: Equatable, Hashable, Sendable {
     public let key: String
     public let type: Int
     public let raw: [UInt8]
-    /// NEED: created_at in ms. ACK: first-stored time in ms. Expiry is `basis + 72 h`.
+    /// NEED: created_at in ms. ACK and LOC_HINT: first-stored time in ms. Expiry is `basis + 72 h`.
     public let expiryBasisMs: Int64
 
     public init(key: String, type: Int, raw: [UInt8], expiryBasisMs: Int64) {
@@ -132,11 +135,12 @@ public final class InMemoryPacketStore: PacketStore, @unchecked Sendable {
 public struct GossipStats: Equatable, Sendable {
     public var framesReceived: Int64 = 0
     public var framesRejected: Int64 = 0
-    /// NEED/ACK/opaque frames dropped because their key was already known.
+    /// NEED/ACK/LOC_HINT/opaque frames dropped because their key was already known.
     public var duplicates: Int64 = 0
     public var framesSent: Int64 = 0
     public var needsDelivered: Int64 = 0
     public var acksDelivered: Int64 = 0
+    public var locHintsDelivered: Int64 = 0
 
     public init() {}
 }

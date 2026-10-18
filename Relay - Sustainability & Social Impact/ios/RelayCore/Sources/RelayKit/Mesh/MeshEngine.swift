@@ -30,6 +30,8 @@ public final class MeshEngine: @unchecked Sendable {
     private let nodeId: [UInt8]
     private let recentPeers: RecentPeers
     private let syncer: GatewaySyncer
+    /// Mesh-assisted location (SPEC 5.5). Created with the node, hence implicitly unwrapped.
+    private var locHints: LocHintResponder!
     private let gateway: GatewayManager
     private let queue = DispatchQueue(label: "relay-engine")
     private let bridge: Bridge
@@ -63,6 +65,7 @@ public final class MeshEngine: @unchecked Sendable {
         func onLog(_ msg: String) { engine?.repo.log(msg) }
         func onNeed(_ need: Need, frame: Frame, fromLink: String?) { engine?.gossipNeed(need, frame, fromLink) }
         func onAckForMe(_ ack: Ack, frame: Frame) { engine?.gossipAckForMe(ack) }
+        func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) { engine?.gossipLocHint(hint, frame, fromLink) }
         func onPeerHello(linkId: String, hello: Hello) { engine?.gossipPeerHello(linkId, hello) }
         func gatewayChanged(_ internet: Bool, _ outcome: SyncOutcome?) { engine?.gatewayChanged(internet: internet, outcome: outcome) }
     }
@@ -71,7 +74,11 @@ public final class MeshEngine: @unchecked Sendable {
     ///   - repository: stores, settings, observation hub.
     ///   - transport: the radio (CoreBluetooth in the app, a fake in tests); attached immediately.
     ///   - syncClient: backend client; pass one with a fake `HTTPTransport` in tests.
-    public init(repository: MeshRepository, transport: any MeshTransport, syncClient: SyncClient = SyncClient()) {
+    ///   - hintFix: this phone's current position for LOC_HINT (SPEC 5.5), nil when it has none; read from the engine's
+    ///     queue, so it must be thread-safe (see `LatestFix`). The default never has a fix, so no hint is ever sent.
+    ///   - requestFix: asks the platform to start a short location listen when a hint is wanted and there is no fix.
+    public init(repository: MeshRepository, transport: any MeshTransport, syncClient: SyncClient = SyncClient(),
+                hintFix: @escaping @Sendable () -> RelayFix? = { nil }, requestFix: @escaping @Sendable () -> Void = {}) {
         let bridge = Bridge()
         self.bridge = bridge
         self.repo = repository
@@ -87,6 +94,15 @@ public final class MeshEngine: @unchecked Sendable {
             scheduler: DispatchQueueScheduler(queue: queue), store: repository.packetStore,
             listener: bridge, appVersion: 1, pushBudgetBytes: PushPlanner.defaultBudgetBytes)
         self.node = node
+        // Re-checks the "Help locate neighbours" setting at the moment of emission, so turning it off stops hinting
+        // immediately.
+        self.locHints = LocHintResponder(
+            node: node, clock: WallClock(), scheduler: DispatchQueueScheduler(queue: queue),
+            enabled: { settings.current.helpLocateNeighbours },
+            fix: hintFix,
+            rssi: { [weak transport] linkId in transport?.rssiFor(linkId: linkId) },
+            requestFix: requestFix,
+            log: { repo.log($0) })
         let syncer = GatewaySyncer(
             node: node, store: repository.packetStore, state: repository.gatewayState, client: syncClient,
             config: { let s = settings.current; return SyncConfig(baseUrl: s.backendUrl, deviceKey: s.deviceKey) },
@@ -288,8 +304,16 @@ public final class MeshEngine: @unchecked Sendable {
     // ---------------------------------------------------------------- GossipListener
 
     fileprivate func gossipNeed(_ need: Need, _ frame: Frame, _ fromLink: String?) {
+        locHints.onNeed(need, fromLink: fromLink)
         repo.log("NEED delivered \(need.msgIdHex) from=\(fromLink ?? "local") ttl=\(frame.ttl) cat=\(need.category.name) urgency=\(need.urgency) item=\"\(need.item)\"")
         gateway.kick()
+        publish()
+    }
+
+    fileprivate func gossipLocHint(_ hint: LocHint, _ frame: Frame, _ fromLink: String?) {
+        repo.log("LOC_HINT stored ref=\(hint.refMsgIdHex) relay=\(Hex.encode(hint.relayNode)) from=\(fromLink ?? "local") "
+            + "acc<=\(hint.accuracyMaxM) m ttl=\(frame.ttl)")
+        gateway.kick() // no-op unless this phone is a gateway; lets hints upload promptly
         publish()
     }
 
@@ -347,6 +371,7 @@ public final class MeshEngine: @unchecked Sendable {
             hopsToGateway: node.hopsToGateway,
             storedNeeds: all.filter { $0.type == FrameTypes.need }.count,
             storedAcks: all.filter { $0.type == FrameTypes.ack }.count,
+            storedHints: all.filter { $0.type == FrameTypes.locHint }.count,
             stats: node.stats(),
             transport: transport.info(),
             internetAvailable: s.internet,

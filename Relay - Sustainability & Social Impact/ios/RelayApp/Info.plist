@@ -59,6 +59,8 @@
 	<string>$(RELAY_DEVICE_KEY)</string>
 	<key>RelayLockConnection</key>
 	<string>$(RELAY_LOCK_CONNECTION)</string>
+	<key>RelayHelpLocateDefault</key>
+	<string>$(RELAY_HELP_LOCATE_DEFAULT)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Relay uses Bluetooth to pass help requests between nearby phones when there is no network.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -24,6 +24,10 @@ public enum BleConstants {
     public static let setupTimeoutMs: Int64 = 25_000
     public static let peripheralSubscribeTimeoutMs: Int64 = 12_000
 
+    /// Mirrors the gossip engine's resync period (`MeshEngine.resyncIntervalMs`: `node.resync()` every 30 s); the
+    /// liveness watchdog derives from it.
+    public static let resyncIntervalMs: Int64 = 30_000
+
     public static let backoffMinMs: Int64 = 2_000
     public static let backoffMaxMs: Int64 = 60_000
     public static let allowlistIgnoreMs: Int64 = 60_000

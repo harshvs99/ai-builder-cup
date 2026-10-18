@@ -105,9 +105,15 @@ final class AppModel {
             dataDirectory: AppModel.dataDirectory(), settings: settings,
             logSink: { relayLogger.info("\($0, privacy: .public)") })
         let transport = CoreBluetoothTransport()
-        let engine = MeshEngine(repository: repository, transport: transport, syncClient: SyncClient())
         let log: @Sendable (String) -> Void = { [weak repository] in repository?.log($0) }
-        let location = LocationProvider()
+        // Mesh-assisted location (SPEC 5.5): the engine reads this phone's latest fix from its own queue, and asks the
+        // main-actor location provider for a short listening window when it wants a hint and has no fix.
+        let latestFix = LatestFix()
+        let location = LocationProvider(latestFix: latestFix)
+        let engine = MeshEngine(
+            repository: repository, transport: transport, syncClient: SyncClient(),
+            hintFix: { latestFix.relayFix() },
+            requestFix: { Task { @MainActor in _ = location.start() } })
 
         self.repository = repository
         self.engine = engine
@@ -386,7 +392,7 @@ final class AppModel {
     /// blanked, so `BuildConfig` falls back to its defaults instead of using the literal text.
     private static func cleanedInfoDictionary() -> [String: Any]? {
         guard var info = Bundle.main.infoDictionary else { return nil }
-        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection"] {
+        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault"] {
             if let v = info[key] as? String, v.contains("$(") { info[key] = "" }
         }
         return info

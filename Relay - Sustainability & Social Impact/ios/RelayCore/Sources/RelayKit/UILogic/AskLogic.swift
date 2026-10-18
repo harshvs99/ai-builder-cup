@@ -195,15 +195,14 @@ public enum AskLogic {
 
     // ---------------------------------------------------------------- location line (Check and send)
 
-    /// "GPS · about 40 m accuracy", "Getting location…", or the honest "Location is off" line.
+    /// "GPS · about 40 m accuracy", or the reason there is no fix ("Location permission is off", "Location is turned
+    /// off on this phone", "Still finding your location…", from `NoLocationLogic`).
     public static func locationText(_ ask: AskStrings, _ ui: LocUi, accuracyM: Double?) -> String {
-        switch ui {
-        case .ready:
+        guard let reason = NoLocationLogic.reason(for: ui) else {
             guard let a = accuracyM, !a.isNaN, a >= 0 else { return "GPS" }
             return ask.locationAccuracy(max(1, Int(a.rounded(.toNearestOrAwayFromZero))))
-        case .acquiring: return ask.locationAcquiring
-        case .off, .noPermission: return ask.locationOff
         }
+        return NoLocationLogic.reasonText(ask, reason)
     }
 
     /// The "Turn on" button beside the location line shows when location is off or not allowed.

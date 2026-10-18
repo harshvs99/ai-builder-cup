@@ -21,6 +21,9 @@ final class CentralLink {
     let queue: GattOpQueue
     /// Notifications that raced ahead of the subscribe completion; replayed right after `onLinkUp`.
     var earlyFrames: [[UInt8]] = []
+    /// Last time any frame arrived on this link (liveness watchdog, `LinkHealth.livenessAbortReason`); set again when
+    /// the link comes up.
+    var lastRxAt: Int64
 
     init(peripheral: CBPeripheral, log: @escaping @Sendable (String) -> Void) {
         let now = monotonicMs()
@@ -29,6 +32,7 @@ final class CentralLink {
         self.linkId = LinkId.central(peripheral.identifier.uuidString)
         self.createdAt = now
         self.phaseSince = now
+        self.lastRxAt = now
         let linkId = LinkId.central(peripheral.identifier.uuidString)
         self.queue = GattOpQueue(log: { log("[\(linkId)] \($0)") })
     }
@@ -46,12 +50,15 @@ final class PeripheralLink {
     var up = false
     let queue: GattOpQueue
     var earlyFrames: [[UInt8]] = []
+    /// Last time any frame arrived on this link (liveness watchdog); set again when the link comes up.
+    var lastRxAt: Int64
 
     init(central: CBCentral, log: @escaping @Sendable (String) -> Void) {
         self.id = central.identifier.uuidString
         self.central = central
         self.linkId = LinkId.peripheral(central.identifier.uuidString)
         self.connectedAt = monotonicMs()
+        self.lastRxAt = self.connectedAt
         let linkId = LinkId.peripheral(central.identifier.uuidString)
         self.queue = GattOpQueue(log: { log("[\(linkId)] \($0)") })
     }

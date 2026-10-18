@@ -81,6 +81,26 @@ final class MeshHardeningTests: XCTestCase {
         XCTAssertEqual(0, r.knownMacCount())
     }
 
+    func testScanRssiIsKeptPerAddressForCentralLinksOnlyAndBounded() {
+        let r = LinkRegistry(myId: [UInt8](repeating: 1, count: 8))
+        XCTAssertNil(r.rssiFor("c:aa"))
+        r.noteScanRssi("aa", -71)
+        r.noteScanRssi("bb", 127)   // "unavailable" is ignored
+        r.noteScanRssi("cc", -200)  // out of range is ignored
+        XCTAssertEqual(-71, r.rssiFor("c:aa"))
+        XCTAssertNil(r.rssiFor("p:aa"), "peripheral links were never scanned")
+        XCTAssertNil(r.rssiFor("c:bb")); XCTAssertNil(r.rssiFor("c:cc"))
+        r.noteScanRssi("aa", -60) // latest scan wins
+        XCTAssertEqual(-60, r.rssiFor("c:aa"))
+
+        let n = LinkRegistry.maxMacEntries * 3
+        for i in 0..<n { r.noteScanRssi("m\(i)", -50) }
+        XCTAssertNil(r.rssiFor("c:aa"), "oldest entries are evicted")
+        XCTAssertEqual(-50, r.rssiFor("c:m\(n - 1)"))
+        r.clear()
+        XCTAssertNil(r.rssiFor("c:m\(n - 1)"))
+    }
+
     func testThrottleResetAfterBluetoothToggleStormAllowsScanAgain() {
         let t = ScanThrottle()
         for i in 0..<5 { XCTAssertTrue(t.tryAcquire(now: Int64(i) * 1_000)) } // five toggles in five seconds

@@ -39,7 +39,7 @@ final class VectorsTests: XCTestCase {
             item: str("item"), landmark: str("landmark"), summary: str("summary"), answers: answers)
     }
 
-    func testVectorsFilePresent() { XCTAssertEqual(9, vectors.count) }
+    func testVectorsFilePresent() { XCTAssertEqual(11, vectors.count) }
 
     func testEveryVectorEncodesAndDecodes() throws {
         for v in vectors {
@@ -81,6 +81,18 @@ final class VectorsTests: XCTestCase {
                 let enc = try InventoryCodec.encode(inv)
                 XCTAssertEqual(payloadHex, Hex.encode(enc), "\(name) payload")
                 XCTAssertEqual(inv, InventoryCodec.decode(h(payloadHex)), "\(name) decode")
+                payload = enc
+            case "LOC_HINT":
+                let hint = LocHint(refMsgId: h(s(fl, "ref_msg_id")), relayNode: h(s(fl, "relay_node")),
+                                   latE5: Geo.toE5(d(fl, "lat")), lonE5: Geo.toE5(d(fl, "lon")), acc: i(fl, "acc"),
+                                   rssiDbm: i(fl, "rssi_dbm"), observedAt: l(fl, "observed_at"))
+                XCTAssertEqual(i(fl, "lat_e5"), hint.latE5, "\(name) lat_e5")
+                XCTAssertEqual(i(fl, "lon_e5"), hint.lonE5, "\(name) lon_e5")
+                let enc = try LocHintCodec.encode(hint)
+                XCTAssertEqual(payloadHex, Hex.encode(enc), "\(name) payload")
+                XCTAssertEqual(hint, LocHintCodec.decode(h(payloadHex)), "\(name) decode")
+                XCTAssertEqual(s(fl, "key"), hint.keyHex, "\(name) key")
+                XCTAssertEqual(i(fl, "acc_max_m"), hint.accuracyMaxM, "\(name) acc bound")
                 payload = enc
             case "OPAQUE":
                 payload = h(payloadHex)
@@ -138,6 +150,19 @@ final class VectorsTests: XCTestCase {
         let bad = root["must_reject_need_payloads"] as! [String: String]
         XCTAssertGreaterThanOrEqual(bad.count, 9)
         for (name, hexv) in bad { XCTAssertNil(NeedCodec.decode(h(hexv)), "must reject \(name)") }
+    }
+
+    func testMustRejectLocHintPayloadsAreRejected() {
+        let bad = root["must_reject_loc_hint_payloads"] as! [String: String]
+        XCTAssertGreaterThanOrEqual(bad.count, 7)
+        for (name, hexv) in bad { XCTAssertNil(LocHintCodec.decode(h(hexv)), "must reject \(name)") }
+    }
+
+    func testLocHintSizeAndAccuracyTableMatchReferenceEncoder() {
+        XCTAssertEqual(LocHintCodec.size, i(obj(root, "sizes"), "loc_hint_payload"))
+        let table = root["loc_hint_acc_max_m"] as! [String: NSNumber]
+        XCTAssertEqual(4, table.count)
+        for (k, v) in table { XCTAssertEqual(v.intValue, LocHintCodec.accMaxM[Int(k)!]) }
     }
 
     func testBroadcastRecipientAllFfIsBroadcast() throws {

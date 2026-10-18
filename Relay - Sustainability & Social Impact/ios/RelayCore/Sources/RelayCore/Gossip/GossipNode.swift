@@ -126,6 +126,15 @@ public final class GossipNode: @unchecked Sendable {
         }
     }
 
+    public func storedLocHints() -> [(LocHint, Frame)] {
+        guarded {
+            store.all().filter { $0.type == FrameTypes.locHint }.compactMap { p in
+                guard let f = FrameCodec.decode(p.raw), let h = LocHintCodec.decode(f.payload) else { return nil }
+                return (h, f)
+            }
+        }
+    }
+
     public func storedAcks() -> [(Ack, Frame)] {
         guarded {
             store.all().filter { $0.type == FrameTypes.ack }.compactMap { p in
@@ -171,7 +180,7 @@ public final class GossipNode: @unchecked Sendable {
         }
     }
 
-    /// Drop NEED/ACK frames older than 72 h from the store. Seen-set keys stay until LRU eviction.
+    /// Drop NEED/ACK/LOC_HINT frames older than 72 h from the store. Seen-set keys stay until LRU eviction.
     public func expire() { locked { out in expireLocked(out) } }
 
     @discardableResult
@@ -192,6 +201,23 @@ public final class GossipNode: @unchecked Sendable {
         let raw = try FrameCodec.encode(frame)
         locked { out in acceptAck(out, ack, frame, raw, fromLink: nil) }
         return frame
+    }
+
+    /// Originate a LOC_HINT (SPEC 5.5) with this node as relay: [hint]'s relay_node must be this node. Returns nil when
+    /// this node already put a hint for that NEED into the mesh (the derived key is in the seen-set), so a relay never
+    /// sends two.
+    @discardableResult
+    public func originateLocHint(_ hint: LocHint) throws -> Frame? {
+        guard hint.relayNode == nodeId else { throw IllegalArgumentError("relay_node must be this node") }
+        let frame = Frame(type: FrameTypes.locHint, ttl: Self.initialTtl, timestampMs: clock.nowMs(),
+                          senderId: nodeId, payload: try LocHintCodec.encode(hint))
+        let raw = try FrameCodec.encode(frame)
+        var fresh = false
+        locked { out in
+            fresh = !isKnown(hint.keyHex)
+            acceptLocHint(out, hint, frame, raw, fromLink: nil)
+        }
+        return fresh ? frame : nil
     }
 
     /// Entry point for every whole frame received on [linkId]. Never fails on malformed input.
@@ -228,6 +254,11 @@ public final class GossipNode: @unchecked Sendable {
                 if !knownVersion { return acceptOpaque(out, frame, bytes, linkId) }
                 guard let ack = AckCodec.decode(frame.payload) else { reject(); return }
                 acceptAck(out, ack, frame, bytes, fromLink: linkId)
+            case FrameTypes.locHint:
+                if !knownVersion { return acceptOpaque(out, frame, bytes, linkId) }
+                // like HELLO: the relay named in the payload must be the node that sent the frame
+                guard let hint = LocHintCodec.decode(frame.payload), hint.relayNode == frame.senderId else { reject(); return }
+                acceptLocHint(out, hint, frame, bytes, fromLink: linkId)
             case FrameTypes.hello:
                 guard let hello = HelloCodec.decode(frame.payload), hello.nodeId == frame.senderId else { reject(); return }
                 onHello(out, linkId, hello)
@@ -269,6 +300,17 @@ public final class GossipNode: @unchecked Sendable {
         statsValue.acksDelivered += 1
         out.actions.append { [listener] in listener.onAckSeen(ack, frame: frame) }
         if ack.targetNode == nodeId { out.actions.append { [listener] in listener.onAckForMe(ack, frame: frame) } }
+        scheduleFlood(out, frame, raw, key, fromLink)
+    }
+
+    private func acceptLocHint(_ out: Out, _ hint: LocHint, _ frame: Frame, _ raw: [UInt8], fromLink: String?) {
+        let key = hint.keyHex
+        if let fromLink { links[fromLink]?.peerKeys.insert(key) }
+        if isKnown(key) { statsValue.duplicates += 1; return }
+        markSeen(key)
+        store.put(StoredPacket(key: key, type: FrameTypes.locHint, raw: raw, expiryBasisMs: clock.nowMs()))
+        statsValue.locHintsDelivered += 1
+        out.actions.append { [listener] in listener.onLocHint(hint, frame: frame, fromLink: fromLink) }
         scheduleFlood(out, frame, raw, key, fromLink)
     }
 
@@ -335,12 +377,13 @@ public final class GossipNode: @unchecked Sendable {
         pushBatch(out, linkId, st)
     }
 
-    /// Push the next capped batch of what the peer lacks (ACKs, then NEEDs newest first). Pushed keys are
+    /// Push the next capped batch of what the peer lacks (ACKs, then NEEDs newest first, then LOC_HINTs). Pushed keys are
     /// recorded in `LinkState.peerKeys` so flooding does not repeat them. A remainder is continued after
     /// [pushContinueMs] on the same link, without waiting for the next 30 s inventory exchange.
     private func pushBatch(_ out: Out, _ linkId: String, _ st: LinkState) {
         let candidates = store.all().filter {
-            ($0.type == FrameTypes.need || $0.type == FrameTypes.ack) && !st.peerKeys.contains($0.key)
+            ($0.type == FrameTypes.need || $0.type == FrameTypes.ack || $0.type == FrameTypes.locHint)
+                && !st.peerKeys.contains($0.key)
         }
         if candidates.isEmpty { return }
         let plan = PushPlanner.plan(candidates, peerNodeId: st.hello?.nodeId, budgetBytes: pushBudgetBytes)

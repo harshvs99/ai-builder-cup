@@ -62,6 +62,9 @@ final class CoreBluetoothTransport: NSObject, MeshTransport, @unchecked Sendable
     var central: [String: CentralLink] = [:]
     var peripheral: [String: PeripheralLink] = [:]
     var connectingId: String?
+    /// peripheral id -> discovery retries already made (reset when the link comes up or we give up); see
+    /// `LinkHealth.discoveryRetryDelayMs`.
+    var discoveryRetries: [String: Int] = [:]
 
     var serverService: CBMutableService?
     var serverChar: CBMutableCharacteristic?
@@ -89,6 +92,9 @@ final class CoreBluetoothTransport: NSObject, MeshTransport, @unchecked Sendable
     private var infoDuty: (@Sendable () -> DutyCycle.Mode)?
     private var stateObserver: (@Sendable (BluetoothRadioState) -> Void)?
     private var lastRadioState: BluetoothRadioState = .unknown
+    /// The same `LinkRegistry` instance as `registry`, reachable from any thread (the registry is internally locked,
+    /// but the `registry` property itself is queue-confined and replaced in `attach`). Serves `rssiFor`.
+    private var rssiRegistry: LinkRegistry?
 
     override init() { super.init() }
 
@@ -102,8 +108,17 @@ final class CoreBluetoothTransport: NSObject, MeshTransport, @unchecked Sendable
         queue.async {
             self.events = events
             self.env = environment
-            self.registry = LinkRegistry(myId: environment.myNodeId)
+            let registry = LinkRegistry(myId: environment.myNodeId)
+            self.registry = registry
+            self.lock.lock(); self.rssiRegistry = registry; self.lock.unlock()
         }
+    }
+
+    /// Last scan RSSI (dBm) of the link [linkId], or nil when unknown (always nil for peripheral links). Any thread;
+    /// feeds `rssi_dbm` of a LOC_HINT (SPEC 5.5).
+    func rssiFor(linkId: String) -> Int? {
+        lock.lock(); let r = rssiRegistry; lock.unlock()
+        return r?.rssiFor(linkId)
     }
 
     /// Called (on the transport queue) with the radio state each time CoreBluetooth reports it, plus once after
@@ -218,6 +233,7 @@ final class CoreBluetoothTransport: NSObject, MeshTransport, @unchecked Sendable
         registry.clear()
         ignored.removeAll()
         seenAt.removeAll()
+        discoveryRetries.removeAll()
         backoff.clear() // a restarted transport starts clean: stale per-peer delays would block the re-link
         scanNotBefore = 0
         connectingId = nil
@@ -313,14 +329,25 @@ final class CoreBluetoothTransport: NSObject, MeshTransport, @unchecked Sendable
                 phase: c.phase, inPhaseMs: t - c.phaseSince, totalMs: t - c.createdAt,
                 consecutiveOpTimeouts: c.queue.consecutiveTimeouts)
             if let abort { teardownCentral(c, abort, backoffFailure: true); continue }
-            if c.queue.consecutiveTimeouts >= 3 { teardownCentral(c, "3 consecutive GATT timeouts", backoffFailure: true) }
+            if c.queue.consecutiveTimeouts >= 3 { teardownCentral(c, "3 consecutive GATT timeouts", backoffFailure: true); continue }
+            // Liveness watchdog: an established link that carried no frame for three resync periods is a zombie (a peer
+            // whose process restarted without a disconnect reaching us). Close it; the backoff applies.
+            if c.phase == .up, let dead = LinkHealth.livenessAbortReason(lastRxAt: c.lastRxAt, now: t) {
+                teardownCentral(c, dead, backoffFailure: true)
+            }
         }
         for p in Array(peripheral.values) {
             if !p.up && t - p.connectedAt > BleConstants.peripheralSubscribeTimeoutMs {
                 teardownPeripheral(p, "central never subscribed"); continue
             }
             p.queue.tick()
-            if p.queue.consecutiveTimeouts >= 3 { teardownPeripheral(p, "3 consecutive notify timeouts") }
+            if p.queue.consecutiveTimeouts >= 3 { teardownPeripheral(p, "3 consecutive notify timeouts"); continue }
+            if p.up, let dead = LinkHealth.livenessAbortReason(lastRxAt: p.lastRxAt, now: t) {
+                // iOS cannot disconnect a central: forget the link and ignore it briefly (as for duplicates), so a
+                // stray write does not revive it half-built. A live peer re-subscribes and gets a fresh link.
+                ignored[p.id] = max(ignored[p.id] ?? 0, t + BleConstants.duplicateIgnoreMs)
+                teardownPeripheral(p, dead)
+            }
         }
         if t - lastHousekeeping >= CoreBluetoothTransport.housekeepingMs {
             lastHousekeeping = t

@@ -10,16 +10,22 @@ public struct SyncOutcome: Equatable, Sendable {
     public var rejected: Int
     public var acksOriginated: Int
     public var error: String?
+    /// How many of the `uploaded` frames were LOC_HINTs (the rest are NEEDs).
+    public var hintsUploaded: Int
+    /// Backend's count of accepted hints, when its response had a `hints` object; nil otherwise.
+    public var hintsAccepted: Int?
 
     public init(ok: Bool, uploaded: Int = 0, accepted: Int = 0, duplicates: Int = 0, rejected: Int = 0,
-                acksOriginated: Int = 0, error: String? = nil) {
+                acksOriginated: Int = 0, error: String? = nil, hintsUploaded: Int = 0, hintsAccepted: Int? = nil) {
         self.ok = ok; self.uploaded = uploaded; self.accepted = accepted; self.duplicates = duplicates
         self.rejected = rejected; self.acksOriginated = acksOriginated; self.error = error
+        self.hintsUploaded = hintsUploaded; self.hintsAccepted = hintsAccepted
     }
 }
 
-/// One gateway sync round: upload stored NEED frames not yet uploaded, then wrap any returned ACK payloads
-/// and originate them into the mesh. Runs against a fake `HTTPTransport` in tests.
+/// One gateway sync round: upload stored NEED frames and then stored LOC_HINT frames (SPEC 5.5) not yet uploaded
+/// (NEEDs first, together capped by `maxFramesPerSync`), then wrap any returned ACK payloads and originate them into
+/// the mesh. Runs against a fake `HTTPTransport` in tests.
 ///
 /// Failure semantics: any error leaves `state` untouched, so the same frames go out again next round.
 public final class GatewaySyncer: @unchecked Sendable {
@@ -43,20 +49,26 @@ public final class GatewaySyncer: @unchecked Sendable {
         self.config = config; self.log = log; self.maxFramesPerSync = maxFramesPerSync
     }
 
-    /// True if more NEED frames are waiting after the last round (caller may re-run immediately).
+    /// True if more NEED or LOC_HINT frames are waiting after the last round (caller may re-run immediately).
     public var moreWaiting: Bool {
         get { flagLock.lock(); defer { flagLock.unlock() }; return moreWaitingValue }
         set { flagLock.lock(); moreWaitingValue = newValue; flagLock.unlock() }
     }
 
+    /// Keys of stored NEED frames not yet uploaded (LOC_HINTs are deliberately not counted here).
     public func pendingNeedKeys() -> [String] {
         store.all().filter { $0.type == FrameTypes.need && !state.isUploaded($0.key) }.map { $0.key }
     }
 
     public func syncOnce() -> SyncOutcome {
         syncLock.lock(); defer { syncLock.unlock() }
-        let pending = store.all().filter { $0.type == FrameTypes.need && !state.isUploaded($0.key) }
+        let stored = store.all()
+        let pendingNeeds = stored.filter { $0.type == FrameTypes.need && !state.isUploaded($0.key) }
+        let pendingHints = stored.filter { $0.type == FrameTypes.locHint && !state.isUploaded($0.key) }
+        // NEEDs go first so a flood of hints can never delay a request for help.
+        let pending = pendingNeeds + pendingHints
         let batch = Array(pending.prefix(maxFramesPerSync))
+        let hintsInBatch = batch.filter { $0.type == FrameTypes.locHint }.count
         moreWaiting = pending.count > batch.count
         do {
             let resp = try client.sync(config(), gatewayNode: node.nodeId, frames: batch.map { $0.raw }, ackCursor: state.ackCursor())
@@ -73,10 +85,13 @@ public final class GatewaySyncer: @unchecked Sendable {
             // Only after ACKs are safely in the store do we advance the cursor / mark frames uploaded.
             state.markUploaded(batch.map { $0.key })
             state.setAckCursor(resp.ackCursor)
+            let hintNote = (hintsInBatch > 0 || resp.hints != nil)
+                ? " hints=\(hintsInBatch) hints_accepted=\(resp.hints.map { String($0.accepted) } ?? "?")" : ""
             log("sync ok frames=\(batch.count) accepted=\(resp.accepted) duplicates=\(resp.duplicates) "
-                + "rejected=\(resp.rejected) acks=\(originated) ack_cursor=\(resp.ackCursor)")
+                + "rejected=\(resp.rejected) acks=\(originated) ack_cursor=\(resp.ackCursor)\(hintNote)")
             return SyncOutcome(ok: true, uploaded: batch.count, accepted: resp.accepted, duplicates: resp.duplicates,
-                               rejected: resp.rejected, acksOriginated: originated)
+                               rejected: resp.rejected, acksOriginated: originated,
+                               hintsUploaded: hintsInBatch, hintsAccepted: resp.hints?.accepted)
         } catch {
             moreWaiting = false
             let msg = (error as? SyncException)?.message ?? "\(type(of: error)): \(error)"

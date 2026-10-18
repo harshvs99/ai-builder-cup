@@ -40,10 +40,31 @@ public final class LinkRegistry: @unchecked Sendable {
     private var linkOrder: [String] = []
     private var macToNode: [String: String] = [:]
     private var macOrder: [String] = [] // least recently used first
+    /// address -> last scan RSSI in dBm, bounded like `macToNode`. Written from the scan callback.
+    private var macRssi: [String: Int] = [:]
+    private var rssiOrder: [String] = [] // least recently used first
 
     public init(myId: [UInt8]) {
         self.myId = myId
         self.myIdHex = Hex.encode(myId)
+    }
+
+    /// Remember the RSSI of the latest scan result from [mac]; values outside -127...0 dBm ("unavailable") are ignored.
+    public func noteScanRssi(_ mac: String, _ rssi: Int) {
+        lock.lock(); defer { lock.unlock() }
+        guard (-127...0).contains(rssi) else { return }
+        macRssi[mac] = rssi
+        rssiOrder.removeAll { $0 == mac }
+        rssiOrder.append(mac)
+        while rssiOrder.count > LinkRegistry.maxMacEntries { macRssi.removeValue(forKey: rssiOrder.removeFirst()) }
+    }
+
+    /// Last scan RSSI (dBm) of the advertiser behind [linkId], or nil when unknown. Only central links (`c:<id>`) are
+    /// known: we connected to the peripheral we scanned. A peripheral link's identifier is a central that connected
+    /// to us and was never scanned, so it has no entry.
+    public func rssiFor(_ linkId: String) -> Int? {
+        lock.lock(); defer { lock.unlock() }
+        return linkId.hasPrefix("c:") ? macRssi[String(linkId.dropFirst(2))] : nil
     }
 
     public func add(_ linkId: String, mac: String, role: LinkRole) {
@@ -60,6 +81,7 @@ public final class LinkRegistry: @unchecked Sendable {
     public func clear() {
         lock.lock(); defer { lock.unlock() }
         links.removeAll(); linkOrder.removeAll(); macToNode.removeAll(); macOrder.removeAll()
+        macRssi.removeAll(); rssiOrder.removeAll()
     }
 
     public func get(_ linkId: String) -> Link? { lock.lock(); defer { lock.unlock() }; return links[linkId] }

@@ -243,6 +243,8 @@ public struct CheckModel: Equatable, Sendable {
         public let secondary: String?
         /// The "Turn on" button beside the location line.
         public let offersTurnOn: Bool
+        /// `secondary` is the reason there is no fix: shown as a warning (icon + amber text), not as a caption.
+        public let secondaryIsWarning: Bool
     }
 
     public struct Option: Equatable, Sendable {
@@ -283,13 +285,16 @@ public struct CheckModel: Equatable, Sendable {
         let sending = phase != .idle
         let rows = [
             Row(editor: .need, label: s.ask.rowNeed, value: AskLogic.needWords(c, d).isEmpty ? s.ask.nothingChosen : AskLogic.needWords(c, d),
-                secondary: nil, offersTurnOn: false),
-            Row(editor: .people, label: s.ask.rowPeople, value: AskLogic.peopleLine(c, d.people, d.vulnFlags), secondary: nil, offersTurnOn: false),
+                secondary: nil, offersTurnOn: false, secondaryIsWarning: false),
+            Row(editor: .people, label: s.ask.rowPeople, value: AskLogic.peopleLine(c, d.people, d.vulnFlags), secondary: nil, offersTurnOn: false,
+                secondaryIsWarning: false),
             Row(editor: .location, label: s.ask.rowWhere,
                 value: d.landmark.trimmed.isEmpty ? s.ask.noLandmark : s.ask.nearLandmark(d.landmark),
-                secondary: AskLogic.locationText(s.ask, locUi, accuracyM: accuracyM), offersTurnOn: AskLogic.offersTurnOnLocation(locUi)),
+                secondary: AskLogic.locationText(s.ask, locUi, accuracyM: accuracyM), offersTurnOn: AskLogic.offersTurnOnLocation(locUi),
+                secondaryIsWarning: NoLocationLogic.reason(for: locUi) != nil),
             Row(editor: .note, label: s.ask.rowNote, value: d.summary.trimmed.isEmpty ? s.ask.noNote : d.summary,
-                secondary: !c.isEnglish && !d.summary.trimmed.isEmpty ? s.ask.sentInEnglish : nil, offersTurnOn: false),
+                secondary: !c.isEnglish && !d.summary.trimmed.isEmpty ? s.ask.sentInEnglish : nil, offersTurnOn: false,
+                secondaryIsWarning: false),
         ]
         let questions: [Question] = d.questionIds.compactMap { QuestionBank.byId($0) }.map { q in
             Question(

@@ -1,4 +1,5 @@
 import XCTest
+import RelayCore
 @testable import RelayKit
 
 final class LocationLogicTests: XCTestCase {
@@ -110,4 +111,27 @@ final class LocationLogicTests: XCTestCase {
     }
 
     func testDefaultWaitBudgetIsTenSeconds() { XCTAssertEqual(10_000, FixWait.defaultTimeoutMs) }
+
+    // ---- LOC_HINT fix bridge
+    func testHintFixConvertsAndKeepsOnlyUsableFixes() throws {
+        let f = try XCTUnwrap(HintFix.current(fix(12, at: now - 5_000), nowMs: now))
+        XCTAssertEqual(20.3, f.lat); XCTAssertEqual(85.8, f.lon)
+        XCTAssertEqual(12, f.accuracyM); XCTAssertEqual(now - 5_000, f.atMs)
+        XCTAssertNil(HintFix.current(nil, nowMs: now))
+        XCTAssertNil(HintFix.current(fix(12, at: now - FixPolicy.maxAgeMs - 1), nowMs: now), "older than FixPolicy.maxAgeMs")
+        XCTAssertEqual(now, HintFix.current(fix(12, at: 0), nowMs: now)?.atMs, "fix without a timestamp counts as taken now")
+        // an unknown accuracy converts to NaN, which LocHintCodec.bucketFor refuses
+        let unknown = try XCTUnwrap(HintFix.current(fix(.nan), nowMs: now))
+        XCTAssertNil(LocHintCodec.bucketFor(unknown.accuracyM))
+    }
+
+    func testLatestFixHoldsTheFixForAnotherThread() {
+        let box = LatestFix()
+        XCTAssertNil(box.relayFix(nowMs: now))
+        box.set(fix(20))
+        XCTAssertEqual(20, box.relayFix(nowMs: now)?.accuracyM)
+        XCTAssertNil(box.relayFix(nowMs: now + FixPolicy.maxAgeMs + 1))
+        box.set(nil)
+        XCTAssertNil(box.get())
+    }
 }

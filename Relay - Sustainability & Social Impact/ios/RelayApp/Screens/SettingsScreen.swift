@@ -41,6 +41,12 @@ struct SettingsScreen: View {
 
             Section(s.groupNetworkPermissions) {
                 valueRow(s.gatewayMode, value: screen.gatewayName) { sheet = .gateway }
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Toggle(s.helpLocate, isOn: Binding(
+                        get: { settings.helpLocateNeighbours }, set: { v in update { $0.helpLocateNeighbours = v } }))
+                    Text(s.helpLocateHelp).font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, Theme.Space.xs)
                 ForEach(Array(screen.permissions.enumerated()), id: \.offset) { _, row in
                     valueRow(row.title, value: row.value, color: row.tone.color, hint: s.permOpensSettings) {
                         model.openAppSettings()

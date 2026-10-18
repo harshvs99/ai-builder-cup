@@ -114,6 +114,7 @@ final class TestNet {
         var needsDelivered: [Need] = []
         var acksForMe: [Ack] = []
         var acksSeen: [Ack] = []
+        var locHints: [LocHint] = []
         var sentFrames: [(String, [UInt8])] = []
         var onNeedHook: (Need) -> Void = { _ in }
         var node: GossipNode!
@@ -143,6 +144,7 @@ final class TestNet {
         }
         func onAckForMe(_ ack: Ack, frame: Frame) { acksForMe.append(ack) }
         func onAckSeen(_ ack: Ack, frame: Frame) { acksSeen.append(ack) }
+        func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) { locHints.append(hint) }
     }
 
     func node(_ name: String) -> N {
@@ -200,6 +202,7 @@ final class SoloHarness {
     var needs: [(Need, Frame)] = []
     var acksForMe: [Ack] = []
     var acksSeen: [Ack] = []
+    var hints: [LocHint] = []
     var logs: [String] = []
     var node: GossipNode!
 
@@ -212,6 +215,7 @@ final class SoloHarness {
         func onNeed(_ need: Need, frame: Frame, fromLink: String?) { h.needs.append((need, frame)) }
         func onAckForMe(_ ack: Ack, frame: Frame) { h.acksForMe.append(ack) }
         func onAckSeen(_ ack: Ack, frame: Frame) { h.acksSeen.append(ack) }
+        func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) { h.hints.append(hint) }
         func onLog(_ msg: String) { h.logs.append(msg) }
     }
     private var impl: Impl!

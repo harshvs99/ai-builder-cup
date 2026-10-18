@@ -49,7 +49,7 @@ public enum BackendDefaults {
 
 /// Build-time connection defaults. Android bakes these in with `buildConfigField` from Gradle properties
 /// (`relay.backendUrl`, `relay.deviceKey` from `local.properties` / environment). On iOS the same values come from
-/// the app's Info.plist (`RelayBackendURL`, `RelayDeviceKey`, `RelayLockConnection`), which an untracked `.xcconfig`
+/// the app's Info.plist (`RelayBackendURL`, `RelayDeviceKey`, `RelayLockConnection`, `RelayHelpLocateDefault`), which an untracked `.xcconfig`
 /// fills in so the shared gateway key is never committed.
 public struct BuildConfig: Equatable, Sendable {
     /// Local-development gateway key, used when none was configured.
@@ -61,11 +61,16 @@ public struct BuildConfig: Equatable, Sendable {
     public var defaultKey: String
     /// Release builds pin backend and key to these values and ignore anything stored (Android `LOCK_CONNECTION`).
     public var lockConnection: Bool
+    /// Default of the opt-in "Help locate neighbours" setting (Android `HELP_LOCATE_DEFAULT`, Gradle property
+    /// `relay.helpLocateDefault`): on in demo builds, off in village builds.
+    public var helpLocateDefault: Bool
 
-    public init(defaultBackend: String = BackendDefaults.productionUrl, defaultKey: String = BuildConfig.fallbackDeviceKey, lockConnection: Bool = false) {
+    public init(defaultBackend: String = BackendDefaults.productionUrl, defaultKey: String = BuildConfig.fallbackDeviceKey,
+                lockConnection: Bool = false, helpLocateDefault: Bool = true) {
         self.defaultBackend = defaultBackend
         self.defaultKey = defaultKey
         self.lockConnection = lockConnection
+        self.helpLocateDefault = helpLocateDefault
     }
 
     /// Debug-style defaults: production backend, dev key, connection editable.
@@ -76,10 +81,17 @@ public struct BuildConfig: Equatable, Sendable {
         let backend = (info?["RelayBackendURL"] as? String)?.trimmed ?? ""
         let key = (info?["RelayDeviceKey"] as? String)?.trimmed ?? ""
         let lock = (info?["RelayLockConnection"] as? Bool) ?? ((info?["RelayLockConnection"] as? String).map { $0.lowercased() == "yes" || $0.lowercased() == "true" } ?? false)
+        // Anything but an explicit "false"/"no"/"0" (or a boolean false) keeps the demo default of on.
+        let helpRaw = info?["RelayHelpLocateDefault"]
+        let help: Bool
+        if let b = helpRaw as? Bool { help = b }
+        else if let t = (helpRaw as? String)?.trimmed.lowercased() { help = !(t == "false" || t == "no" || t == "0") }
+        else { help = true }
         self.init(
             defaultBackend: backend.isEmpty ? BackendDefaults.productionUrl : backend,
             defaultKey: key.isEmpty ? BuildConfig.fallbackDeviceKey : key,
-            lockConnection: lock
+            lockConnection: lock,
+            helpLocateDefault: help
         )
     }
 }

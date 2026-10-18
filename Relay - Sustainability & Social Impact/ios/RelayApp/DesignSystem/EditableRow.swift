@@ -7,6 +7,9 @@ struct EditableRow: View {
     var value: String
     var detail: String?
     var detailColor: Color
+    /// Show the detail as a warning: triangle icon and amber text ("there is no GPS fix, and here is why").
+    var detailIsWarning: Bool
+    var warningLabel: String
     var actionTitle: String
     var action: () -> Void
 
@@ -15,6 +18,8 @@ struct EditableRow: View {
         value: String,
         detail: String? = nil,
         detailColor: Color = .secondary,
+        detailIsWarning: Bool = false,
+        warningLabel: String = "",
         actionTitle: String,
         action: @escaping () -> Void
     ) {
@@ -22,6 +27,8 @@ struct EditableRow: View {
         self.value = value
         self.detail = detail
         self.detailColor = detailColor
+        self.detailIsWarning = detailIsWarning
+        self.warningLabel = warningLabel
         self.actionTitle = actionTitle
         self.action = action
     }
@@ -32,7 +39,17 @@ struct EditableRow: View {
                 Text(label).font(.footnote).foregroundStyle(.secondary)
                 Text(value).font(.body)
                 if let detail {
-                    Text(detail).font(.footnote).foregroundStyle(detailColor)
+                    if detailIsWarning {
+                        Label {
+                            Text(detail).font(.footnote).foregroundStyle(Theme.Palette.waitingAmber)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.footnote)
+                                .foregroundStyle(Theme.Palette.waitingAmber)
+                                .accessibilityLabel(warningLabel)
+                        }
+                    } else {
+                        Text(detail).font(.footnote).foregroundStyle(detailColor)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

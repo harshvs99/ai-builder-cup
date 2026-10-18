@@ -92,8 +92,13 @@ extension CoreBluetoothTransport {
     }
 
     /// Remove a central link and release the connection. [backoffFailure] applies the 2 s .. 60 s reconnect backoff
-    /// (always for setup failures); a link that was up also backs off, like Android.
-    func teardownCentral(_ c: CentralLink, _ reason: String, backoffFailure: Bool) {
+    /// (always for setup failures); a link that was up also backs off, like Android. [skipBackoff] suppresses even the
+    /// backoff an established link normally earns; [reconnectAfterMs] schedules one fresh connect to the same
+    /// peripheral (service changed / discovery retry). Android also drops the GATT cache first (hidden
+    /// `BluetoothGatt.refresh()`); CoreBluetooth has no such call and re-reads the service table itself after a
+    /// service-changed indication and on every new connection, so nothing is needed here.
+    func teardownCentral(_ c: CentralLink, _ reason: String, backoffFailure: Bool,
+                         reconnectAfterMs: Int64? = nil, skipBackoff: Bool = false) {
         if central[c.id] !== c { return }
         central.removeValue(forKey: c.id)
         let wasUp = c.phase == .up
@@ -107,12 +112,51 @@ extension CoreBluetoothTransport {
                 preferUntil = now() + RecentPeers.preferWindowMs
             }
         }
-        let delay: Int64 = (backoffFailure || wasUp) ? backoff.onFailure(c.id, now: now()) : 0
+        let delay: Int64 = (!skipBackoff && (backoffFailure || wasUp)) ? backoff.onFailure(c.id, now: now()) : 0
         log("BLE: closing \(c.linkId) (\(reason))" + (delay > 0 ? "; retry in \(delay)ms" : ""))
         if let cm = centralManager, cm.state == .poweredOn, c.peripheral.state != .disconnected {
             cm.cancelPeripheralConnection(c.peripheral)
         }
+        if let reconnectAfterMs, running {
+            let p = c.peripheral
+            queue.asyncAfter(deadline: .now() + .milliseconds(Int(reconnectAfterMs))) { [weak self] in
+                self?.reconnectCentral(p)
+            }
+        }
         updateDiag()
+    }
+
+    /// One scheduled re-connect to [p] (service changed / discovery retry); skipped if anything else got there first,
+    /// in which case the scan finds it again.
+    private func reconnectCentral(_ p: CBPeripheral) {
+        let id = p.identifier.uuidString
+        guard running else { return }
+        let why: String?
+        if central[id] != nil { why = "already connecting" }
+        else if connectingId != nil { why = "another connect in progress" }
+        else if central.count >= BleConstants.maxCentralLinks || registry.total() + pendingCount() >= BleConstants.maxTotalLinks { why = "link cap" }
+        else if registry.hasLinkToMac(id) || self.peripheral[id] != nil { why = "already linked" }
+        else if p.state != .disconnected { why = "peripheral state \(p.state.rawValue)" }
+        else { why = nil }
+        if let why { log("BLE: scheduled reconnect to \(id) skipped (\(why)); scan will find it"); return }
+        log("BLE: scheduled reconnect to \(id)")
+        connectTo(p)
+    }
+
+    /// Discovery found no Relay service (or characteristic) on a device we expected to be a peer: it may not have added
+    /// its GATT service yet (its app just restarted) or we hold a stale table. Retry once after a short delay without
+    /// backoff, then give up and let the backoff apply.
+    private func serviceMissing(_ c: CentralLink, _ detail: String) {
+        let retries = discoveryRetries[c.id] ?? 0
+        if let retryIn = LinkHealth.discoveryRetryDelayMs(retriesSoFar: retries) {
+            discoveryRetries[c.id] = retries + 1
+            log("BLE: \(c.linkId) \(detail); retrying once in \(retryIn)ms")
+            teardownCentral(c, detail, backoffFailure: false, reconnectAfterMs: retryIn, skipBackoff: true)
+        } else {
+            discoveryRetries.removeValue(forKey: c.id)
+            log("BLE: \(c.linkId) \(detail) after retry; giving up")
+            teardownCentral(c, detail, backoffFailure: true)
+        }
     }
 
     // ---- central GATT operations (serialised through CentralLink.queue)
@@ -174,6 +218,8 @@ extension CoreBluetoothTransport {
 extension CoreBluetoothTransport {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        // Remember the signal strength for the link we may open to this advertiser (LOC_HINT, SPEC 5.5).
+        registry.noteScanRssi(peripheral.identifier.uuidString, RSSI.intValue)
         maybeConnect(peripheral, hint: CoreBluetoothTransport.nodeHint(advertisementData))
     }
 
@@ -206,11 +252,11 @@ extension CoreBluetoothTransport: CBPeripheralDelegate {
         c.queue.onComplete()
         guard c.phase == .discovering, c.service == nil else { return }
         if let error {
-            teardownCentral(c, "service discovery failed: \(error.localizedDescription)", backoffFailure: true)
+            serviceMissing(c, "service discovery failed: \(error.localizedDescription)")
             return
         }
         guard let service = peripheral.services?.first(where: { $0.uuid == serviceUUID }) else {
-            teardownCentral(c, "relay service missing", backoffFailure: true)
+            serviceMissing(c, "relay service missing")
             return
         }
         c.service = service
@@ -222,11 +268,11 @@ extension CoreBluetoothTransport: CBPeripheralDelegate {
         c.queue.onComplete()
         guard c.phase == .discovering, c.characteristic == nil else { return }
         if let error {
-            teardownCentral(c, "characteristic discovery failed: \(error.localizedDescription)", backoffFailure: true)
+            serviceMissing(c, "characteristic discovery failed: \(error.localizedDescription)")
             return
         }
         guard let ch = service.characteristics?.first(where: { $0.uuid == charUUID }) else {
-            teardownCentral(c, "relay characteristic missing", backoffFailure: true)
+            serviceMissing(c, "relay characteristic missing")
             return
         }
         c.characteristic = ch
@@ -254,6 +300,8 @@ extension CoreBluetoothTransport: CBPeripheralDelegate {
             return
         }
         c.phase = .up
+        c.lastRxAt = now()
+        discoveryRetries.removeValue(forKey: c.id)
         if connectingId == c.id { connectingId = nil }
         backoff.onSuccess(c.id)
         registry.add(c.linkId, mac: c.id, role: .central)
@@ -267,6 +315,7 @@ extension CoreBluetoothTransport: CBPeripheralDelegate {
         guard error == nil, characteristic.uuid == charUUID, let c = link(for: peripheral),
               let data = characteristic.value else { return }
         let bytes = [UInt8](data)
+        c.lastRxAt = now()
         switch c.phase {
         case .up: events?.onFrame(c.linkId, bytes)
         case .subscribing: if c.earlyFrames.count < 64 { c.earlyFrames.append(bytes) }
@@ -287,6 +336,11 @@ extension CoreBluetoothTransport: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
         guard let c = link(for: peripheral), invalidatedServices.contains(where: { $0.uuid == serviceUUID }) else { return }
-        teardownCentral(c, "relay service invalidated", backoffFailure: true)
+        // The peer's GATT database changed under an open connection (e.g. its app process restarted and re-added the
+        // service): our characteristic handle and the HELLO/inventory state on this link are stale. Drop the link
+        // (gossip sees a linkDown) and reconnect once shortly, without the exponential backoff.
+        log("BLE: service changed on \(c.linkId) (peer restarted?); closing and reconnecting in \(LinkHealth.serviceChangedReconnectMs)ms")
+        teardownCentral(c, "service changed", backoffFailure: false,
+                        reconnectAfterMs: LinkHealth.serviceChangedReconnectMs, skipBackoff: true)
     }
 }

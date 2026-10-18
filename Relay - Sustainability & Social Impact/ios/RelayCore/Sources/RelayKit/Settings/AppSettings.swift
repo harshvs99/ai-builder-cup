@@ -31,17 +31,23 @@ public struct Settings: Equatable, Sendable {
     public var gatewayMode: GatewayMode
     /// Keep the mesh running when the app is closed (best effort on iOS).
     public var carryInBackground: Bool
+    /// Opt-in "Help locate neighbours" (mesh-assisted location, SPEC 5.5): when a neighbour's NEED has no position,
+    /// this phone publishes its own position (about 100 m or better) to the mesh and the control room. Default on in
+    /// demo builds, off in village builds (`BuildConfig.helpLocateDefault`).
+    public var helpLocateNeighbours: Bool
 
     public init(
         backendUrl: String = BackendDefaults.emulatorUrl, deviceKey: String = BuildConfig.fallbackDeviceKey,
         allowlist: String = "", language: Lang = .en, themeMode: ThemeMode = .auto, largerText: Bool = false,
         readAloud: Bool = false, voiceSpeed: VoiceSpeed = .normal, languageConfirmed: Bool = false,
-        areaLabel: String = "", gatewayMode: GatewayMode = .automatic, carryInBackground: Bool = true
+        areaLabel: String = "", gatewayMode: GatewayMode = .automatic, carryInBackground: Bool = true,
+        helpLocateNeighbours: Bool = BuildConfig.standard.helpLocateDefault
     ) {
         self.backendUrl = backendUrl; self.deviceKey = deviceKey; self.allowlist = allowlist; self.language = language
         self.themeMode = themeMode; self.largerText = largerText; self.readAloud = readAloud
         self.voiceSpeed = voiceSpeed; self.languageConfirmed = languageConfirmed; self.areaLabel = areaLabel
         self.gatewayMode = gatewayMode; self.carryInBackground = carryInBackground
+        self.helpLocateNeighbours = helpLocateNeighbours
     }
 
     /// The old "Pretend offline" behaviour: never act as a gateway.
@@ -109,7 +115,8 @@ public final class AppSettings: @unchecked Sendable {
             languageConfirmed: prefs.boolValue(forKey: "lang_confirmed") ?? false,
             areaLabel: prefs.stringValue(forKey: "area") ?? "",
             gatewayMode: gateway,
-            carryInBackground: prefs.boolValue(forKey: "carry_bg") ?? true
+            carryInBackground: prefs.boolValue(forKey: "carry_bg") ?? true,
+            helpLocateNeighbours: prefs.boolValue(forKey: "help_locate") ?? cfg.helpLocateDefault
         )
     }
 
@@ -136,6 +143,7 @@ public final class AppSettings: @unchecked Sendable {
         store.setString(next.areaLabel, forKey: "area")
         store.setString(next.gatewayMode.rawValue, forKey: "gateway_mode")
         store.setBool(next.carryInBackground, forKey: "carry_bg")
+        store.setBool(next.helpLocateNeighbours, forKey: "help_locate")
         flow.send(next)
         let targets = Array(listeners.values)
         lock.unlock()

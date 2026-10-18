@@ -75,4 +75,14 @@ final class BackendDefaultsTests: XCTestCase {
         XCTAssertEqual(BuildConfig.standard, BuildConfig(infoDictionary: ["RelayBackendURL": "  ", "RelayDeviceKey": ""]))
         XCTAssertTrue(BuildConfig(infoDictionary: ["RelayLockConnection": "YES"]).lockConnection)
     }
+
+    func testHelpLocateDefaultComesFromTheInfoDictionary() {
+        XCTAssertTrue(BuildConfig.standard.helpLocateDefault)
+        XCTAssertTrue(BuildConfig(infoDictionary: nil).helpLocateDefault)
+        XCTAssertTrue(BuildConfig(infoDictionary: ["RelayHelpLocateDefault": ""]).helpLocateDefault)
+        XCTAssertTrue(BuildConfig(infoDictionary: ["RelayHelpLocateDefault": "YES"]).helpLocateDefault)
+        XCTAssertFalse(BuildConfig(infoDictionary: ["RelayHelpLocateDefault": "NO"]).helpLocateDefault)
+        XCTAssertFalse(BuildConfig(infoDictionary: ["RelayHelpLocateDefault": "false"]).helpLocateDefault)
+        XCTAssertFalse(BuildConfig(infoDictionary: ["RelayHelpLocateDefault": false]).helpLocateDefault)
+    }
 }

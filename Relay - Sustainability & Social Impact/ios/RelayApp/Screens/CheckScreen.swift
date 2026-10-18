@@ -9,6 +9,11 @@ struct CheckScreen: View {
     @Environment(\.strings) private var strings
     @State private var editor: ActiveEditor?
     @State private var noVoiceInstalled = false
+    /// The no-location alert shown on Send without a fix, and the second "send anyway" confirmation when there is no
+    /// landmark either.
+    @State private var prompt: NoLocationPrompt?
+    @State private var showNoLocation = false
+    @State private var showConfirmAnyway = false
 
     private var ctl: AskFlowController { nav.ensureFlow() }
     private var lang: Lang { model.settings.language }
@@ -67,6 +72,50 @@ struct CheckScreen: View {
             CheckEditorSheet(editor: active.editor)
         }
         .task { await startLocationIfAllowed() }
+        // The control room cannot act on a request it cannot place: without a fix, ask before anything leaves. Never
+        // blocks: "Send without location" is always there (with a second confirmation when there is no landmark).
+        .alert(strings.ask.noLocationTitle, isPresented: $showNoLocation, presenting: prompt) { p in
+            Button(strings.ask.turnOnLocation) { turnOn(p.turnOn) }
+            Button(p.addLandmark ? strings.ask.addLandmark : strings.ask.changeLandmark) {
+                editor = ActiveEditor(editor: .location)
+            }
+            Button(strings.ask.sendWithoutLocation, role: .destructive) { sendAnywayTapped(p) }
+        } message: { p in
+            Text(NoLocationLogic.body(strings.ask, p, landmark: ctl.flow.draft.landmark))
+        }
+        .alert(strings.ask.sendAnywayConfirm, isPresented: $showConfirmAnyway) {
+            Button(strings.ask.sendWithoutLocation, role: .destructive) { Task { await send(force: true) } }
+            Button(strings.common.cancel, role: .cancel) {}
+        }
+        // Title and body are also spoken when "Read messages aloud" is on.
+        .onChange(of: showNoLocation) { _, shown in
+            if shown, model.settings.readAloud, let p = prompt {
+                model.speak(NoLocationLogic.speech(strings.ask, p, landmark: ctl.flow.draft.landmark))
+            }
+        }
+    }
+
+    /// "Turn on location": permission missing: ask (or open Settings once it was denied); Location Services off: open
+    /// Settings (iOS offers no deep link to the system switch, so the app's page is the closest); otherwise just try
+    /// for a fix again.
+    private func turnOn(_ action: TurnOnAction) {
+        switch action {
+        case .requestPermission, .openLocationSettings: turnOnLocation()
+        case .retryFix: Task { _ = await model.requestLocationFix() }
+        }
+    }
+
+    /// "Send without location": a second tap when there is no landmark either. iOS alerts always dismiss on a button,
+    /// so the second tap is a second alert, shown once the first has finished dismissing.
+    private func sendAnywayTapped(_ p: NoLocationPrompt) {
+        if p.confirmSendAnyway {
+            Task {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                showConfirmAnyway = true
+            }
+        } else {
+            Task { await send(force: true) }
+        }
     }
 
     private func back() {
@@ -79,7 +128,9 @@ struct CheckScreen: View {
     private func summaryRow(_ row: CheckModel.Row, _ check: CheckModel) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             EditableRow(
-                label: row.label, value: row.value, detail: row.secondary, actionTitle: check.changeLabel
+                label: row.label, value: row.value, detail: row.secondary,
+                detailIsWarning: row.secondaryIsWarning, warningLabel: strings.ask.noLocationWarningA11y,
+                actionTitle: check.changeLabel
             ) { editor = ActiveEditor(editor: row.editor) }
             if row.offersTurnOn {
                 Button(strings.common.turnOn, action: turnOnLocation)
@@ -155,14 +206,26 @@ struct CheckScreen: View {
         }
     }
 
-    /// Send: ask for location the first time, wait briefly for a fix, hand the NEED to the mesh, open its detail.
-    /// The NEED goes out whatever the answer; without a fix it says so honestly (no coordinates).
-    private func send() async {
+    /// Send: ask for location the first time, wait briefly for a fix, and without one ask before anything leaves
+    /// (`NoLocationLogic`). Then hand the NEED to the mesh and open its detail. [force] = the person chose "Send without
+    /// location" in the alert: no wait, no prompt; the NEED says so honestly (no coordinates).
+    private func send(force: Bool = false) async {
         guard ctl.flow.beginLocating() else { return }
         _ = await model.requestLocationFix()
         var fix = model.locationFix.flatMap { FixPolicy.isUsable($0, nowMs: currentTimeMs()) ? $0 : nil }
-        if fix == nil, LocationState.shouldWaitForFix(model.locationUi) {
+        if fix == nil, !force, LocationState.shouldWaitForFix(model.locationUi) {
             fix = await model.awaitLocationFix()
+        }
+        if fix == nil, !force {
+            let ui = model.locationUi
+            if let p = NoLocationLogic.promptOnSend(
+                permissionGranted: ui != .noPermission, servicesEnabled: ui != .off && ui != .noPermission,
+                fixPresent: false, waiting: false, landmarkEmpty: ctl.flow.draft.landmark.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                ctl.flow.endSend()
+                prompt = p
+                showNoLocation = true
+                return
+            }
         }
         let need = ctl.flow.buildNeed(
             msgId: NodeId.random(), originNode: model.nodeId, createdAtSec: Int64(Date().timeIntervalSince1970),

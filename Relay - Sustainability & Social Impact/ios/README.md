@@ -70,6 +70,15 @@ Odia has no on-device speech model, so voice input falls back to typing.
 - Needs Xcode: first compile of `Screens/`, light/dark and Dynamic Type passes, VoiceOver pass, the Liquid Glass look on
   iOS 26 and the material fallback on iOS 17 to 25.
 
+## Android changes mirrored since the first port
+
+- Mesh-assisted location: `LOC_HINT` (0x74) in RelayCore (`LocHint`, `LocHintResponder`, gossip store/flood/expiry), hint upload in
+  `GatewaySyncer`, the "Help locate neighbours" setting (`RelayHelpLocateDefault` in Info.plist / xcconfig, default on),
+  scan RSSI per central link. A hint needs a fix, and the app only has When-In-Use location, so an iPhone hints while Relay is open.
+- BLE zombie-link recovery: `didModifyServices` reconnect, one discovery retry, 90 s liveness watchdog on the 500 ms tick.
+  Needs a device test with a restarted Android peer.
+- No-location prompt before Send (`NoLocationLogic`): an alert from `CheckScreen`; with no landmark, "Send without location" asks again.
+
 ## Device-test checklist
 
 1. iPhone locked and Android: Android may not discover a locked iPhone because iOS moves the service UUID to the

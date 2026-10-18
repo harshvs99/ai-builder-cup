@@ -134,6 +134,7 @@ final class ScreenModelsTests: XCTestCase {
         XCTAssertEqual(["Water", "6 · children, elderly", "Near primary school", "Pump broken since yesterday"], m.rows.map { $0.value })
         XCTAssertEqual("GPS · about 40 m accuracy", m.rows[2].secondary)
         XCTAssertFalse(m.rows[2].offersTurnOn)
+        XCTAssertFalse(m.rows[2].secondaryIsWarning)
         XCTAssertNil(m.rows[3].secondary, "English notes need no 'sent in English' line")
         XCTAssertEqual([3, 4], [] + QuestionBank.select(.rescue, []), "bank order sanity")
         // Water questions: children_or_elderly is skipped because the flags say so; how long remains.
@@ -150,8 +151,9 @@ final class ScreenModelsTests: XCTestCase {
     func testCheckModelEmptyDraftAndLocationOff() {
         let m = CheckModel.make(draft: AskDraft(), locUi: .off, accuracyM: nil, phase: .idle, lang: .en, strings: UI.strings(.en))
         XCTAssertEqual(["Not chosen yet", "1", "No landmark yet", "No note"], m.rows.map { $0.value })
-        XCTAssertEqual(UI.strings(.en).ask.locationOff, m.rows[2].secondary)
+        XCTAssertEqual("Location is turned off on this phone", m.rows[2].secondary)
         XCTAssertTrue(m.rows[2].offersTurnOn)
+        XCTAssertTrue(m.rows[2].secondaryIsWarning)
         XCTAssertTrue(m.questions.isEmpty)
     }
 
@@ -159,7 +161,8 @@ final class ScreenModelsTests: XCTestCase {
         let en = CheckModel.make(draft: checkDraft, locUi: .acquiring, accuracyM: nil, phase: .locating, lang: .en, strings: UI.strings(.en))
         XCTAssertEqual("Getting your location…", en.sendTitle)
         XCTAssertFalse(en.sendEnabled)
-        XCTAssertEqual("Getting location…", en.rows[2].secondary)
+        XCTAssertEqual("Still finding your location…", en.rows[2].secondary)
+        XCTAssertTrue(en.rows[2].secondaryIsWarning)
         let hi = CheckModel.make(draft: checkDraft, locUi: .ready, accuracyM: 12, phase: .idle, lang: .hi, strings: UI.strings(.hi))
         XCTAssertEqual("जाँचें और भेजें", hi.title)
         XCTAssertEqual("भेजें", hi.sendTitle)

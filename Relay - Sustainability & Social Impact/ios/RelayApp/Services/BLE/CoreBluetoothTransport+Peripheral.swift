@@ -91,6 +91,7 @@ extension CoreBluetoothTransport {
             peripheral[id] = link
             updateDiag()
         }
+        link.lastRxAt = now()
         if link.up { events?.onFrame(link.linkId, bytes) }
         else if link.earlyFrames.count < 64 { link.earlyFrames.append(bytes) }
     }
@@ -175,6 +176,7 @@ extension CoreBluetoothTransport: CBPeripheralManagerDelegate {
             return
         }
         link.up = true
+        link.lastRxAt = now()
         registry.add(link.linkId, mac: id, role: .peripheral)
         updateDiag()
         events?.onLinkUp(link.linkId)

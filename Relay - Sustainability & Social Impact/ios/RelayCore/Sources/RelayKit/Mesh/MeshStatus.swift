@@ -41,6 +41,8 @@ public struct MeshStatus: Equatable, Sendable {
     public var hopsToGateway: Int
     public var storedNeeds: Int
     public var storedAcks: Int
+    /// Stored LOC_HINT frames (mesh-assisted location, SPEC 5.5).
+    public var storedHints: Int
     public var stats: GossipStats
     public var transport: MeshTransportInfo?
     public var internetAvailable: Bool
@@ -61,7 +63,7 @@ public struct MeshStatus: Equatable, Sendable {
 
     public init(
         serviceRunning: Bool = false, bluetoothOn: Bool = false, peers: [PeerInfo] = [], isGateway: Bool = false,
-        hopsToGateway: Int = 0xFF, storedNeeds: Int = 0, storedAcks: Int = 0, stats: GossipStats = GossipStats(),
+        hopsToGateway: Int = 0xFF, storedNeeds: Int = 0, storedAcks: Int = 0, storedHints: Int = 0, stats: GossipStats = GossipStats(),
         transport: MeshTransportInfo? = nil, internetAvailable: Bool = false, lastSyncOkAtMs: Int64 = 0,
         lastSyncError: String? = nil, pendingUploads: Int = 0, syncHealth: SyncHealth = SyncHealth(),
         batteryPercent: Int = -1, charging: Bool = false, scanMode: DutyCycle.Mode = .normal,
@@ -74,6 +76,7 @@ public struct MeshStatus: Equatable, Sendable {
         self.lastSyncError = lastSyncError; self.pendingUploads = pendingUploads; self.syncHealth = syncHealth
         self.batteryPercent = batteryPercent; self.charging = charging; self.scanMode = scanMode
         self.meshHoursRemaining = meshHoursRemaining; self.recentPeerIds = recentPeerIds
+        self.storedHints = storedHints
     }
 }
 

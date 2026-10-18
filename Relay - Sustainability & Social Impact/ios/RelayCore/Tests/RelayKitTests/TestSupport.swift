@@ -16,6 +16,12 @@ enum TestSupport {
         Ack(ackId: id(ackSeed), refMsgId: ref, targetNode: target, ticketNo: ticket, status: status, etaMin: 0xFFFF, text: text)
     }
 
+    /// A LOC_HINT for the NEED [refSeed] from relay phone [relay]; originate it on a node whose id is [relay].
+    static func hint(_ refSeed: Int, _ relay: [UInt8], acc: Int = 3, rssi: Int = -70) -> LocHint {
+        LocHint(refMsgId: id(refSeed), relayNode: relay, latE5: 2029612, lonE5: 8582451, acc: acc, rssiDbm: rssi,
+                observedAt: currentTimeMs() / 1000)
+    }
+
     final class Recorder: GossipListener, @unchecked Sendable {
         private let lock = NSLock()
         private var _acksSeen: [Ack] = [], _acksForMe: [Ack] = [], _needs: [Need] = []

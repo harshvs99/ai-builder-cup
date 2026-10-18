@@ -60,4 +60,12 @@ public protocol MeshTransport: LinkSender, AnyObject, Sendable {
 
     /// Diagnostics for the Network screen.
     func info() -> MeshTransportInfo
+
+    /// Last scan RSSI (dBm) of the link [linkId], or nil when unknown (always nil for peripheral links). Any thread.
+    /// Feeds `rssi_dbm` of a LOC_HINT (SPEC 5.5).
+    func rssiFor(linkId: String) -> Int?
+}
+
+extension MeshTransport {
+    public func rssiFor(linkId: String) -> Int? { nil }
 }

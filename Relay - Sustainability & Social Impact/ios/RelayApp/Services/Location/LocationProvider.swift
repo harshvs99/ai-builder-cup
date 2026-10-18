@@ -19,13 +19,16 @@ final class LocationProvider {
     /// The system Location Services switch. Refreshed off the main thread (the query can block).
     private(set) var systemEnabled = true
 
+    /// Thread-safe mirror of `fix` for the mesh engine's LOC_HINT responder, which reads it off the main actor.
+    @ObservationIgnored private let latestFix: LatestFix
     @ObservationIgnored private let manager = CLLocationManager()
     @ObservationIgnored private var delegate: LocationDelegate?
     @ObservationIgnored private let broadcaster = Broadcaster<Fix?>(nil)
     @ObservationIgnored private var stopTask: Task<Void, Never>?
     @ObservationIgnored private var authContinuations: [CheckedContinuation<CLAuthorizationStatus, Never>] = []
 
-    init() {
+    init(latestFix: LatestFix = LatestFix()) {
+        self.latestFix = latestFix
         authorization = manager.authorizationStatus
         let d = LocationDelegate(
             onLocations: { [weak self] locs in self?.accept(locs) },
@@ -135,6 +138,7 @@ final class LocationProvider {
 
     private func setFix(_ f: Fix?) {
         fix = f
+        latestFix.set(f)
         broadcaster.send(f)
     }
 

@@ -21,3 +21,8 @@ RELAY_DEVICE_KEY =
 
 // YES in release builds: backend and key are pinned to the values above and the Developer screen cannot change them.
 RELAY_LOCK_CONNECTION = NO
+
+// Default of the opt-in Settings switch "Help locate neighbours" (mesh-assisted location, SPEC 5.5): YES in demo builds,
+// NO in village builds so that sharing a position is strictly opt-in. Empty or undefined means YES. A choice the user
+// made in Settings is kept either way.
+RELAY_HELP_LOCATE_DEFAULT = YES

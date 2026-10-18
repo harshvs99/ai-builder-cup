@@ -142,4 +142,18 @@ final class SettingsTests: TempDirTestCase {
         s.update { var n = $0; n.language = .hi; return n }
         XCTAssertEqual(.hi, AppSettings(store: store).current.language)
     }
+
+    func testHelpLocateNeighboursFollowsTheBuildDefaultAndPersists() {
+        let demo = AppSettings(store: InMemoryKeyValueStore(), buildConfig: BuildConfig(helpLocateDefault: true))
+        let village = AppSettings(store: InMemoryKeyValueStore(), buildConfig: BuildConfig(helpLocateDefault: false))
+        XCTAssertTrue(demo.current.helpLocateNeighbours)
+        XCTAssertFalse(village.current.helpLocateNeighbours, "village builds are strictly opt-in")
+
+        let store = InMemoryKeyValueStore()
+        let a = AppSettings(store: store, buildConfig: BuildConfig(helpLocateDefault: false))
+        a.update { var s = $0; s.helpLocateNeighbours = true; return s }
+        XCTAssertEqual(true, store.boolValue(forKey: "help_locate"))
+        XCTAssertTrue(AppSettings(store: store, buildConfig: BuildConfig(helpLocateDefault: false)).current.helpLocateNeighbours,
+                      "a stored choice beats the build default")
+    }
 }
