@@ -8,6 +8,7 @@ public enum FrameTypes {
     public static let inventory = 0x73
     public static let locHint = 0x74
     public static let broadcast = 0x75
+    public static let announcement = 0x76
 }
 
 /// Outer frame (SPEC section 3). Byte arrays compare by content.

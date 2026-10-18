@@ -4,7 +4,8 @@ import Foundation
 /// most inside a bounded burst and the rest follows later. Local policy only: nothing here is on the wire.
 ///
 /// Order: ACKs addressed to the peer itself, control-room broadcasts, other ACKs (they close the loop for a villager), then NEEDs, then
-/// LOC_HINTs (they refine a location, they never gate a rescue). Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
+/// control-room announcements (small, and a rescue request must not wait behind them), then LOC_HINTs (they refine a location,
+/// they never gate a rescue). Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
 /// holds at least one frame so progress is guaranteed.
 public enum PushPlanner {
     /// About two ATT MTUs of payload (2 x (517 - 3)): a handful of frames per burst.
@@ -22,7 +23,8 @@ public enum PushPlanner {
             if p.type == FrameTypes.broadcast { return 1 }
             if p.type == FrameTypes.ack { return 2 }
             if p.type == FrameTypes.need { return 3 }
-            return 4
+            if p.type == FrameTypes.announcement { return 4 }
+            return 5
         }
         // Stable: ties keep candidate (insertion) order, like Kotlin's sortedWith.
         return candidates.enumerated().map { (i: $0.offset, p: $0.element, g: group($0.element)) }

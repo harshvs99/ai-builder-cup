@@ -27,6 +27,8 @@ public protocol GossipListener {
     func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?)
     /// A control-room BROADCAST (SPEC 5.6) was stored for the first time; [fromLink] is nil for one this node originated.
     func onBroadcast(_ broadcast: Broadcast, frame: Frame, fromLink: String?)
+    /// A control-room ANNOUNCEMENT (SPEC 5.7) was stored for the first time; [fromLink] is nil for one this node originated.
+    func onAnnouncement(_ announcement: Announcement, frame: Frame, fromLink: String?)
     func onPeerHello(linkId: String, hello: Hello)
     func onLog(_ msg: String)
 }
@@ -37,6 +39,7 @@ extension GossipListener {
     public func onAckSeen(_ ack: Ack, frame: Frame) {}
     public func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) {}
     public func onBroadcast(_ broadcast: Broadcast, frame: Frame, fromLink: String?) {}
+    public func onAnnouncement(_ announcement: Announcement, frame: Frame, fromLink: String?) {}
     public func onPeerHello(linkId: String, hello: Hello) {}
     public func onLog(_ msg: String) {}
 }
@@ -70,12 +73,12 @@ public enum DuplicateLinkPolicy {
     }
 }
 
-/// One stored NEED/ACK/LOC_HINT/BROADCAST frame. [raw] is the encoded frame as received (or originated).
+/// One stored NEED/ACK/LOC_HINT/BROADCAST/ANNOUNCEMENT frame. [raw] is the encoded frame as received (or originated).
 public struct StoredPacket: Equatable, Hashable, Sendable {
     public let key: String
     public let type: Int
     public let raw: [UInt8]
-    /// NEED: created_at in ms. ACK and LOC_HINT: first-stored time in ms. BROADCAST: issued_at in ms minus 48 h, so the shared 72 h expiry lands 24 h after issue. Expiry is `basis + 72 h`.
+    /// NEED: created_at in ms. ACK, LOC_HINT and ANNOUNCEMENT: first-stored time in ms. BROADCAST: issued_at in ms minus 48 h, so the shared 72 h expiry lands 24 h after issue. Expiry is `basis + 72 h`.
     public let expiryBasisMs: Int64
 
     public init(key: String, type: Int, raw: [UInt8], expiryBasisMs: Int64) {
@@ -145,6 +148,7 @@ public struct GossipStats: Equatable, Sendable {
     public var acksDelivered: Int64 = 0
     public var locHintsDelivered: Int64 = 0
     public var broadcastsDelivered: Int64 = 0
+    public var announcementsDelivered: Int64 = 0
 
     public init() {}
 }
