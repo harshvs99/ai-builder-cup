@@ -20,4 +20,30 @@ object LinkHealth {
         totalMs > BleConstants.SETUP_TIMEOUT_MS -> "setup timeout in $phase"
         else -> null
     }
+
+    /**
+     * Every link carries a frame at least once per resync (the gossip engine sends an inventory on every link every
+     * [BleConstants.RESYNC_INTERVAL_MS]); a link silent for [LIVENESS_TIMEOUT_MS] (3 resyncs: two can be lost or
+     * delayed by a busy radio) is a zombie, e.g. a peer whose process restarted without a disconnect reaching us.
+     */
+    const val LIVENESS_TIMEOUT_MS = 3 * BleConstants.RESYNC_INTERVAL_MS
+
+    /** Reason to close an established link that has received nothing since [lastRxAt], or null while it is live. */
+    fun livenessAbortReason(lastRxAt: Long, now: Long): String? {
+        val idle = now - lastRxAt
+        return if (idle >= LIVENESS_TIMEOUT_MS) "no frame for ${idle / 1000}s (liveness watchdog)" else null
+    }
+
+    /** Delay before the single re-connect after a service-changed event (not the exponential backoff). */
+    const val SERVICE_CHANGED_RECONNECT_MS = 1_000L
+
+    /** Delay before the single retry after discovery found no Relay service. */
+    const val DISCOVERY_RETRY_MS = 1_500L
+
+    /**
+     * Discovery found no Relay service on a device we expected to be a peer (it may not have added its GATT service
+     * yet, or we hold a stale cache): retry once after [DISCOVERY_RETRY_MS], then give up and let the backoff apply.
+     * [retriesSoFar] counts the retries already made for this MAC; returns the delay, or null to give up.
+     */
+    fun discoveryRetryDelayMs(retriesSoFar: Int): Long? = if (retriesSoFar < 1) DISCOVERY_RETRY_MS else null
 }

@@ -1,66 +1,106 @@
 import type { Ticket } from '../types';
-import { categoryMeta } from '../lib/categories';
 import { formatRelative } from '../lib/time';
-import { tierOf, ticketTitle } from '../lib/sort';
-import { hasMeshEstimate, meshEstimateShort, noLocationBadge } from '../lib/location';
-
-const STATUS_LABEL: Record<Ticket['status'], string> = {
-  OPEN: 'Open',
-  DISPATCHED: 'Dispatched',
-  ON_THE_WAY: 'On the way',
-  RESOLVED: 'Resolved',
-};
+import { isMappable } from '../lib/location';
+import {
+  QUEUE_FILTERS,
+  SORT_LABEL,
+  headline,
+  matchesFilter,
+  rowState,
+  ticketRef,
+  urgencyOf,
+  type SortKey,
+} from '../lib/triage';
 
 interface Props {
+  /** All tickets matching the search, in display order (filters are applied here). */
   tickets: Ticket[];
+  filterId: string;
+  onFilter: (id: string) => void;
+  sort: SortKey;
+  onSort: (s: SortKey) => void;
   loaded: boolean;
   nowSec: number;
   fresh: ReadonlyMap<number, number>;
+  seen: ReadonlySet<number>;
   selected: number | null;
   onSelect: (no: number) => void;
 }
 
-export function Queue({ tickets, loaded, nowSec, fresh, selected, onSelect }: Props) {
+function where(t: Ticket): string {
+  const lm = t.landmark?.trim() ? `near ${t.landmark.trim()}` : null;
+  if (!isMappable(t)) return [lm, 'no location'].filter(Boolean).join(' · ');
+  return [lm, t.loc_acc_m ? `GPS ${t.loc_acc_m.replace('<', '±')}` : 'GPS'].filter(Boolean).join(' · ');
+}
+
+export function Queue(p: Props) {
+  const active = QUEUE_FILTERS.find((f) => f.id === p.filterId) ?? QUEUE_FILTERS[0]!;
+  const shown = p.tickets.filter((t) => matchesFilter(t, active.filter));
+  const openCount = p.tickets.filter((t) => t.status === 'OPEN').length;
+
   return (
-    <section className="queue" aria-label="Priority queue">
-      <h2>Queue <span className="muted">({tickets.length})</span></h2>
-      {tickets.length === 0 ? (
+    <section className="queue panel" aria-label="Request queue">
+      <div className="queue-head">
+        <h2>Queue · {openCount} open</h2>
+        <label className="sort">
+          Sort:
+          <select value={p.sort} onChange={(e) => p.onSort(e.target.value as SortKey)}>
+            {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
+              <option key={k} value={k}>{SORT_LABEL[k]}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="chips" role="toolbar" aria-label="Filter the queue">
+        {QUEUE_FILTERS.map((f) => {
+          const n = p.tickets.filter((t) => t.status === 'OPEN' && matchesFilter(t, f.filter)).length;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              className={f.id === active.id ? 'chip on' : 'chip'}
+              aria-pressed={f.id === active.id}
+              onClick={() => p.onFilter(f.id)}
+            >
+              {f.label}{f.id === 'all' || f.filter.kind === 'urgency' || f.id === 'noloc' ? ` ${n}` : ''}
+            </button>
+          );
+        })}
+      </div>
+      {shown.length === 0 ? (
         <p className="empty">
-          {loaded
-            ? 'No needs reported yet. Packets appear here as soon as a gateway phone syncs.'
-            : 'Loading…'}
+          {!p.loaded
+            ? 'Loading…'
+            : p.tickets.length === 0
+              ? 'No requests yet. They appear here as soon as a gateway phone uploads.'
+              : 'Nothing matches this filter.'}
         </p>
       ) : (
-        <ul>
-          {tickets.map((t) => {
-            const tier = tierOf(t);
-            const noLoc = noLocationBadge(t);
+        <ul className="rows">
+          {shown.map((t) => {
+            const u = urgencyOf(t);
+            const state = rowState(t, p.seen);
             const cls = [
               'row',
-              t.ticket_no === selected ? 'selected' : '',
-              t.status !== 'OPEN' ? 'dispatched' : '',
-              fresh.has(t.ticket_no) ? 'fresh' : '',
+              t.ticket_no === p.selected ? 'selected' : '',
+              t.status === 'RESOLVED' ? 'closed' : '',
+              p.fresh.has(t.ticket_no) ? 'fresh' : '',
             ].join(' ');
             return (
               <li key={t.ticket_no}>
-                <button type="button" className={cls} onClick={() => onSelect(t.ticket_no)}>
-                  <span className={`tier ${tier}`}>{tier}</span>
-                  <span className="ico" aria-label={t.category}>{categoryMeta(t.category).icon}</span>
-                  <span className="body">
-                    <span className="title">{ticketTitle(t)}</span>
-                    <span className="meta">
-                      <span>{formatRelative(nowSec, t.first_reported_at)}</span>
-                      <span>{t.max_hops} hop{t.max_hops === 1 ? '' : 's'}</span>
-                      <span className={`status ${t.status}`}>{STATUS_LABEL[t.status] ?? 'Open'}</span>
-                    </span>
-                    {noLoc && <span className="noloc">{noLoc}</span>}
-                    {hasMeshEstimate(t) && (
-                      <span className="est-short" title="Approximate position from nearby relay phones, not a GPS fix">
-                        ◌ approx. {meshEstimateShort(t.geo)}
-                      </span>
-                    )}
+                <button type="button" className={cls} onClick={() => p.onSelect(t.ticket_no)} data-ticket={t.ticket_no}>
+                  <span className={`score u-${u.key}`} title={`Priority score ${t.priority_score.toFixed(1)}`}>
+                    {Math.round(t.priority_score)}
                   </span>
-                  {t.report_count > 1 && <span className="count" title="Reports merged">×{t.report_count}</span>}
+                  <span className="body">
+                    <span className="title">{headline(t)}</span>
+                    <span className="line">{where(t)}</span>
+                    <span className="line muted">
+                      {u.label} · {formatRelative(p.nowSec, t.first_reported_at)} · {t.max_hops} hop{t.max_hops === 1 ? '' : 's'} · {ticketRef(t.ticket_no)}
+                      {t.report_count > 1 ? ` · ${t.report_count} reports` : ''}
+                    </span>
+                  </span>
+                  <span className={`state s-${state.replace(/ /g, '-').toLowerCase()}`}>{state}</span>
                 </button>
               </li>
             );

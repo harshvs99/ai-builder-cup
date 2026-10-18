@@ -23,6 +23,9 @@ object BleConstants {
     const val SETUP_TIMEOUT_MS = 25_000L
     const val PERIPHERAL_SUBSCRIBE_TIMEOUT_MS = 12_000L
 
+    /** Mirrors the gossip engine's resync period (MeshEngine: node.resync() every 30 s); the liveness watchdog derives from it. */
+    const val RESYNC_INTERVAL_MS = 30_000L
+
     const val BACKOFF_MIN_MS = 2_000L
     const val BACKOFF_MAX_MS = 60_000L
     const val ALLOWLIST_IGNORE_MS = 60_000L

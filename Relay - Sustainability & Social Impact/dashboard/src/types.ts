@@ -20,6 +20,8 @@ export interface PacketInfo {
   /** 0 = no GPS fix, 1 <10 m ... 5 >=1 km (SPEC §5.1). */
   loc_acc?: number;
   received_at: number;
+  /** When the phone recorded the need (clock-sanitised); absent on older backends. */
+  reported_at?: number;
   summary?: string;
 }
 
@@ -71,6 +73,10 @@ export interface Ticket {
   max_hops: number;
   gateways: string[];
   msg_ids: string[];
+  /** Pending team proposal from the dispatch agent; absent until proposed. */
+  proposal?: Proposal;
+  /** Approved dispatch; absent until approved. */
+  dispatch?: Dispatch;
   /** Detail endpoint only. */
   packets?: PacketInfo[];
 }
@@ -79,4 +85,68 @@ export interface Stats {
   open_by_category: Partial<Record<Category, number>>;
   gateways_online: number;
   tickets: number;
+  open?: number;
+  p1_open?: number;
+  oldest_open_at?: number | null;
+  teams_free?: number;
+  teams_total?: number;
+}
+
+export interface Proposal {
+  team_id: string;
+  team_name: string;
+  eta_min: number;
+  order_en?: string;
+  order_local?: string;
+  local_lang?: string;
+  reason?: string;
+  proposed_at: number;
+}
+
+export interface Dispatch {
+  team_id: string | null;
+  team_name: string | null;
+  eta_min: number | null;
+  approved_at: number;
+  order_en?: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  kind: 'boat' | 'medical' | 'supply' | string;
+  capacity: number;
+  load: number;
+  base_lat: number;
+  base_lon: number;
+  status: 'free' | 'busy' | 'off' | string;
+}
+
+export interface Gateway {
+  node: string;
+  /** unix seconds */
+  last_seen: number;
+  online: boolean;
+}
+
+export interface SitrepCounts {
+  open: number;
+  open_by_category: Partial<Record<Category, number>>;
+  p1_open: number;
+  dispatched: number;
+  resolved: number;
+  gateways_online: number;
+  oldest_open_ticket_no: number | null;
+  oldest_open_age_s: number | null;
+}
+
+export interface Sitrep {
+  period_start: number;
+  period_end: number;
+  generated_at: number;
+  counts: SitrepCounts;
+  text_en: string;
+  text_local: string;
+  local_lang: string;
+  ticket_nos: number[];
 }

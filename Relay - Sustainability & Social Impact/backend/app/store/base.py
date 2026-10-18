@@ -137,6 +137,9 @@ class Store(Protocol):
     # ------------------------------------------------------------------ gateways
     def touch_gateway(self, node: str, now: float) -> None: ...
     def gateways_online(self, now: float, window_s: float = 60.0) -> int: ...
+    def list_gateways(self) -> list[dict[str, Any]]:
+        """Every gateway that ever synced as ``{node, last_seen}``, most recently seen first."""
+        ...
 
     # ------------------------------------------------------------------ packets
     def record_packets(self, packets: list[PacketIn], gateway_node: str, received_at: int) -> list[RecordStatus]:

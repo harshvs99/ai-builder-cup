@@ -1,5 +1,5 @@
 import { loadOperatorKey } from './lib/operatorKey';
-import type { Stats, Ticket } from './types';
+import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
 
 export class ApiError extends Error {
   /** HTTP status, or 0 for network failures. */
@@ -29,6 +29,12 @@ async function errorMessage(res: Response): Promise<string> {
   }
 }
 
+const post = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
 export function createClient(base: string, operatorKey?: string | null) {
   const root = base.replace(/\/+$/, '');
 
@@ -57,8 +63,37 @@ export function createClient(base: string, operatorKey?: string | null) {
     getTicket(no: number, signal?: AbortSignal): Promise<Ticket> {
       return request<Ticket>(`/v1/tickets/${no}`, { signal });
     },
-    approve(no: number): Promise<Ticket> {
-      return request<Ticket>(`/v1/tickets/${no}/approve`, { method: 'POST' });
+    /** Approve; `team_id` overrides the proposed team (the backend recomputes the ETA). */
+    approve(no: number, body?: { team_id?: string }): Promise<Ticket> {
+      return request<Ticket>(`/v1/tickets/${no}/approve`, body ? post(body) : { method: 'POST' });
+    },
+    onTheWay(no: number): Promise<Ticket> {
+      return request<Ticket>(`/v1/tickets/${no}/on-the-way`, { method: 'POST' });
+    },
+    resolve(no: number): Promise<Ticket> {
+      return request<Ticket>(`/v1/tickets/${no}/resolve`, { method: 'POST' });
+    },
+    proposeDispatch(): Promise<{ proposals: unknown[] }> {
+      return request('/v1/dispatch/propose', { method: 'POST' });
+    },
+    listTeams(signal?: AbortSignal): Promise<Team[]> {
+      return request<Team[]>('/v1/teams', { signal });
+    },
+    async listGateways(signal?: AbortSignal): Promise<Gateway[]> {
+      const body = await request<{ gateways?: Gateway[] }>('/v1/gateways', { signal });
+      return Array.isArray(body?.gateways) ? body.gateways : [];
+    },
+    /** null when no sitrep has been generated yet. */
+    async latestSitrep(signal?: AbortSignal): Promise<Sitrep | null> {
+      try {
+        return await request<Sitrep>('/v1/sitreps/latest', { signal });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    runSitrep(): Promise<Sitrep> {
+      return request<Sitrep>('/v1/sitreps/run', { method: 'POST' });
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });
