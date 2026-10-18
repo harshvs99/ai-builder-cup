@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72">
+  <!-- Same mark as the Android launcher icon (res/drawable/ic_launcher_*.xml): three mesh nodes on red. -->
+  <rect x="18" y="18" width="72" height="72" rx="16" fill="#B3261E"/>
+  <g fill="#fff"><circle cx="54" cy="37" r="7"/><circle cx="32" cy="77" r="7"/><circle cx="76" cy="77" r="7"/></g>
+  <path d="M54 37 34 64M54 37l20 27M39 70h30" stroke="#fff" stroke-width="3" fill="none"/>
+</svg>
