@@ -55,7 +55,12 @@ export function Header(p: Props) {
     <header className="topbar">
       <div className="brand">
         <span className="logo" aria-hidden>
-          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-6 9a6 6 0 0 0 12 0h-2a4 4 0 0 1-8 0H6Zm5 7v2h2v-2h-2Z" fill="currentColor" /></svg>
+          {/* Same mark as the Android launcher icon and public/favicon.svg. */}
+          <svg viewBox="18 18 72 72" width="24" height="24">
+            <rect x="18" y="18" width="72" height="72" rx="16" fill="#B3261E" />
+            <g fill="#fff"><circle cx="54" cy="37" r="7" /><circle cx="32" cy="77" r="7" /><circle cx="76" cy="77" r="7" /></g>
+            <path d="M54 37 34 64M54 37l20 27M39 70h30" stroke="#fff" strokeWidth="3" fill="none" />
+          </svg>
         </span>
         <b>Relay</b>
         <span className="where">Control room · Puri district</span>
