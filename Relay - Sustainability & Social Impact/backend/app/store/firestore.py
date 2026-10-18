@@ -9,6 +9,10 @@ Layout (all top-level collections in the configured database):
   acks/{seq}            ACK; ``seq`` is the gateway sync cursor
   ack_keys/{ref}_{st}   marker doc: at most one ack per (ref_msg_id, status)
   gateways/{node}       last_seen
+  teams/{id}            dispatch team (seeded once, create-if-absent)
+  dispatch/{ticket_no}  ``proposal`` / ``dispatch`` maps (or null); ``team_id`` and ``active`` (counts
+                        toward the team's load) are set by approve
+  sitreps/{id}          generated sitreps; ``id`` comes from counters/sitrep
   counters/{name}       ``ticket_no`` and ``ack_seq``: ``value`` is the last number handed out
 
 Atomicity: every multi-document write is one Firestore transaction (reads first, then
@@ -42,6 +46,7 @@ from .base import (
     PacketIn,
     Plan,
     RecordStatus,
+    TeamAtCapacity,
 )
 
 log = logging.getLogger("relay.store.firestore")
@@ -285,10 +290,15 @@ class FirestoreStore:
 
         return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
-    def approve_ticket(self, ticket_no: int, now: int, make_ack: Callable[[dict[str, Any]], AckSpec]) -> bool | None:
+    def approve_ticket(
+        self, ticket_no: int, now: int, make_ack: Callable[[dict[str, Any]], AckSpec], *,
+        dispatch: dict[str, Any] | None = None, capacity: int | None = None,
+    ) -> bool | None:
         from google.cloud import firestore
 
         tref = self._col("tickets").document(str(ticket_no))
+        dref = self._col("dispatch").document(str(ticket_no))
+        team_id = dispatch.get("team_id") if dispatch else None
 
         @firestore.transactional
         def run(txn) -> bool | None:
@@ -297,11 +307,18 @@ class FirestoreStore:
                 return None
             if snap.get("status") != "OPEN":
                 return False
+            if team_id and capacity is not None:
+                q = self._eq(self._col("dispatch"), "team_id", "==", team_id)
+                if sum(1 for d in q.stream(transaction=txn) if d.get("active")) >= capacity:
+                    raise TeamAtCapacity(team_id)
             acks = [make_ack(p) for p in self._origins(self._packets_of(ticket_no, txn))]
             ack_counter_ref, seq = self._next(txn, "ack_seq")
             keys = [(a, self._col("ack_keys").document(f"{a.ref_msg_id}_{a.status}")) for a in acks]
             fresh = [(a, k) for a, k in keys if not k.get(transaction=txn).exists]
             txn.update(tref, {"status": "DISPATCHED", "updated_at": now, "open_category": None})
+            if dispatch is not None:
+                txn.set(dref, {"ticket_no": ticket_no, "team_id": team_id, "active": True, "dispatch": dispatch},
+                        merge=True)
             for a, k in fresh:
                 txn.set(self._col("acks").document(str(seq)), _ack_doc(a, seq, now))
                 txn.set(k, {"seq": seq})
@@ -319,6 +336,106 @@ class FirestoreStore:
             name: self._count(self._eq(tickets, "open_category", "==", name)) for name in CATEGORY_NAMES
         }
         return {"open_by_category": open_by_cat, "tickets": self._count(tickets)}
+
+    def ticket_counts(self) -> dict[str, Any]:
+        tickets = self._col("tickets")
+        open_rows = [self._ticket_row(s) for s in self._eq(tickets, "status", "==", "OPEN").stream()]
+        open_rows.sort(key=lambda r: (-r["priority_score"], r["first_reported_at"], r["ticket_no"]))
+        open_by_cat = {name: 0 for name in CATEGORY_NAMES}
+        for r in open_rows:
+            open_by_cat[r["category"]] = open_by_cat.get(r["category"], 0) + 1
+        p1 = [r["ticket_no"] for r in open_rows if r["priority_tier"] == "P1"]
+        oldest = min(open_rows, key=lambda r: (r["first_reported_at"], r["ticket_no"]), default=None)
+        return {
+            "open": len(open_rows),
+            "p1_open": len(p1),
+            "p1_open_nos": p1,
+            "dispatched": self._count(self._eq(tickets, "status", "==", "DISPATCHED")),
+            "resolved": self._count(self._eq(tickets, "status", "==", "RESOLVED")),
+            "open_by_category": open_by_cat,
+            "oldest_open_no": oldest["ticket_no"] if oldest else None,
+            "oldest_open_at": oldest["first_reported_at"] if oldest else None,
+        }
+
+    # ------------------------------------------------------------------ teams + dispatch
+    def seed_teams(self, teams: list[dict[str, Any]]) -> None:
+        from google.api_core.exceptions import AlreadyExists
+
+        for t in teams:
+            doc = {k: t[k] for k in ("id", "name", "kind", "capacity", "base_lat", "base_lon")}
+            doc["status"] = t.get("status", "free")
+            try:
+                self._col("teams").document(t["id"]).create(doc)
+            except AlreadyExists:
+                pass
+
+    def list_teams(self) -> list[dict[str, Any]]:
+        out = [s.to_dict() for s in self._col("teams").stream()]
+        out.sort(key=lambda t: t["id"])
+        return out
+
+    def set_team_status(self, team_id: str, status: str) -> bool:
+        from google.api_core.exceptions import NotFound
+
+        try:
+            self._col("teams").document(team_id).update({"status": status})
+            return True
+        except NotFound:
+            return False
+
+    def team_loads(self) -> dict[str, int]:
+        loads: dict[str, int] = {}
+        for s in self._eq(self._col("dispatch"), "active", "==", True).stream():
+            tid = s.get("team_id")
+            if tid:
+                loads[tid] = loads.get(tid, 0) + 1
+        return loads
+
+    @staticmethod
+    def _dispatch_doc(d: dict[str, Any]) -> dict[str, Any]:
+        return {"proposal": d.get("proposal"), "dispatch": d.get("dispatch")}
+
+    def dispatch_records(self) -> dict[int, dict[str, Any]]:
+        return {int(s.id): self._dispatch_doc(s.to_dict()) for s in self._col("dispatch").stream()}
+
+    def get_dispatch_record(self, ticket_no: int) -> dict[str, Any] | None:
+        snap = self._col("dispatch").document(str(ticket_no)).get()
+        return self._dispatch_doc(snap.to_dict()) if snap.exists else None
+
+    def set_proposals(self, proposals: dict[int, dict[str, Any] | None]) -> None:
+        for ticket_no, proposal in proposals.items():
+            self._col("dispatch").document(str(ticket_no)).set(
+                {"ticket_no": ticket_no, "proposal": proposal}, merge=True
+            )
+
+    def release_dispatch(self, ticket_no: int) -> None:
+        from google.api_core.exceptions import NotFound
+
+        try:
+            self._col("dispatch").document(str(ticket_no)).update({"active": False})
+        except NotFound:
+            pass
+
+    # ------------------------------------------------------------------ sitreps
+    def add_sitrep(self, sitrep: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, sid = self._next(txn, "sitrep")
+            saved = {**{k: v for k, v in sitrep.items() if k != "id"}, "id": sid}
+            txn.set(self._col("sitreps").document(str(sid)), saved)
+            txn.set(ref, {"value": sid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def latest_sitrep(self) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        docs = list(self._col("sitreps").order_by("id", direction=firestore.Query.DESCENDING).limit(1).stream())
+        return docs[0].to_dict() if docs else None
 
     # ------------------------------------------------------------------ acks
     def _newest_ack_seq(self) -> int:

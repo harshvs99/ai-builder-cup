@@ -51,6 +51,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GOOGLE_GENAI_USE_VERTEXAI` | unset | `true` enables Gemini on Vertex AI via ADC (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, default `global`) |
 | `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
+| `SITREP_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the sitrep prose (set a Pro-tier name here) |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
 | `PORT` | `8080` | Docker/Cloud Run listen port |
 
@@ -66,8 +67,14 @@ app/cluster.py          near-duplicate matching + merge rules
 app/templates.py        ACK texts (6 languages; non-English pending native-speaker review)
 app/agent.py            triage pipeline; DeterministicAgent and GeminiAgent (API key or Vertex)
 app/pubsub.py           publish side of /v1/sync, push envelope parsing, OIDC verifier
+app/teams.py            dispatch teams: seed file (data/teams_puri.json), derived load and status
+app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
+app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
+app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
+app/data/               teams_puri.json, gazetteer_puri.json (landmarks with Hindi/Odia aliases)
 app/main.py             FastAPI app (SPEC section 7), /internal/triage, static dashboard
 scripts/test-firestore.sh   emulator-backed test run
+scripts/seed_district.py    40 NEEDs over a simulated cyclone night in Puri, posted through /v1/sync
 tests/                  pytest (golden vectors, fuzz, API on both stores, Pub/Sub, static, agent)
 ```
 
@@ -96,6 +103,27 @@ asks Gemini, one structured-JSON call per touched ticket (8 s hard timeout), for
 a tier adjustment clamped to one tier, and a polished + translated dispatch draft. The score is
 never model-written; ACK text is never model-written; any error or invalid field falls back to
 the deterministic value and is logged.
+
+## Control room: teams, dispatch, sitrep
+
+- `GET /v1/teams`: six Puri-district teams (2 boat, 2 medical, 2 supply), seeded from
+  `app/data/teams_puri.json` on first use. `load` = approved, unreleased dispatches; `status` is
+  `off` (operator), `busy` (at capacity) or `free`.
+- `POST /v1/dispatch/propose`: walks OPEN tickets by score, then age; matches team kind to category
+  (RESCUE/MISSING_PERSON boat, MEDICAL medical, the rest supply; any free team as fallback); never
+  exceeds capacity (existing load plus this run). ETA = straight-line km from the team base to the
+  ticket (GPS fix, else `geo`, else a flat 45 min) at 15 km/h (boat) or 25 km/h, plus 10 min prep,
+  rounded up to 5. Gemini may write `order_en` / `order_local` (Hindi or Odia by ticket language);
+  text that lacks the ticket number or the team name is replaced by a template. Proposals are stored
+  on the tickets as `proposal` and nothing is sent to the mesh.
+- `POST /v1/tickets/{no}/approve` takes an optional `{team_id?, eta_min?, order_en?}`; missing parts
+  come from the pending proposal. It records `dispatch`, counts toward the team's load and puts the
+  ETA into the DISPATCHED ACK (templated text). A full team is 409; no body and no proposal is the
+  plain 45 min approval. Releasing a team's load on resolve: `Store.release_dispatch`.
+- `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`: counts come from store queries; Gemini writes
+  English and Odia prose around them, and the text is used only if every number in it is one it was
+  handed. Hourly via the Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).
+- `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
 
 ## Deploy
 

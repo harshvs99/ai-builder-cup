@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 
-from .base import AckSpec, IngestOutcome, PacketIn, Plan, Store
+from .base import AckSpec, IngestOutcome, PacketIn, Plan, Store, TeamAtCapacity
 from .firestore import FirestoreStore
 from .sqlite import SqliteStore
 
 __all__ = [
-    "AckSpec", "FirestoreStore", "IngestOutcome", "PacketIn", "Plan", "SqliteStore", "Store", "open_store",
+    "AckSpec", "FirestoreStore", "IngestOutcome", "PacketIn", "Plan", "SqliteStore", "Store", "TeamAtCapacity", "open_store",
 ]
 
 
