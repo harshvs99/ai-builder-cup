@@ -14,6 +14,7 @@ Layout (all top-level collections in the configured database):
   dispatch/{ticket_no}  ``proposal`` / ``dispatch`` maps (or null); ``team_id`` and ``active`` (counts
                         toward the team's load) are set by approve
   sitreps/{id}          generated sitreps; ``id`` comes from counters/sitrep
+  broadcasts/{id}       broadcast drafts and approvals; ``id`` comes from counters/broadcast
   counters/{name}       ``ticket_no`` and ``ack_seq``: ``value`` is the last number handed out
 
 Atomicity: every multi-document write is one Firestore transaction (reads first, then
@@ -559,6 +560,52 @@ class FirestoreStore:
             return snap.to_dict() if snap.exists else None
         docs = list(self._col("sitreps").order_by("id", direction=firestore.Query.DESCENDING).limit(1).stream())
         return docs[0].to_dict() if docs else None
+
+    # ------------------------------------------------------------------ broadcasts
+    def add_broadcast(self, broadcast: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, bid = self._next(txn, "broadcast")
+            saved = {**{k: v for k, v in broadcast.items() if k != "id"}, "id": bid}
+            txn.set(self._col("broadcasts").document(str(bid)), saved)
+            txn.set(ref, {"value": bid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def get_broadcast(self, broadcast_id: int) -> dict[str, Any] | None:
+        snap = self._col("broadcasts").document(str(broadcast_id)).get()
+        return snap.to_dict() if snap.exists else None
+
+    def update_broadcast(self, broadcast_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        ref = self._col("broadcasts").document(str(broadcast_id))
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any] | None:
+            snap = ref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            saved = {**snap.to_dict(), **fields, "id": broadcast_id}
+            txn.set(ref, saved)
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def list_broadcasts(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        # equality filters only (no composite index); newest-first sort in memory
+        q = self._col("broadcasts")
+        for field, val in (("district", district), ("status", status)):
+            if val is not None:
+                q = self._eq(q, field, "==", val)
+        docs = [s.to_dict() for s in q.stream()]
+        docs.sort(key=lambda d: d["id"], reverse=True)
+        return docs
 
     # ------------------------------------------------------------------ acks
     def _newest_ack_seq(self) -> int:

@@ -156,6 +156,14 @@ CREATE TABLE IF NOT EXISTS sitreps (
     generated_at INTEGER NOT NULL,
     data         TEXT    NOT NULL            -- JSON, includes id
 );
+
+CREATE TABLE IF NOT EXISTS broadcasts (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    district TEXT    NOT NULL,
+    status   TEXT    NOT NULL,
+    data     TEXT    NOT NULL                -- JSON, includes id
+);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_district ON broadcasts(district, status);
 """
 
 _OLD_STATUS_CHECK = "CHECK (status IN ('OPEN','DISPATCHED'))"
@@ -627,6 +635,42 @@ class SqliteStore:
                 (district,),
             )
         return json.loads(rows[0]["data"]) if rows else None
+
+    # ------------------------------------------------------------------ broadcasts
+    def add_broadcast(self, broadcast: dict[str, Any]) -> dict[str, Any]:
+        with self.tx() as c:
+            cur = c.execute(
+                "INSERT INTO broadcasts(district, status, data) VALUES (?, ?, '{}')",
+                (broadcast["district"], broadcast["status"]),
+            )
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in broadcast.items() if k != "id"}}
+            c.execute("UPDATE broadcasts SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            return saved
+
+    def get_broadcast(self, broadcast_id: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM broadcasts WHERE id = ?", (broadcast_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def update_broadcast(self, broadcast_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        with self.tx() as c:
+            row = c.execute("SELECT data FROM broadcasts WHERE id = ?", (broadcast_id,)).fetchone()
+            if row is None:
+                return None
+            saved = {**json.loads(row["data"]), **fields, "id": broadcast_id}
+            c.execute(
+                "UPDATE broadcasts SET district = ?, status = ?, data = ? WHERE id = ?",
+                (saved["district"], saved["status"], json.dumps(saved), broadcast_id),
+            )
+            return saved
+
+    def list_broadcasts(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        where, args = [], []
+        for col, val in (("district", district), ("status", status)):
+            if val is not None:
+                where.append(f"{col} = ?")
+                args.append(val)
+        sql = "SELECT data FROM broadcasts" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC"
+        return [json.loads(r["data"]) for r in self._q(sql, args)]
 
     # ------------------------------------------------------------------ acks
     def queue_ack(

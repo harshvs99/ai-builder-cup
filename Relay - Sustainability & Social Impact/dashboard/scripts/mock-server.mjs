@@ -120,13 +120,33 @@ function propose() {
   return out;
 }
 
+// Broadcasts: fake translations ("[hi] ...") so the review table has something to show.
+const broadcasts = [];
+const BC_LANGS = ['en', 'hi', 'or', 'tl', 'war'];
+const digits = (t) => (t.match(/\d+/g) ?? []).map(Number).sort((a, b) => a - b).join(',');
+function bcDraft(text, sourceLang) {
+  const tr = {};
+  for (const l of BC_LANGS) {
+    const t = l === sourceLang ? text : `[${l}] ${text}`;
+    tr[l] = { text: t, back_translation: text, faithful: true, issues: '', checks_passed: true, status: 'ok' };
+  }
+  // one language is made to look suspicious so the needs-review path can be tried
+  tr.war = { ...tr.war, text: `[war] ${text} 99`, faithful: false, checks_passed: false, status: 'needs_review', issues: 'numbers differ from the source' };
+  return tr;
+}
+function readBody(req, cb) {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => { try { cb(body ? JSON.parse(body) : {}); } catch { cb(null); } });
+}
+
 const summarize = ({ packets: _p, ...rest }) => rest;
 const sorted = () => [...tickets.values()].sort((a, b) => b.priority_score - a.priority_score);
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Relay-Key',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Relay-Key, X-Operator-Key',
 };
 function send(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json', ...CORS });
@@ -171,6 +191,36 @@ const server = http.createServer((req, res) => {
     const open_by_category = {};
     for (const t of tickets.values()) if (t.status === 'OPEN') open_by_category[t.category] = (open_by_category[t.category] ?? 0) + 1;
     return send(res, 200, { open_by_category, gateways_online: GATEWAYS.length - 1, tickets: tickets.size });
+  }
+  if (path === '/v1/broadcasts' && req.method === 'GET') return send(res, 200, { broadcasts: [...broadcasts].reverse() });
+  if (path === '/v1/broadcasts' && req.method === 'POST') {
+    return readBody(req, (b) => {
+      if (!b || !b.district || !b.text) return send(res, 422, { detail: 'district and text are required' });
+      const lang = b.source_lang ?? 'en';
+      const row = { id: broadcasts.length + 1, district: b.district, source_text: b.text.trim(), source_lang: lang, created_at: now(),
+        translations: bcDraft(b.text.trim(), lang), status: 'draft', approved_at: null, approved_langs: [] };
+      broadcasts.push(row);
+      send(res, 200, row);
+    });
+  }
+  const bm = path.match(/^\/v1\/broadcasts\/(\d+)\/(approve|withdraw)$/);
+  if (bm && req.method === 'POST') {
+    const row = broadcasts.find((x) => x.id === Number(bm[1]));
+    if (!row) return send(res, 404, { detail: 'broadcast not found' });
+    if (bm[2] === 'withdraw') { row.status = 'withdrawn'; return send(res, 200, row); }
+    return readBody(req, (b) => {
+      if (row.status !== 'draft') return send(res, 409, { detail: `broadcast is ${row.status}, not a draft` });
+      const edits = b?.edits ?? {};
+      for (const [l, t] of Object.entries(edits)) {
+        if (digits(t) !== digits(row.source_text)) return send(res, 422, { detail: `${l}: numbers differ from the source` });
+        row.translations[l] = { text: t, back_translation: '', faithful: false, issues: 'edited by operator, not model-checked', checks_passed: true, status: 'ok', edited: true };
+      }
+      const langs = b?.langs ?? BC_LANGS.filter((l) => row.translations[l].status === 'ok');
+      row.approved_langs = BC_LANGS.filter((l) => langs.includes(l) || l in edits);
+      row.status = 'approved';
+      row.approved_at = now();
+      send(res, 200, row);
+    });
   }
   const m = path.match(/^\/v1\/tickets\/(\d+)(\/approve|\/on-the-way|\/resolve)?$/);
   if (m) {
