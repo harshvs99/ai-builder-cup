@@ -6,6 +6,7 @@ Layout (all top-level collections in the configured database):
   tickets/{ticket_no}   ticket; ``links`` = [{msg_id, gateway_node, loc_acc}] (denormalised so the
                         dashboard list needs one read per ticket, not one per packet);
                         ``open_category`` = category while OPEN, null once DISPATCHED (and after: ON_THE_WAY, RESOLVED)
+  loc_hints/{hint_key}  LOC_HINT (create-if-absent); ``ref_msg_id`` (automatic single-field index) finds a NEED's hints
   acks/{seq}            ACK; ``seq`` is the gateway sync cursor
   ack_keys/{ref}_{st}   marker doc: at most one ack per (ref_msg_id, status)
   gateways/{node}       last_seen
@@ -43,12 +44,14 @@ from .base import (
     TICKET_DEFAULTS,
     AckSpec,
     AdvanceResult,
+    HintIn,
     IngestOutcome,
     Lookup,
     PacketIn,
     Plan,
     RecordStatus,
     TeamAtCapacity,
+    keep_mesh_geo,
     merge_dispatch,
 )
 
@@ -146,6 +149,11 @@ class FirestoreStore:
     def gateways_online(self, now: float, window_s: float = 60.0) -> int:
         return self._count(self._eq(self._col("gateways"), "last_seen", ">=", now - window_s))
 
+    def list_gateways(self) -> list[dict[str, Any]]:
+        out = [{"node": d.id, "last_seen": d.to_dict()["last_seen"]} for d in self._col("gateways").stream()]
+        out.sort(key=lambda g: (-g["last_seen"], g["node"]))
+        return out
+
     # ------------------------------------------------------------------ packets
     def record_packets(self, packets: list[PacketIn], gateway_node: str, received_at: int) -> list[RecordStatus]:
         from google.api_core.exceptions import AlreadyExists
@@ -238,6 +246,64 @@ class FirestoreStore:
     def origins_for_ticket(self, ticket_no: int) -> list[dict[str, Any]]:
         return self._origins(self._packets_of(ticket_no))
 
+    # ------------------------------------------------------------------ mesh location hints
+    def add_hints(self, hints: list[HintIn]) -> list[bool]:
+        from google.api_core.exceptions import AlreadyExists
+
+        def one(h: HintIn) -> bool:
+            doc = {
+                "hint_key": h.key, "ref_msg_id": h.ref_msg_id, "relay_node": h.relay_node, "lat_e5": h.lat_e5,
+                "lon_e5": h.lon_e5, "acc": h.acc, "rssi_dbm": h.rssi_dbm, "observed_at": h.observed_at,
+                "gateway_node": h.gateway_node, "received_at": h.received_at,
+            }
+            try:
+                self._col("loc_hints").document(h.key).create(doc)  # create-if-absent: the first hint wins
+                return True
+            except AlreadyExists:
+                return False
+
+        if len(hints) <= 1:
+            return [one(h) for h in hints]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=RECORD_WORKERS) as pool:
+            return list(pool.map(one, hints))
+
+    def hints_for(self, msg_ids: list[str]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for msg_id in msg_ids:
+            for s in self._eq(self._col("loc_hints"), "ref_msg_id", "==", msg_id).stream():
+                d = s.to_dict()
+                out.append({**d, "key": d["hint_key"]})
+        out.sort(key=lambda d: (d["received_at"], d["key"]))
+        return out
+
+    def ticket_for_msg(self, msg_id: str) -> int | None:
+        snap = self._col("packets").document(msg_id).get()
+        no = (snap.to_dict() or {}).get("ticket_no") if snap.exists else None
+        return int(no) if no is not None else None
+
+    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+        from google.cloud import firestore
+
+        tref = self._col("tickets").document(str(ticket_no))
+
+        @firestore.transactional
+        def run(txn) -> bool:
+            snap = tref.get(transaction=txn)
+            if not snap.exists:
+                return False
+            # ``links`` are the ticket's packets, written in the same transaction that links them
+            for lk in snap.get("links") or []:
+                acc = lk.get("loc_acc")
+                if acc is None:  # written before loc_acc was denormalised
+                    p = self._col("packets").document(lk["msg_id"]).get(transaction=txn)
+                    acc = (p.to_dict() or {}).get("loc_acc") if p.exists else None
+                if acc != 0:
+                    return False  # a GPS fix (or unknown quality): never shadow it
+            txn.update(tref, {"geo": geo})
+            return True
+
+        return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
     @staticmethod
     def _origins(packets: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen: dict[str, dict[str, Any]] = {}
@@ -287,8 +353,11 @@ class FirestoreStore:
             snap = tref.get(transaction=txn)
             if not snap.exists or snap.get("status") != "OPEN" or snap.get("report_count") != report_count:
                 return False
+            fields_ = keep_mesh_geo((snap.to_dict() or {}).get("geo"), fields)
+            if not fields_:
+                return True
             # the ticket is OPEN here, so its merge-lookup category follows a reclassification
-            txn.update(tref, {**fields, "open_category": fields["category"]} if "category" in fields else fields)
+            txn.update(tref, {**fields_, "open_category": fields_["category"]} if "category" in fields_ else fields_)
             return True
 
         return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))

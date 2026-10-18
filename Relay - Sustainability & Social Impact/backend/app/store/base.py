@@ -8,6 +8,7 @@ transaction) and the pipeline code is identical for both:
   * ``approve_ticket``  OPEN -> DISPATCHED plus one DISPATCHED ack per distinct origin
   * ``advance_ticket``  DISPATCHED -> ON_THE_WAY -> RESOLVED plus one ack per distinct origin
   * ``update_ticket_if_unchanged``  compare-and-set used by the Gemini enrichment phase
+  * ``set_mesh_geo``    guarded write of a mesh location estimate onto a ticket with no GPS fix
 
 ``ingest`` calls back into the pipeline (``plan``) with the candidate tickets the store read
 inside its transaction. ``plan`` must be a pure function of its argument: Firestore may run
@@ -20,6 +21,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol
 
 from ..codec import Need
+
+def keep_mesh_geo(current: dict[str, Any] | None, fields: dict[str, Any]) -> dict[str, Any]:
+    """``fields`` for an update that must not replace a mesh estimate with a landmark one (the enrichment phase
+    reads the ticket first and writes later; a hint may land in between)."""
+    if "geo" in fields and (current or {}).get("source") == "mesh":
+        return {k: v for k, v in fields.items() if k != "geo"}
+    return fields
+
 
 # Defaults for a ticket document that does not set the field (SQLite gets the same from DDL).
 TICKET_DEFAULTS: dict[str, Any] = {
@@ -58,6 +67,21 @@ def merge_dispatch(existing: dict[str, Any] | None, patch: dict[str, Any]) -> di
 
 class TeamAtCapacity(Exception):
     """``approve_ticket`` refused to assign a team that already carries its capacity."""
+
+
+@dataclass(frozen=True)
+class HintIn:
+    """A validated LOC_HINT ready to be stored. Keyed by (ref_msg_id, relay_node) via ``key`` (hex)."""
+    key: str
+    ref_msg_id: str  # hex of the NEED it is about
+    relay_node: str
+    lat_e5: int
+    lon_e5: int
+    acc: int
+    rssi_dbm: int
+    observed_at: int
+    gateway_node: str
+    received_at: int
 
 
 # What a sync said about one frame in ``record_packets``.
@@ -113,6 +137,9 @@ class Store(Protocol):
     # ------------------------------------------------------------------ gateways
     def touch_gateway(self, node: str, now: float) -> None: ...
     def gateways_online(self, now: float, window_s: float = 60.0) -> int: ...
+    def list_gateways(self) -> list[dict[str, Any]]:
+        """Every gateway that ever synced as ``{node, last_seen}``, most recently seen first."""
+        ...
 
     # ------------------------------------------------------------------ packets
     def record_packets(self, packets: list[PacketIn], gateway_node: str, received_at: int) -> list[RecordStatus]:
@@ -130,6 +157,27 @@ class Store(Protocol):
         ...
 
     def ticket_packets(self, ticket_no: int) -> list[dict[str, Any]]: ...
+
+    # ------------------------------------------------------------------ mesh location hints
+    def add_hints(self, hints: list[HintIn]) -> list[bool]:
+        """Store LOC_HINTs idempotently (create-if-absent on ``key``, first one wins). True per hint stored now,
+        False for one seen before. A hint may arrive before the NEED it refers to."""
+        ...
+
+    def hints_for(self, msg_ids: list[str]) -> list[dict[str, Any]]:
+        """Stored hints (``HintIn`` fields as dicts) whose ``ref_msg_id`` is one of ``msg_ids``."""
+        ...
+
+    def ticket_for_msg(self, msg_id: str) -> int | None:
+        """The ticket a NEED was triaged into, or None (unknown NEED, or recorded but not triaged yet)."""
+        ...
+
+    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+        """Atomically set ``geo`` (a ``source: "mesh"`` record) on the ticket unless it does not exist or any of its
+        packets carries a GPS fix (``loc_acc != 0``): a real fix is never overwritten or shadowed. Replaces a
+        landmark estimate. True if written."""
+        ...
+
     def origins_for_ticket(self, ticket_no: int) -> list[dict[str, Any]]: ...
 
     # ------------------------------------------------------------------ tickets

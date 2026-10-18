@@ -26,20 +26,27 @@ from . import teams as team_data
 from .agent import Agent, IncomingNeed, TriagePipeline, agent_from_env, build_ack
 from .codec import (
     CATEGORY_NAMES,
+    HINT_ACC_MAX_M,
     INITIAL_TTL,
     LANG_CODES,
+    RSSI_UNKNOWN,
     STATUS_DISPATCHED,
     STATUS_ON_THE_WAY,
     STATUS_RESOLVED,
+    TYPE_LOC_HINT,
     TYPE_NEED,
     VULN_NAMES,
     CodecError,
+    LocHint,
     Need,
     answers_from_json,
     decode_frame,
+    decode_loc_hint,
     decode_need,
     encode_frame,
+    encode_loc_hint,
     encode_need,
+    to_e5,
 )
 from .location import add_no_fix_note, scrub_legacy_draft, ticket_location
 from .priority import vuln_names
@@ -77,6 +84,15 @@ class SyncRequest(BaseModel):
     ack_cursor: int = Field(default=0, ge=0)
 
 
+class MeshHintJson(BaseModel):
+    """Dev-inject only: a nearby phone with a fix that heard this (no-fix) NEED directly from its requester."""
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    accuracy_m: float = Field(default=20, gt=0, le=100)
+    rssi_dbm: int | None = Field(default=None, ge=-127, le=0)
+
+
 class NeedJson(BaseModel):
     category: str
     urgency: int = Field(ge=0, le=3)
@@ -92,6 +108,7 @@ class NeedJson(BaseModel):
     loc_acc: int = Field(default=1, ge=0, le=5)  # extra, optional
     created_at: int | None = Field(default=None, ge=0, lt=1 << 32)  # extra, optional (unix s)
     answers: dict[str, str] = Field(default_factory=dict)  # extra, optional: {question key: answer key}, max 3
+    mesh_hints: list[MeshHintJson] = Field(default_factory=list, max_length=8)  # extra, optional: needs loc_acc 0
 
     @field_validator("category")
     @classmethod
@@ -207,12 +224,14 @@ def _packet_json(p: dict[str, Any]) -> dict[str, Any]:
         "hops": p["hops"],
         "loc_acc": p["loc_acc"],
         "received_at": p["received_at"],
+        "reported_at": p["reported_at"],
         "summary": p["summary"],
     }
 
 
 def decode_frames(b64_frames: list[str]) -> tuple[list[IncomingNeed], int]:
-    """Validate uploaded frames. Returns (decoded NEEDs, number rejected)."""
+    """Validate uploaded frames. Returns (decoded NEEDs, number rejected); LOC_HINT frames count as rejected here
+    (``/v1/sync`` takes them out first with ``split_hint_frames``)."""
     items: list[IncomingNeed] = []
     rejected = 0
     for b64 in b64_frames:
@@ -229,6 +248,32 @@ def decode_frames(b64_frames: list[str]) -> tuple[list[IncomingNeed], int]:
             continue
         items.append(IncomingNeed(raw, need, frame.ttl, b64))
     return items, rejected
+
+
+def split_hint_frames(b64_frames: list[str]) -> tuple[list[str], list[LocHint], int]:
+    """Take the LOC_HINT frames out of an upload: (the other frames, decoded hints, hints that did not decode or whose
+    relay is not the frame's sender). Frames that are not hints are left alone for ``decode_frames``."""
+    rest: list[str] = []
+    hints: list[LocHint] = []
+    rejected = 0
+    for b64 in b64_frames:
+        try:
+            frame = decode_frame(base64.b64decode(b64, validate=True))
+        except ValueError:
+            rest.append(b64)  # decode_frames counts it as rejected
+            continue
+        if frame.type != TYPE_LOC_HINT:
+            rest.append(b64)
+            continue
+        try:
+            hint = decode_loc_hint(frame.payload)
+            if hint.relay_node != frame.sender_id:
+                raise CodecError("relay_node is not the frame sender")
+        except CodecError:
+            rejected += 1
+            continue
+        hints.append(hint)
+    return rest, hints, rejected
 
 
 class SpaStaticFiles(StaticFiles):
@@ -379,7 +424,8 @@ def create_app(
     def sync(req: SyncRequest) -> dict[str, Any]:
         gateway = req.gateway_node.lower()
         store.touch_gateway(gateway, clock())
-        items, rejected = decode_frames(req.frames)
+        other, hints, hints_bad = split_hint_frames(req.frames)
+        items, rejected = decode_frames(other)
 
         if topic and publisher is not None:
             accepted, duplicates = publish_batch(req.gateway_node, gateway, items)
@@ -387,15 +433,27 @@ def create_app(
             res = pipeline.process_batch(gateway, items)
             accepted, duplicates = res.accepted, res.duplicates
 
+        # Location hints after the NEEDs, so a hint for a NEED in this very upload finds its ticket at once. Applied
+        # in-process in both triage modes: it is a few small writes, and a hint for a NEED that Pub/Sub has not
+        # triaged yet is kept and applied when that NEED is.
+        hint_res = pipeline.process_hints(gateway, hints) if hints else None
+
         cursor = store.clamp_ack_cursor(req.ack_cursor)  # beyond the newest ack = store was reset
         acks = store.acks_after(cursor, MAX_ACKS_PER_SYNC)
-        return {
+        out = {
             "accepted": accepted,
             "duplicates": duplicates,
             "rejected": rejected,
             "acks": [base64.b64encode(a["payload"]).decode("ascii") for a in acks],
             "ack_cursor": acks[-1]["id"] if acks else cursor,
         }
+        if hint_res is not None or hints_bad:  # only when the upload held hints: older gateways see no change
+            out["hints"] = {
+                "accepted": hint_res.accepted if hint_res else 0,
+                "duplicates": hint_res.duplicates if hint_res else 0,
+                "rejected": hints_bad + (hint_res.rejected if hint_res else 0),
+            }
+        return out
 
     def publish_batch(gateway_as_sent: str, gateway: str, items: list[IncomingNeed]) -> tuple[int, int]:
         """Pub/Sub mode: record packets idempotently, publish the ones not yet triaged.
@@ -599,6 +657,17 @@ def create_app(
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
 
+    @app.get("/v1/gateways", dependencies=operator)
+    def list_gateways() -> dict[str, Any]:
+        """Every gateway phone that has synced: when it was last seen and whether that counts as online."""
+        now = clock()
+        return {
+            "gateways": [
+                {**g, "online": g["last_seen"] >= now - GATEWAY_ONLINE_WINDOW_S} for g in store.list_gateways()
+            ],
+            "online_window_s": GATEWAY_ONLINE_WINDOW_S,
+        }
+
     @app.get("/v1/stats", dependencies=operator)
     def stats() -> dict[str, Any]:
         s = store.stats()
@@ -641,11 +710,26 @@ def create_app(
                 items.append(IncomingNeed(frame, decode_need(decode_frame(frame).payload), INITIAL_TTL))
                 msg_ids.append(msg_id.hex())
             res = pipeline.process_batch(DEV_GATEWAY, items)
+            hint_count = 0
+            for nj, msg_hex in zip(body.needs, msg_ids):
+                if nj.loc_acc != 0 or not nj.mesh_hints:
+                    continue
+                hints = []
+                for k, mh in enumerate(nj.mesh_hints):
+                    bucket = next(b for b, bound in HINT_ACC_MAX_M.items() if mh.accuracy_m <= bound)
+                    relay = hashlib.sha256(bytes.fromhex(msg_hex) + bytes([k])).digest()[:8]  # a stable fake phone each
+                    hint = LocHint(
+                        bytes.fromhex(msg_hex), relay, to_e5(mh.lat), to_e5(mh.lon), bucket,
+                        mh.rssi_dbm if mh.rssi_dbm is not None else RSSI_UNKNOWN, int(now),
+                    )
+                    hints.append(decode_loc_hint(encode_loc_hint(hint)))  # exactly what the wire would carry
+                hint_count += pipeline.process_hints(DEV_GATEWAY, hints).accepted
             return {
                 "accepted": res.accepted,
                 "duplicates": res.duplicates,
                 "msg_ids": msg_ids,
                 "ticket_nos": [res.packet_tickets[m] for m in msg_ids if m in res.packet_tickets],
+                **({"hints": hint_count} if hint_count else {}),
             }
 
     # ------------------------------------------------------------------ static dashboard

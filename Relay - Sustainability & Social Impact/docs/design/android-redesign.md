@@ -109,6 +109,18 @@ open; "Closed" when resolved; "Cancelled" when cancelled.
   help now."
 - Primary pill "Send" (send icon), outlined pill "Change something" (back to step 1 keeping what was understood),
   footnote "Goes phone to phone until it reaches a gateway. No network needed."
+- **No request leaves without the person knowing it has no location** (the control room cannot act on a request it
+  cannot place). The decision is the pure `NoLocationLogic` (permission, services enabled, fix, waiting, landmark empty).
+  - Where row without a fix: warning icon + amber text with the reason — "Location permission is off", "Location is
+    turned off on this phone", or "Still finding your location…". With a fix: "GPS · about N m accuracy".
+  - Send without a fix (after the existing 6 s wait) opens a dialog before anything is sent: "Rescuers can't see where
+    you are". Body with a landmark: "They will rely on '<landmark>'. Adding your location helps them find you faster."
+    Without: "Without your location or a nearby landmark, the control room may not be able to find you." Actions:
+    primary "Turn on location" (permission missing: request it; granted but services off: open Location settings, as
+    Play Services is not a dependency; then back to Check, retrying the fix); secondary "Add a landmark" (or "Change
+    landmark" when one exists) opens the Where editor; tertiary text "Send without location", always available, but with
+    no landmark it takes a second tap on "Send anyway — the control room may not find you".
+  - Title and body are spoken when "Read messages aloud" is on. Screenshot: `screens/no-location-dialog.png`.
 - Send stores and broadcasts the NEED exactly as today (same MeshRepository path), then opens Request detail.
   Step "3 of 3" is that sent state.
 

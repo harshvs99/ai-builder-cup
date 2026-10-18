@@ -88,7 +88,7 @@ padding); ignore `IS_RSR`. A rejected frame is dropped silently and never relaye
 (timestamp, sender, recipient, payload and signature unchanged). Frames with `ttl <= 1` on
 arrival are stored but not flooded onward.
 
-**Initial TTL:** 7 for `NEED` and `ACK`; 1 for `HELLO` and `INVENTORY` (never relayed).
+**Initial TTL:** 7 for `NEED`, `ACK` and `LOC_HINT`; 1 for `HELLO` and `INVENTORY` (never relayed).
 
 ---
 
@@ -103,8 +103,9 @@ and has used up to `0x2C`; we will ask its maintainers to reserve `0x70–0x7F`.
 | `0x71` | `ACK` | `target_node` | 7 | yes (every node relays directed frames) | `ack_id` |
 | `0x72` | `HELLO` | none | 1 | no | n/a |
 | `0x73` | `INVENTORY` | none | 1 | no | n/a |
+| `0x74` | `LOC_HINT` | none (broadcast) | 7 | yes | `hint_key` (§5.5) |
 
-Any other type: decoded, not processed, deduplicated by its opaque key (§5), and relayed if
+Any other type (including `LOC_HINT` on a build that predates it): decoded, not processed, deduplicated by its opaque key (§5), and relayed if
 `ttl > 1` (forward compatibility). Not stored.
 
 ---
@@ -229,6 +230,59 @@ size field
 At most 19 ids per chunk, so a chunk frame is at most 22 + 4 + 152 = 178 bytes. A node
 holding no packets sends one chunk with `chunk_count = 1, id_count = 0`.
 
+### 5.5 `LOC_HINT` (type `0x74`), 31 bytes
+
+A relay's statement "I heard this no-fix NEED directly from its requester, and this is where I am". The control
+room intersects the hints for one NEED into an approximate position for a requester whose phone had no GPS fix
+(§7, `geo` with `source: "mesh"`). A hint is evidence of proximity, not a fix: the requester is within radio range
+of the relay, which is why the backend treats the relay's position, widened by 100 m, as a disc the requester is in.
+
+```
+size field
+1    payload_version   = 0x01
+8    ref_msg_id        the NEED this hint is about (a NEED with loc_acc = 0)
+8    relay_node        node_id of the relay; must equal the frame sender_id
+4    lat_e5            i32, the relay's own position, degrees × 100000, rounded half away from zero
+4    lon_e5            i32
+1    acc               the relay's own accuracy bucket: 1 ≤10 m, 2 ≤25 m, 3 ≤50 m, 4 ≤100 m
+1    rssi_dbm          i8, signal strength of the relay's link to the requester, in dBm; -128 (0x80) = unknown
+4    observed_at       unix seconds, u32: when the relay received the NEED from the requester
+```
+
+Frame: broadcast (no recipient), initial TTL 7, `sender_id` = the relay. The accuracy buckets are the hint's own
+(they are not the NEED `loc_acc` buckets): a relay with worse than 100 m accuracy has no bucket and never emits.
+
+**Dedupe key:** the first 8 bytes of `SHA-256(0x74 ‖ ref_msg_id ‖ relay_node)`. It is derived, not random, so a relay
+can never put more than one hint for the same NEED into the mesh, whatever it forgets or re-sends.
+
+**Validation on decode:** `payload_version = 1`, exactly 31 bytes, `acc` in 1..4, `|lat_e5| ≤ 9 000 000`,
+`|lon_e5| ≤ 18 000 000`; anything else is dropped. A frame whose `relay_node` differs from its `sender_id` is dropped
+(like `HELLO`). Node-level plausibility (for example a position of exactly 0, 0) is the consumer's job.
+
+**When a relay emits a hint.** All of the following, and nothing else:
+
+1. the user has "Help locate neighbours" on (§5.5.1);
+2. it received the NEED, for the first time, with `loc_acc = 0`;
+3. **directly from its origin**: the link the NEED arrived on had a `HELLO` whose `node_id` equals the NEED's
+   `origin_node` (a NEED that merely names an origin, or reached the relay through other phones, never counts);
+4. it has a position fix of its own taken within the last 120 s whose accuracy is ≤ 100 m.
+
+The relay takes `rssi_dbm` and `observed_at` when the NEED arrives. If it has no good fix at that moment it may ask
+the platform for one and emit within 30 s of the NEED, otherwise it gives up for that NEED. Gossip then treats the hint
+like an `ACK` (§6): stored, listed in `INVENTORY`, flooded with TTL 7, expired after 72 h from first storage, and a
+gateway uploads it with the NEEDs (§7).
+
+**Upgrade consequence:** a build that predates `LOC_HINT` relays it once as an unknown type (§4) but does not
+store it, list it in `INVENTORY` or upload it, so a hint only reaches the control room over a path whose gateway
+understands it.
+
+#### 5.5.1 Privacy and the setting
+
+A hint publishes the relay user's position (to metre precision) to every phone that carries it and to the control
+room. It is therefore **opt-in per phone**: Settings has a switch "Help locate neighbours". Builds choose its
+default: **on in demo builds, off in village builds** (Gradle property `relay.helpLocateDefault`, default `true`). A phone with the switch off
+never emits a hint, though it still relays other phones' hints like any other frame.
+
 ---
 
 ## 6. Gossip engine (behaviour every node implements)
@@ -263,6 +317,10 @@ live links.
 ACK delivery: every node stores and relays ACKs; only the node whose `node_id == target_node`
 shows it to the user.
 
+`LOC_HINT` frames (§5.5) are stored, inventoried, flooded and expired exactly like ACKs, except that no node
+shows them to the user; the gateway uploads them (§7). A node that is not the NEED's requester never needs the
+hint's content for anything but forwarding it.
+
 ---
 
 ## 7. Gateway ↔ backend API
@@ -283,8 +341,13 @@ Response:
 { "accepted": 3, "duplicates": 1, "rejected": 0, "acks": ["<base64 ACK payload>", "..."], "ack_cursor": 17 }
 ```
 - `frames` are full outer frames as received over BLE (so the backend sees TTL and computes
-  `hops = 7 − ttl`). Non-NEED or undecodable frames count as `rejected`.
-- Uploads are idempotent on `msg_id`.
+  `hops = 7 − ttl`). A frame that is neither a NEED nor a `LOC_HINT`, or that does not decode, counts as `rejected`.
+- Uploads are idempotent on `msg_id` (NEED) and on the hint's dedupe key (`LOC_HINT`).
+- `LOC_HINT` frames (§5.5) are counted apart: when the upload holds at least one, the response also carries
+  `"hints": {"accepted": n, "duplicates": n, "rejected": n}` (absent otherwise, so older gateways see no change). A
+  hint is `rejected` when it does not decode, when its `relay_node` is not the frame's `sender_id`, when its position is
+  exactly 0, 0, or when its `observed_at` is more than 24 h in the future or older than 72 h. A hint for a NEED the
+  backend has not seen yet is kept (`accepted`) and used when that NEED arrives.
 - `acks` are **ACK payloads** (not frames) with id greater than `ack_cursor`, oldest first,
   at most 50. The gateway wraps each in a frame (`sender_id` = gateway, `recipient_id` =
   `target_node`, TTL 7) and originates it into the mesh.
@@ -318,6 +381,25 @@ real answer). For a merged ticket it holds the first report's answers, and a lat
 does not have yet.
 `status` is `OPEN` or `DISPATCHED`.
 
+**`geo`** (optional, only on a ticket with `has_location = false`) is an approximate position, never a fix, and never
+set on a ticket that has one: `{ "lat", "lon", "source", ... }`, where `source` is one of
+- `"gazetteer"` or `"gemini_maps"`: looked up from the free-text landmark; also carries `query` (the landmark);
+- `"mesh"`: estimated from `LOC_HINT` frames (§5.5); also carries `radius_m` (u32, metres, a multiple of 10) and
+  `hint_count` (the hints that agreed and were used). A mesh estimate replaces a landmark one; a landmark lookup never
+  replaces a mesh one.
+
+The mesh estimate treats each hint as a disc centred on the relay with radius `accuracy upper bound + 100 m` (the
+requester was within radio range of the relay, which is generously 100 m) and takes the **intersection of the discs**.
+The backend uses the largest group of hints whose discs share a point (ties: the more accurate group, at most 12
+hints, most accurate first), so one forged or wrong hint cannot shut out several that agree; a hint left out is not
+counted in `hint_count`. The point is the centre of the intersection, nudged by at most a factor of two towards relays
+with a stronger link (`rssi_dbm` is a weak weight, not a distance), and `radius_m` is the radius of the circle around
+that point that covers the whole intersection, rounded up to 10 m. With one hint it is the relay's position and
+`bucket bound + 100` m.
+
+`has_location`, `loc_acc` and `lat`/`lon` stay as described above: a ticket with only a mesh estimate still counts
+as "without location" in `GET /v1/stats` consumers and the dashboard.
+
 Location quality is derived from the ticket's linked NEED packets (§5.1 `loc_acc`):
 `loc_acc` is the best (lowest non-zero) bucket among them, `0` only if no packet had a fix;
 `loc_acc_m` is its label (`"<10 m"`, `"<50 m"`, `"<200 m"`, `"<1 km"`, `"≥1 km"`, or `null` for 0);
@@ -333,6 +415,7 @@ also carries its own `loc_acc`.
 `protocol/vectors.json` holds hex encodings produced by `protocol/gen_vectors.py` (the
 reference encoder). Both codecs must (a) encode each vector's fields to exactly the given hex
 and (b) decode the hex back to the same fields. The v1 vectors are byte-identical to the originals; the `need_v2_*`
-vectors cover the answer bytes. `must_reject_need_payloads` lists NEED payloads both decoders must refuse, and
-`answer_bank` is the question table both codecs must match. Regenerate with
+vectors cover the answer bytes, and the `loc_hint_*` vectors cover `LOC_HINT` (fields include its dedupe `key`).
+`must_reject_need_payloads` and `must_reject_loc_hint_payloads` list payloads both decoders must refuse,
+`loc_hint_acc_max_m` is the accuracy-bucket table, and `answer_bank` is the question table both codecs must match. Regenerate with
 `python3 protocol/gen_vectors.py > protocol/vectors.json`.

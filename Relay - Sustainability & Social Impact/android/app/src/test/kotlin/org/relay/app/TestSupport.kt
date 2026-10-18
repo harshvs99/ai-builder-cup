@@ -11,6 +11,7 @@ import org.relay.core.payload.Ack
 import org.relay.core.payload.AckStatus
 import org.relay.core.payload.Category
 import org.relay.core.payload.Lang
+import org.relay.core.payload.LocHint
 import org.relay.core.payload.Need
 import java.util.Random
 
@@ -25,6 +26,12 @@ object TestSupport {
 
     fun ack(ackSeed: Int, ref: ByteArray, target: ByteArray, ticket: Long = 7, status: AckStatus = AckStatus.RECEIVED, text: String = "received") =
         Ack(id(ackSeed), ref, target, ticket, status, 0xFFFF, text)
+
+    /** A LOC_HINT for the NEED [refSeed] from relay phone [relay]; originate it on a node whose id is [relay]. */
+    fun hint(refSeed: Int, relay: ByteArray, acc: Int = 3, rssi: Int = -70) = LocHint(
+        refMsgId = id(refSeed), relayNode = relay, latE5 = 2029612, lonE5 = 8582451, acc = acc,
+        rssiDbm = rssi, observedAt = System.currentTimeMillis() / 1000,
+    )
 
     class Recorder : GossipListener {
         val acksSeen = ArrayList<Ack>()

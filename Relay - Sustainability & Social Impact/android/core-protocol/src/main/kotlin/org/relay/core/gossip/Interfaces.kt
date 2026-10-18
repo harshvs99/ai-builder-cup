@@ -2,6 +2,7 @@ package org.relay.core.gossip
 
 import org.relay.core.payload.Ack
 import org.relay.core.payload.Hello
+import org.relay.core.payload.LocHint
 import org.relay.core.payload.Need
 import org.relay.core.frame.Frame
 import java.util.concurrent.ScheduledExecutorService
@@ -24,6 +25,8 @@ interface GossipListener {
     fun onNeed(need: Need, frame: Frame, fromLink: String?) {}
     fun onAckForMe(ack: Ack, frame: Frame) {}
     fun onAckSeen(ack: Ack, frame: Frame) {}
+    /** A LOC_HINT (SPEC 5.5) was stored for the first time; [fromLink] is null for a hint this node originated. */
+    fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) {}
     fun onPeerHello(linkId: String, hello: Hello) {}
     fun onLog(msg: String) {}
 }
@@ -56,12 +59,12 @@ object DuplicateLinkPolicy {
         org.relay.core.ids.NodeId.compare(myId, peerId) < 0
 }
 
-/** One stored NEED/ACK frame. [raw] is the encoded frame as received (or originated). */
+/** One stored NEED/ACK/LOC_HINT frame. [raw] is the encoded frame as received (or originated). */
 class StoredPacket(
     val key: String,
     val type: Int,
     val raw: ByteArray,
-    /** NEED: created_at in ms. ACK: first-stored time in ms. Expiry is `basis + 72 h`. */
+    /** NEED: created_at in ms. ACK and LOC_HINT: first-stored time in ms. Expiry is `basis + 72 h`. */
     val expiryBasisMs: Long,
 )
 
@@ -98,9 +101,10 @@ class InMemoryPacketStore : PacketStore {
 data class GossipStats(
     val framesReceived: Long = 0,
     val framesRejected: Long = 0,
-    /** NEED/ACK/opaque frames dropped because their key was already known. */
+    /** NEED/ACK/LOC_HINT/opaque frames dropped because their key was already known. */
     val duplicates: Long = 0,
     val framesSent: Long = 0,
     val needsDelivered: Long = 0,
     val acksDelivered: Long = 0,
+    val locHintsDelivered: Long = 0,
 )

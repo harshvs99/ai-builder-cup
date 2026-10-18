@@ -39,7 +39,7 @@ function addTicket(f) {
   };
   t.packets = t.msg_ids.map((id, i) => ({
     msg_id: id, origin_node: hex(16), gateway_node: gw[i % gw.length],
-    hops: Math.max(1, t.max_hops - i), loc_acc: t.loc_acc, received_at: reported + i * 20, summary: t.summary,
+    hops: Math.max(1, t.max_hops - i), loc_acc: t.loc_acc, reported_at: reported, received_at: reported + 360 + i * 20, summary: t.summary,
   }));
   tickets.set(no, t);
   return t;
@@ -57,6 +57,9 @@ const FIXTURES = [
   { category: 'MISSING_PERSON', item: null, landmark: 'San Jose', summary: 'looking for 8-year-old boy, last seen near church', lat: 11.2354, lon: 125.0126, urgency: 2, people: 1, vuln_flags: ['CHILD'], lang: 'ceb', report_count: 1, max_hops: 2, first_reported_at: min(5) },
   // Phone with Location switched off: loc_acc 0, no coordinates (must stay off the map, in the queue)
   { category: 'MEDICAL', item: 'insulin', landmark: 'school', summary: 'mother needs insulin (location off)', lat: null, lon: null, loc_acc: 0, urgency: 3, people: 1, vuln_flags: ['ELDERLY'], lang: 'en', report_count: 1, max_hops: 1, first_reported_at: min(3) },
+  // No fix, but two nearby relay phones sent location hints: the backend adds an approximate mesh estimate
+  // (has_location stays false; the dashboard draws a dashed circle, never a GPS dot).
+  { category: 'WATER', item: 'drinking water', landmark: null, summary: 'no clean water, family of 6 (location off, mesh estimate)', lat: null, lon: null, loc_acc: 0, geo: { lat: 20.2763, lon: 85.8309, source: 'mesh', radius_m: 130, hint_count: 2 }, urgency: 2, people: 6, vuln_flags: ['CHILD'], lang: 'or', report_count: 1, max_hops: 2, first_reported_at: min(6) },
 ];
 FIXTURES.forEach(addTicket);
 
@@ -87,6 +90,36 @@ setInterval(() => {
   console.log(`[mock] new ticket #${t.ticket_no} ${t.category}`);
 }, 10_000);
 
+const TEAMS = [
+  { id: 'boat-puri', name: 'Puri Rescue Boat 1', kind: 'boat', capacity: 3, base_lat: 19.8135, base_lon: 85.8312, status: 'free' },
+  { id: 'med-pipili', name: 'Pipili Medical Team', kind: 'medical', capacity: 4, base_lat: 20.113, base_lon: 85.833, status: 'free' },
+  { id: 'sup-nimapara', name: 'Nimapara Supply Team', kind: 'supply', capacity: 5, base_lat: 20.033, base_lon: 86.0, status: 'free' },
+  { id: 'sup-gop', name: 'Gop Supply Team', kind: 'supply', capacity: 5, base_lat: 20.085, base_lon: 86.095, status: 'off' },
+];
+const KIND_FOR = { RESCUE: 'boat', MEDICAL: 'medical' };
+const teamViews = () => TEAMS.map((t) => {
+  const load = [...tickets.values()].filter((x) => x.dispatch?.team_id === t.id && x.status !== 'RESOLVED').length;
+  return { ...t, load, status: t.status === 'off' ? 'off' : load >= t.capacity ? 'busy' : 'free' };
+});
+const gatewaySeen = new Map(GATEWAYS.map((g, i) => [g, i === GATEWAYS.length - 1 ? now() - 3 * 3600 : now()]));
+setInterval(() => { for (const g of GATEWAYS.slice(0, -1)) gatewaySeen.set(g, now() - Math.floor(Math.random() * 20)); }, 5000);
+let sitrep = null;
+function propose() {
+  const out = [];
+  for (const t of tickets.values()) {
+    if (t.status !== 'OPEN') continue;
+    const team = teamViews().find((x) => x.status === 'free' && x.kind === (KIND_FOR[t.category] ?? 'supply'));
+    if (!team) continue;
+    t.proposal = {
+      team_id: team.id, team_name: team.name, eta_min: 20 + (t.ticket_no % 5) * 10,
+      order_en: `${team.name}: take ${t.item ?? 'assistance'} to ${t.landmark ?? 'the reported location'} for ${t.people} people.`,
+      order_local: `[${t.lang}] ${t.summary}`, local_lang: t.lang, reason: `nearest free ${team.kind} team`, proposed_at: now(),
+    };
+    out.push({ ticket_no: t.ticket_no, ...t.proposal });
+  }
+  return out;
+}
+
 const summarize = ({ packets: _p, ...rest }) => rest;
 const sorted = () => [...tickets.values()].sort((a, b) => b.priority_score - a.priority_score);
 
@@ -107,20 +140,50 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true });
   if (req.method === 'GET' && path === '/v1/tickets') return send(res, 200, { tickets: sorted().map(summarize) });
+  if (req.method === 'GET' && path === '/v1/teams') return send(res, 200, teamViews());
+  if (req.method === 'GET' && path === '/v1/gateways') {
+    return send(res, 200, { gateways: [...gatewaySeen].map(([node, last_seen]) => ({ node, last_seen, online: last_seen >= now() - 60 }))
+      .sort((a, b) => b.last_seen - a.last_seen), online_window_s: 60 });
+  }
+  if (req.method === 'POST' && path === '/v1/dispatch/propose') return send(res, 200, { proposals: propose() });
+  if (req.method === 'GET' && path === '/v1/sitreps/latest') return sitrep ? send(res, 200, sitrep) : send(res, 404, { detail: 'no sitrep yet' });
+  if (req.method === 'POST' && path === '/v1/sitreps/run') {
+    const open = [...tickets.values()].filter((t) => t.status === 'OPEN');
+    const p1 = open.filter((t) => t.priority_tier === 'P1');
+    const counts = { open: open.length, open_by_category: {}, p1_open: p1.length,
+      dispatched: [...tickets.values()].filter((t) => t.status === 'DISPATCHED' || t.status === 'ON_THE_WAY').length,
+      resolved: [...tickets.values()].filter((t) => t.status === 'RESOLVED').length, gateways_online: GATEWAYS.length - 1,
+      oldest_open_ticket_no: open[0]?.ticket_no ?? null, oldest_open_age_s: 600 };
+    sitrep = { period_start: now() - 3600, period_end: now(), generated_at: now(), counts, local_lang: 'or', ticket_nos: p1.map((t) => t.ticket_no),
+      text_en: `Situation report: ${counts.open} open requests, ${counts.p1_open} of them top priority. ${counts.dispatched} dispatched, ${counts.resolved} resolved.\n\n${counts.gateways_online} gateways online.`,
+      text_local: `ପରିସ୍ଥିତି ରିପୋର୍ଟ: ${counts.open}ଟି ଖୋଲା ଅନୁରୋଧ।` };
+    return send(res, 200, sitrep);
+  }
   if (req.method === 'GET' && path === '/v1/stats') {
     const open_by_category = {};
     for (const t of tickets.values()) if (t.status === 'OPEN') open_by_category[t.category] = (open_by_category[t.category] ?? 0) + 1;
     return send(res, 200, { open_by_category, gateways_online: GATEWAYS.length - 1, tickets: tickets.size });
   }
-  const m = path.match(/^\/v1\/tickets\/(\d+)(\/approve)?$/);
+  const m = path.match(/^\/v1\/tickets\/(\d+)(\/approve|\/on-the-way|\/resolve)?$/);
   if (m) {
     const t = tickets.get(Number(m[1]));
     if (!t) return send(res, 404, { detail: 'ticket not found' });
     if (req.method === 'GET' && !m[2]) return send(res, 200, t);
-    if (req.method === 'POST' && m[2]) {
-      t.status = 'DISPATCHED';
-      return send(res, 200, t);
+    if (req.method === 'POST' && m[2] === '/approve') {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        const teamId = (body && JSON.parse(body).team_id) || t.proposal?.team_id;
+        const team = TEAMS.find((x) => x.id === teamId);
+        t.status = 'DISPATCHED';
+        if (team) t.dispatch = { team_id: team.id, team_name: team.name, eta_min: t.proposal?.eta_min ?? 35, approved_at: now() };
+        delete t.proposal;
+        send(res, 200, t);
+      });
+      return;
     }
+    if (req.method === 'POST' && m[2] === '/on-the-way') { t.status = 'ON_THE_WAY'; return send(res, 200, t); }
+    if (req.method === 'POST' && m[2] === '/resolve') { t.status = 'RESOLVED'; return send(res, 200, t); }
   }
   send(res, 404, { detail: 'not found' });
 });

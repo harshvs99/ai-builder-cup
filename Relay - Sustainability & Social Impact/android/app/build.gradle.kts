@@ -33,6 +33,11 @@ android {
         val deviceKey = relayProp("relay.deviceKey")?.trim().orEmpty().ifEmpty { "dev-relay-key" }
         buildConfigField("String", "DEFAULT_KEY", "\"${deviceKey.replace("\"", "")}\"")
         buildConfigField("boolean", "LOCK_CONNECTION", "false")
+
+        // First-run value of the "Help locate neighbours" setting (mesh-assisted location, SPEC 5.5). true for demo
+        // builds; village builds pass -Prelay.helpLocateDefault=false so position sharing is strictly opt-in.
+        val helpLocate = providers.gradleProperty("relay.helpLocateDefault").orElse("true").get().trim().lowercase() != "false"
+        buildConfigField("boolean", "HELP_LOCATE_DEFAULT", helpLocate.toString())
     }
 
     // Release uses a real keystore when relay.signing.storeFile is set; otherwise the debug key, so a

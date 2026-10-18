@@ -88,6 +88,8 @@ class BleTransport(
     private val central = HashMap<String, CentralConn>()
     private val peripheral = HashMap<String, PeriphConn>()
     private var connectingMac: String? = null
+    /** MAC -> discovery retries already made (reset when the link comes up or we give up); see [LinkHealth.discoveryRetryDelayMs]. */
+    private val discoveryRetries = HashMap<String, Int>()
     private var server: BluetoothGattServer? = null
     private var serverChar: BluetoothGattCharacteristic? = null
     private var serviceReady = false
@@ -160,6 +162,7 @@ class BleTransport(
         registry.clear()
         ignored.clear()
         seenAt.clear()
+        discoveryRetries.clear()
         backoff.clear() // a restarted transport starts clean: stale per-MAC delays would block the re-link
         scanNotBefore = 0
         connectingMac = null
@@ -247,14 +250,22 @@ class BleTransport(
             c.queue.tick()
             val abort = LinkHealth.setupAbortReason(c.state, t - c.stateSince, t - c.createdAt, c.queue.consecutiveTimeouts)
             if (abort != null) { teardownCentral(c, abort, backoffFailure = true); continue }
-            if (c.queue.consecutiveTimeouts >= 3) teardownCentral(c, "3 consecutive GATT timeouts", backoffFailure = true)
+            if (c.queue.consecutiveTimeouts >= 3) { teardownCentral(c, "3 consecutive GATT timeouts", backoffFailure = true); continue }
+            if (c.state == SetupPhase.UP) {
+                val dead = LinkHealth.livenessAbortReason(c.lastRxAt, t)
+                if (dead != null) teardownCentral(c, dead, backoffFailure = true, refreshCache = true)
+            }
         }
         for (p in peripheral.values.toList()) {
             if (!p.up && t - p.connectedAt > BleConstants.PERIPHERAL_SUBSCRIBE_TIMEOUT_MS) {
                 teardownPeripheral(p, "central never subscribed"); continue
             }
             p.queue.tick()
-            if (p.queue.consecutiveTimeouts >= 3) teardownPeripheral(p, "3 consecutive notify timeouts")
+            if (p.queue.consecutiveTimeouts >= 3) { teardownPeripheral(p, "3 consecutive notify timeouts"); continue }
+            if (p.up) {
+                val dead = LinkHealth.livenessAbortReason(p.lastRxAt, t)
+                if (dead != null) teardownPeripheral(p, dead)
+            }
         }
         if (t - lastHousekeeping >= HOUSEKEEPING_MS) {
             lastHousekeeping = t
@@ -272,11 +283,13 @@ class BleTransport(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val dev = result.device ?: return
+            noteRssi(result)
             val hint = nodeHint(result)
             handler.post { maybeConnect(dev, hint) }
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            results.forEach { noteRssi(it) }
             val items = results.mapNotNull { r -> r.device?.let { it to nodeHint(r) } }
             handler.post { for ((d, h) in items) maybeConnect(d, h) }
         }
@@ -290,6 +303,15 @@ class BleTransport(
             }
         }
     }
+
+    /** Remember the signal strength of this advertiser for the link we may open to it (see [rssiFor]). */
+    private fun noteRssi(result: ScanResult) {
+        val mac = result.device?.address ?: return
+        registry.noteScanRssi(mac, result.rssi)
+    }
+
+    /** Last scan RSSI (dBm) of the link [linkId], or null when unknown (always null for peripheral links). Any thread. */
+    fun rssiFor(linkId: String): Int? = registry.rssiFor(linkId)
 
     private fun scheduleScanRetry(delayMs: Long) { scanNotBefore = now() + delayMs }
 
@@ -400,6 +422,8 @@ class BleTransport(
         var stateSince = createdAt
         var mtu = BleConstants.DEFAULT_MTU
         var characteristic: BluetoothGattCharacteristic? = null
+        /** Last time any frame arrived on this link (liveness watchdog); set again when the link comes up. */
+        var lastRxAt = createdAt
         val queue = GattOpQueue(now = ::now, log = { m -> log("[$linkId] $m") })
         /** Notifications that raced ahead of the CCCD write callback; replayed right after linkUp. */
         val earlyFrames = ArrayList<ByteArray>()
@@ -434,6 +458,12 @@ class BleTransport(
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             handler.post { onCentralServices(gatt, status) }
+        }
+
+        // API 31+: the peer's GATT database changed (e.g. its app process restarted and re-added the service).
+        // On older releases the framework never calls this, so the liveness watchdog is the only net there.
+        override fun onServiceChanged(gatt: BluetoothGatt) {
+            handler.post { onCentralServiceChanged(gatt) }
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
@@ -505,7 +535,17 @@ class BleTransport(
             gatt.getService(BleConstants.SERVICE_UUID)?.getCharacteristic(BleConstants.CHAR_UUID)
         } else null
         if (ch == null) {
-            teardownCentral(c, "relay service missing (status=$status)", backoffFailure = true)
+            val retries = discoveryRetries[c.mac] ?: 0
+            val retryIn = LinkHealth.discoveryRetryDelayMs(retries)
+            if (retryIn != null) {
+                discoveryRetries[c.mac] = retries + 1
+                log("BLE: ${c.linkId} relay service missing (status=$status); refreshing GATT cache, retrying once in ${retryIn}ms")
+                teardownCentral(c, "relay service missing (status=$status)", backoffFailure = false, refreshCache = true, reconnectAfterMs = retryIn, skipBackoff = true)
+            } else {
+                discoveryRetries.remove(c.mac)
+                log("BLE: ${c.linkId} relay service still missing after retry; giving up")
+                teardownCentral(c, "relay service missing (status=$status)", backoffFailure = true, refreshCache = true)
+            }
             return
         }
         c.characteristic = ch
@@ -522,6 +562,8 @@ class BleTransport(
             return
         }
         c.state = SetupPhase.UP
+        c.lastRxAt = now()
+        discoveryRetries.remove(c.mac)
         if (connectingMac == c.mac) connectingMac = null
         backoff.onSuccess(c.mac)
         registry.add(c.linkId, c.mac, LinkRole.CENTRAL)
@@ -539,6 +581,7 @@ class BleTransport(
 
     private fun onCentralFrame(gatt: BluetoothGatt, value: ByteArray) {
         val c = connFor(gatt) ?: return
+        c.lastRxAt = now()
         when (c.state) {
             SetupPhase.UP -> events.onFrame(c.linkId, value)
             SetupPhase.SUBSCRIBING -> if (c.earlyFrames.size < 64) c.earlyFrames.add(value)
@@ -546,11 +589,51 @@ class BleTransport(
         }
     }
 
+    /** The peer's GATT database changed under an open connection: our cached handles are stale, so drop the link and re-connect. */
+    private fun onCentralServiceChanged(gatt: BluetoothGatt) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val c = connFor(gatt)
+        if (c == null) { log("BLE: service changed on untracked ${gatt.device.address}; ignoring"); return }
+        log("BLE: service changed on ${c.linkId} (peer restarted?); closing, refreshing GATT cache, reconnecting in ${LinkHealth.SERVICE_CHANGED_RECONNECT_MS}ms")
+        teardownCentral(c, "service changed", backoffFailure = false, refreshCache = true, reconnectAfterMs = LinkHealth.SERVICE_CHANGED_RECONNECT_MS, skipBackoff = true)
+    }
+
+    /** One scheduled re-connect to [device] (service changed / discovery retry); skipped if anything else got there first. */
+    private fun reconnectCentral(device: BluetoothDevice) {
+        val mac = device.address ?: return
+        if (!running) return
+        val why = when {
+            central.containsKey(mac) -> "already connecting"
+            connectingMac != null -> "another connect in progress"
+            central.size >= BleConstants.MAX_CENTRAL_LINKS || registry.total() + pendingCount() >= BleConstants.MAX_TOTAL_LINKS -> "link cap"
+            registry.hasLinkToMac(mac) || peripheral.containsKey(mac) -> "already linked"
+            else -> null
+        }
+        if (why != null) { log("BLE: scheduled reconnect to $mac skipped ($why); scan will find it"); return }
+        log("BLE: scheduled reconnect to $mac")
+        connectTo(device)
+    }
+
+    private fun refreshGattCache(gatt: BluetoothGatt) {
+        // BluetoothGatt.refresh() is hidden API: it drops the stack's cached service table so the next discovery is fresh.
+        try {
+            val ok = gatt.javaClass.getMethod("refresh").invoke(gatt) as? Boolean
+            log("BLE: gatt cache refresh on ${gatt.device.address} -> $ok")
+        } catch (e: Throwable) {
+            log("BLE: gatt cache refresh unavailable: $e")
+        }
+    }
+
     /**
      * Remove a central connection and release its BluetoothGatt. [backoffFailure] applies the 2 s..60 s
      * reconnect backoff for that MAC (always used for connect/setup failures such as status 133).
+     * [skipBackoff] suppresses even the backoff an established link normally earns; [refreshCache] drops the
+     * GATT cache first; [reconnectAfterMs] schedules one fresh connect to the same device.
      */
-    private fun teardownCentral(c: CentralConn, reason: String, backoffFailure: Boolean, immediateClose: Boolean = false) {
+    private fun teardownCentral(
+        c: CentralConn, reason: String, backoffFailure: Boolean, immediateClose: Boolean = false,
+        refreshCache: Boolean = false, reconnectAfterMs: Long? = null, skipBackoff: Boolean = false,
+    ) {
         if (central[c.mac] !== c) return
         central.remove(c.mac)
         val wasUp = c.state == SetupPhase.UP
@@ -562,9 +645,14 @@ class BleTransport(
             events.onLinkDown(c.linkId)
             if (running && node != null && recentPeers.all().any { it.nodeIdHex == node }) preferUntil = now() + RecentPeers.PREFER_WINDOW_MS
         }
-        val delay = if (backoffFailure || wasUp) backoff.onFailure(c.mac, now()) else 0L
+        val delay = if (!skipBackoff && (backoffFailure || wasUp)) backoff.onFailure(c.mac, now()) else 0L
         log("BLE: closing ${c.linkId} ($reason)" + if (delay > 0) "; retry in ${delay}ms" else "")
+        if (refreshCache) refreshGattCache(c.gatt)
         disconnectAndClose(c.gatt, immediateClose)
+        if (reconnectAfterMs != null && running) {
+            val device = c.gatt.device
+            handler.postDelayed({ reconnectCentral(device) }, reconnectAfterMs)
+        }
         updateDiag()
     }
 
@@ -676,6 +764,8 @@ class BleTransport(
         var mtu = BleConstants.DEFAULT_MTU
         var up = false
         val connectedAt = now()
+        /** Last time any frame arrived on this link (liveness watchdog); set again when the link comes up. */
+        var lastRxAt = connectedAt
         val queue = GattOpQueue(now = ::now, log = { m -> log("[$linkId] $m") })
         val earlyFrames = ArrayList<ByteArray>()
     }
@@ -781,6 +871,7 @@ class BleTransport(
                 } else {
                     val p = peripheral[device.address]
                     if (p != null) {
+                        p.lastRxAt = now()
                         if (p.up) events.onFrame(p.linkId, copy)
                         else if (p.earlyFrames.size < 64) p.earlyFrames.add(copy)
                     }
@@ -843,7 +934,7 @@ class BleTransport(
         } else if (value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
             if (!p.up) {
                 if (p.mtu < BleConstants.MIN_MTU) closeForMtu = true
-                else { p.up = true; becameUp = true }
+                else { p.up = true; becameUp = true; p.lastRxAt = now() }
             }
         } else if (value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)) {
             wentDown = p.up

@@ -85,6 +85,7 @@ fun RelayScreen() {
             InfoCard {
                 KeyValue("Stored NEEDs", status.storedNeeds.toString())
                 KeyValue("Stored ACKs", status.storedAcks.toString())
+                KeyValue("Stored location hints", status.storedHints.toString())
                 val s = status.stats
                 KeyValue("Frames received", s.framesReceived.toString())
                 KeyValue("Frames rejected", s.framesRejected.toString())

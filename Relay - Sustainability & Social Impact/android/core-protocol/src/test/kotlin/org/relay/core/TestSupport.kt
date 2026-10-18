@@ -14,6 +14,7 @@ import org.relay.core.payload.Ack
 import org.relay.core.payload.AckStatus
 import org.relay.core.payload.Category
 import org.relay.core.payload.Lang
+import org.relay.core.payload.LocHint
 import org.relay.core.payload.Need
 import java.util.PriorityQueue
 import java.util.Random
@@ -61,6 +62,7 @@ class TestNet(seed: Long = 1) {
         val needsDelivered = ArrayList<Need>()
         val acksForMe = ArrayList<Ack>()
         val acksSeen = ArrayList<Ack>()
+        val locHints = ArrayList<LocHint>()
         val sentFrames = ArrayList<Pair<String, ByteArray>>()
         var onNeedHook: (Need) -> Unit = {}
         val node = GossipNode(id, this, clock, scheduler, random = Random(rnd.nextLong()), listener = this)
@@ -81,6 +83,7 @@ class TestNet(seed: Long = 1) {
         }
         override fun onAckForMe(ack: Ack, frame: Frame) { acksForMe += ack }
         override fun onAckSeen(ack: Ack, frame: Frame) { acksSeen += ack }
+        override fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) { locHints += hint }
     }
 
     fun node(name: String): N = nodes.getOrPut(name) { N(name) }
@@ -131,6 +134,7 @@ class SoloHarness(val nowMs: Long = T0) {
     val needs = ArrayList<Pair<Need, Frame>>()
     val acksForMe = ArrayList<Ack>()
     val acksSeen = ArrayList<Ack>()
+    val hints = ArrayList<LocHint>()
     val logs = ArrayList<String>()
     val node = GossipNode(
         id,
@@ -142,6 +146,7 @@ class SoloHarness(val nowMs: Long = T0) {
             override fun onNeed(need: Need, frame: Frame, fromLink: String?) { needs += need to frame }
             override fun onAckForMe(ack: Ack, frame: Frame) { acksForMe += ack }
             override fun onAckSeen(ack: Ack, frame: Frame) { acksSeen += ack }
+            override fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) { hints += hint }
             override fun onLog(msg: String) { logs += msg }
         },
     )

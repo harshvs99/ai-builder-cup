@@ -28,6 +28,8 @@ import org.relay.core.payload.HelloCodec
 import org.relay.core.payload.Inventory
 import org.relay.core.payload.InventoryCodec
 import org.relay.core.payload.Lang
+import org.relay.core.payload.LocHint
+import org.relay.core.payload.LocHintCodec
 import org.relay.core.payload.Need
 import org.relay.core.payload.NeedAnswer
 import org.relay.core.payload.NeedCodec
@@ -66,7 +68,7 @@ class VectorsTest {
         answers = fl["answers"]?.jsonArray?.map { NeedAnswer(it.jsonObject.i("id"), it.jsonObject.i("value")) } ?: emptyList(),
     )
 
-    @Test fun vectorsFilePresent() { assertEquals(9, vectors.size) }
+    @Test fun vectorsFilePresent() { assertEquals(11, vectors.size) }
 
     @Test fun everyVectorEncodesAndDecodes() {
         for (v in vectors) {
@@ -105,6 +107,18 @@ class VectorsTest {
                     val enc = InventoryCodec.encode(inv)
                     assertEquals("$name payload", payloadHex, Hex.encode(enc))
                     assertEquals("$name decode", inv, InventoryCodec.decode(h(payloadHex)))
+                    enc
+                }
+                "LOC_HINT" -> {
+                    val hint = LocHint(h(fl.s("ref_msg_id")), h(fl.s("relay_node")), Geo.toE5(fl.d("lat")), Geo.toE5(fl.d("lon")),
+                        fl.i("acc"), fl.i("rssi_dbm"), fl.l("observed_at"))
+                    assertEquals("$name lat_e5", fl.i("lat_e5"), hint.latE5)
+                    assertEquals("$name lon_e5", fl.i("lon_e5"), hint.lonE5)
+                    val enc = LocHintCodec.encode(hint)
+                    assertEquals("$name payload", payloadHex, Hex.encode(enc))
+                    assertEquals("$name decode", hint, LocHintCodec.decode(h(payloadHex)))
+                    assertEquals("$name key", fl.s("key"), hint.keyHex)
+                    assertEquals("$name acc bound", fl.i("acc_max_m"), hint.accuracyMaxM)
                     enc
                 }
                 "OPAQUE" -> h(payloadHex)
@@ -160,6 +174,19 @@ class VectorsTest {
         val bad = root["must_reject_need_payloads"]!!.jsonObject
         assertTrue(bad.size >= 9)
         for ((name, hexv) in bad) assertNull("must reject $name", NeedCodec.decode(h(hexv.jsonPrimitive.content)))
+    }
+
+    @Test fun mustRejectLocHintPayloadsAreRejected() {
+        val bad = root["must_reject_loc_hint_payloads"]!!.jsonObject
+        assertTrue(bad.size >= 7)
+        for ((name, hexv) in bad) assertNull("must reject $name", LocHintCodec.decode(h(hexv.jsonPrimitive.content)))
+    }
+
+    @Test fun locHintSizeAndAccuracyTableMatchReferenceEncoder() {
+        assertEquals(LocHintCodec.SIZE, root["sizes"]!!.jsonObject.i("loc_hint_payload"))
+        val table = root["loc_hint_acc_max_m"]!!.jsonObject
+        assertEquals(4, table.size)
+        for ((k, v) in table) assertEquals(v.jsonPrimitive.int, LocHintCodec.ACC_MAX_M[k.toInt()])
     }
 
     @Test fun broadcastRecipientAllFfIsBroadcast() {

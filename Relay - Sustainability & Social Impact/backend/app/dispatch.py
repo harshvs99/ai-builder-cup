@@ -144,6 +144,10 @@ def _where(t: dict[str, Any]) -> str:
         return f"{where} near {landmark}" if landmark else where
     geo = t.get("geo")
     if geo and geo.get("lat") is not None:
+        if geo.get("source") == "mesh":
+            near = f", near {landmark}" if landmark else ""
+            return (f"approx. {geo['lat']:.4f}, {geo['lon']:.4f} (within about {geo.get('radius_m', '?')} m, "
+                    f"estimated from {geo.get('hint_count', '?')} nearby phone(s){near})")
         return f"approx. {geo['lat']:.4f}, {geo['lon']:.4f} (estimated from landmark{': ' + landmark if landmark else ''})"
     return landmark or "location unknown"
 

@@ -20,6 +20,8 @@ import org.relay.core.ids.NodeId
 import org.relay.core.payload.Ack
 import org.relay.core.payload.AckCodec
 import org.relay.core.payload.AckStatus
+import org.relay.core.payload.LocHint
+import org.relay.core.payload.LocHintCodec
 import org.relay.core.payload.Need
 import org.relay.core.payload.NeedCodec
 import java.net.InetSocketAddress
@@ -36,11 +38,14 @@ class FakeBackend(port: Int = 0, private val relayKey: String = "dev-relay-key")
     private val ackPayloads = ArrayList<ByteArray>() // ack id = index + 1
     private val ticketNeeds = LinkedHashMap<Long, Need>()
     private val ticketByMsg = HashMap<String, Long>()
+    private val hintsByKey = LinkedHashMap<String, LocHint>()
     private var nextTicket = 1L
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
 
     /** Needs received, in ticket order. */
     val needs: List<Need> get() = synchronized(lock) { ticketNeeds.values.toList() }
+    /** LOC_HINTs received (first one per relay and NEED wins), in arrival order. The fake does not estimate anything. */
+    val hints: List<LocHint> get() = synchronized(lock) { hintsByKey.values.toList() }
     @Volatile var syncCalls = 0
         private set
     @Volatile var failSync = false
@@ -70,12 +75,20 @@ class FakeBackend(port: Int = 0, private val relayKey: String = "dev-relay-key")
         val frames = body["frames"]?.jsonArray ?: JsonArray(emptyList())
         val cursor = body["ack_cursor"]?.jsonPrimitive?.int ?: 0
         var accepted = 0; var duplicates = 0; var rejected = 0
+        var sawHints = false; var hintsAccepted = 0; var hintsDuplicates = 0; var hintsRejected = 0
         val out = ArrayList<ByteArray>()
         var newCursor = cursor
         synchronized(lock) {
             for (f in frames) {
                 val raw = try { Base64.getDecoder().decode(f.jsonPrimitive.content) } catch (e: IllegalArgumentException) { rejected++; continue }
                 val frame = FrameCodec.decode(raw)
+                if (frame != null && frame.type == FrameTypes.LOC_HINT) {
+                    sawHints = true
+                    val hint = LocHintCodec.decode(frame.payload)
+                    if (hint == null || !hint.relayNode.contentEquals(frame.senderId)) { hintsRejected++; continue }
+                    if (hintsByKey.putIfAbsent(hint.keyHex, hint) == null) hintsAccepted++ else hintsDuplicates++
+                    continue
+                }
                 val need = if (frame != null && frame.type == FrameTypes.NEED) NeedCodec.decode(frame.payload) else null
                 if (need == null) { rejected++; continue }
                 val key = Hex.encode(need.msgId)
@@ -91,6 +104,9 @@ class FakeBackend(port: Int = 0, private val relayKey: String = "dev-relay-key")
             put("accepted", accepted); put("duplicates", duplicates); put("rejected", rejected)
             put("acks", buildJsonArray { out.forEach { add(JsonPrimitive(Base64.getEncoder().encodeToString(it))) } })
             put("ack_cursor", newCursor)
+            if (sawHints) put("hints", buildJsonObject {
+                put("accepted", hintsAccepted); put("duplicates", hintsDuplicates); put("rejected", hintsRejected)
+            })
         })
     }
 

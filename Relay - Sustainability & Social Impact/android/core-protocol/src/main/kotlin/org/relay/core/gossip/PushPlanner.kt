@@ -7,8 +7,8 @@ import org.relay.core.frame.FrameTypes
  * Orders and caps the frames pushed to a peer after an INVENTORY diff, so one link-up carries what matters
  * most inside a bounded burst and the rest follows later. Local policy only: nothing here is on the wire.
  *
- * Order: ACKs addressed to the peer itself, other ACKs (they close the loop for a villager), then NEEDs
- * newest first. Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
+ * Order: ACKs addressed to the peer itself, other ACKs (they close the loop for a villager), then NEEDs, then
+ * LOC_HINTs (they refine a location, they never gate a rescue). Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
  * holds at least one frame so progress is guaranteed.
  */
 object PushPlanner {

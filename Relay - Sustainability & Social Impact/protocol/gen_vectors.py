@@ -9,7 +9,7 @@ import json
 import math
 import struct
 
-NEED, ACK, HELLO, INVENTORY = 0x70, 0x71, 0x72, 0x73
+NEED, ACK, HELLO, INVENTORY, LOC_HINT = 0x70, 0x71, 0x72, 0x73, 0x74
 F_HAS_RECIPIENT, F_HAS_SIGNATURE = 0x01, 0x02
 
 
@@ -100,6 +100,22 @@ def hello_payload(h):
 def inventory_payload(chunk_index, chunk_count, ids):
     assert len(ids) <= 19
     return struct.pack(">BBBB", 1, chunk_index, chunk_count, len(ids)) + b"".join(ids)
+
+
+HINT_ACC_MAX_M = {1: 10, 2: 25, 3: 50, 4: 100}  # LOC_HINT accuracy buckets (SPEC 5.5): upper bound in metres
+RSSI_UNKNOWN = -128
+
+
+def loc_hint_payload(h):
+    return struct.pack(
+        ">B8s8siiBbI", 1, h["ref_msg_id"], h["relay_node"], e5(h["lat"]), e5(h["lon"]), h["acc"],
+        h["rssi_dbm"], h["observed_at"],
+    )
+
+
+def loc_hint_key(ref_msg_id, relay_node):
+    """Dedupe key (SPEC 5.5): first 8 bytes of SHA-256(type || ref_msg_id || relay_node)."""
+    return hashlib.sha256(bytes([LOC_HINT]) + ref_msg_id + relay_node).digest()[:8]
 
 
 def opaque_key(type_, sender, ts_ms, payload):
@@ -238,6 +254,34 @@ need5 = dict(
 p5 = v2_vector("need_v2_max_size", need5, 7, TS + 40, B)
 assert len(p5) == 121
 
+# LOC_HINT (SPEC 5.5): a relay with a fix vouches that it heard a no-fix NEED directly from its origin.
+def hint_vector(name, h, ttl, ts):
+    pl = loc_hint_payload(h)
+    vectors.append({
+        "name": name, "kind": "LOC_HINT",
+        "fields": {**{k: (H(v) if isinstance(v, bytes) else v) for k, v in h.items()},
+                   "lat_e5": e5(h["lat"]), "lon_e5": e5(h["lon"]),
+                   "acc_max_m": HINT_ACC_MAX_M[h["acc"]],
+                   "key": H(loc_hint_key(h["ref_msg_id"], h["relay_node"]))},
+        "frame": {"type": LOC_HINT, "ttl": ttl, "timestamp_ms": ts, "sender_id": H(h["relay_node"]), "recipient_id": None},
+        "payload_hex": H(pl), "frame_hex": H(frame(LOC_HINT, ttl, ts, h["relay_node"], pl)),
+    })
+    return pl
+
+
+hint1 = dict(
+    ref_msg_id=bytes.fromhex("0011223344556677"), relay_node=D, lat=20.296013, lon=85.824329,
+    acc=2, rssi_dbm=-67, observed_at=1_790_000_005,
+)
+ph1 = hint_vector("loc_hint_basic", hint1, 7, TS + 50)
+
+# Southern/western hemisphere, worst accepted accuracy, RSSI unknown (-128), relayed (ttl 4).
+hint2 = dict(
+    ref_msg_id=bytes.fromhex("ffeeddccbbaa9988"), relay_node=B, lat=-12.000005, lon=-77.123455,
+    acc=4, rssi_dbm=RSSI_UNKNOWN, observed_at=1_790_003_700,
+)
+hint_vector("loc_hint_unknown_rssi_southwest", hint2, 4, TS + 60)
+
 # Frames every decoder must reject.
 good = frame(NEED, 7, TS, A, p)
 bad = {
@@ -262,15 +306,29 @@ bad_need = {
     "version_3": bytes([3]) + p3[1:],
 }
 
+# LOC_HINT payloads (a frame's payload bytes) every decoder must reject.
+hb = ph1
+bad_hint = {
+    "version_2": bytes([2]) + hb[1:],
+    "too_short": hb[:-1],
+    "trailing_byte": hb + b"\x00",
+    "acc_zero": hb[:25] + bytes([0]) + hb[26:],
+    "acc_five": hb[:25] + bytes([5]) + hb[26:],
+    "lat_out_of_range": hb[:17] + struct.pack(">i", 9_000_001) + hb[21:],
+    "lon_out_of_range": hb[:21] + struct.pack(">i", -18_000_001) + hb[25:],
+}
+
 print(json.dumps({
     "spec": "protocol/SPEC.md v1",
     "vectors": vectors,
     "must_reject_frames": {k: H(v) for k, v in bad.items()},
     "sizes": {"need1_payload": len(p), "need2_payload": len(p2), "ack1_payload": len(pa),
-              "need_v2_max_payload": len(p5)},
+              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1)},
     "answer_bank": [
         {"id": qid, "key": key, "options": [{"value": v, "key": k} for k, v in opts.items()]}
         for qid, (key, opts) in BANK.items()
     ],
     "must_reject_need_payloads": {k: H(v) for k, v in bad_need.items()},
+    "must_reject_loc_hint_payloads": {k: H(v) for k, v in bad_hint.items()},
+    "loc_hint_acc_max_m": {str(k): v for k, v in HINT_ACC_MAX_M.items()},
 }, indent=2, ensure_ascii=False))

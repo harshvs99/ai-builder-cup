@@ -18,7 +18,9 @@ onWarning, warningText, micYellow). `ThemeMode`, `VoiceSpeed`, `GatewayMode` liv
 ## Settings
 Read `MeshRepository.settings.flow.collectAsStateWithLifecycle()`; write `MeshRepository.settings.update { it.copy(...) }`.
 Fields: themeMode, largerText, readAloud, voiceSpeed, languageConfirmed, areaLabel, gatewayMode (NEVER = old
-pretend-offline), carryInBackground (stored, not yet wired to the service).
+pretend-offline), carryInBackground (stored, not yet wired to the service),
+helpLocateNeighbours (opt-in "Help locate neighbours": publishes this phone's position as LOC_HINT, SPEC 5.5; default
+`BuildConfig.HELP_LOCATE_DEFAULT` from `-Prelay.helpLocateDefault`, true for demo builds, false for village builds).
 
 ## Components (`ui/components/`)
 `PillButton(text, onClick, style = PillStyle.Filled|Tonal|Outlined, icon, enabled)`, `SectionCard(title?, onClick?) {}`,

@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterator
 from ..codec import CATEGORY_NAMES, Need
 from .base import (
     ADVANCE_FROM,
+    HintIn,
     JSON_COLUMNS,
     TICKET_COLUMNS,
     AckSpec,
@@ -29,6 +30,7 @@ from .base import (
     Plan,
     RecordStatus,
     TeamAtCapacity,
+    keep_mesh_geo,
     merge_dispatch,
 )
 
@@ -57,9 +59,12 @@ CREATE TABLE IF NOT EXISTS tickets (
     max_hops           INTEGER NOT NULL DEFAULT 0,
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL,
-    geo                TEXT,    -- JSON {lat, lon, source, query}: estimate from the landmark, no GPS fix
-    reclass            TEXT,    -- JSON {from, to, reason}: category corrected at triage
-    answers            TEXT     -- JSON {question key: answer key}: intake answers (first report wins)
+    -- JSON {lat, lon, source, query | radius_m + hint_count}: estimate from the landmark or from mesh hints, no GPS fix
+    geo                TEXT,
+    -- JSON {from, to, reason}: category corrected at triage
+    reclass            TEXT,
+    -- JSON {question key: answer key}: intake answers (first report wins)
+    answers            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_open ON tickets(status, category);
 
@@ -91,6 +96,21 @@ CREATE TABLE IF NOT EXISTS ticket_packets (
     PRIMARY KEY (ticket_no, msg_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ticket_packets_msg ON ticket_packets(msg_id);
+
+-- LOC_HINT frames (SPEC 5.5), keyed by their derived dedupe key; resolved to a ticket through ref_msg_id.
+CREATE TABLE IF NOT EXISTS loc_hints (
+    hint_key     TEXT PRIMARY KEY,           -- 16 hex chars
+    ref_msg_id   TEXT    NOT NULL,           -- the NEED; may not exist (yet)
+    relay_node   TEXT    NOT NULL,
+    lat_e5       INTEGER NOT NULL,
+    lon_e5       INTEGER NOT NULL,
+    acc          INTEGER NOT NULL,
+    rssi_dbm     INTEGER NOT NULL,
+    observed_at  INTEGER NOT NULL,
+    gateway_node TEXT    NOT NULL,
+    received_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_loc_hints_ref ON loc_hints(ref_msg_id);
 
 CREATE TABLE IF NOT EXISTS acks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,   -- the sync cursor
@@ -267,6 +287,9 @@ class SqliteStore:
     def gateways_online(self, now: float, window_s: float = 60.0) -> int:
         return self._q("SELECT COUNT(*) AS n FROM gateways WHERE last_seen >= ?", (now - window_s,))[0]["n"]
 
+    def list_gateways(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q("SELECT node, last_seen FROM gateways ORDER BY last_seen DESC, node")]
+
     # ------------------------------------------------------------------ packets
     def record_packets(self, packets: list[PacketIn], gateway_node: str, received_at: int) -> list[RecordStatus]:
         out: list[RecordStatus] = []
@@ -354,6 +377,43 @@ class SqliteStore:
             )
         return out
 
+    # ------------------------------------------------------------------ mesh location hints
+    def add_hints(self, hints: list[HintIn]) -> list[bool]:
+        out: list[bool] = []
+        with self.tx() as c:
+            for h in hints:
+                cur = c.execute(
+                    "INSERT OR IGNORE INTO loc_hints(hint_key, ref_msg_id, relay_node, lat_e5, lon_e5, acc, rssi_dbm, "
+                    "observed_at, gateway_node, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (h.key, h.ref_msg_id, h.relay_node, h.lat_e5, h.lon_e5, h.acc, h.rssi_dbm, h.observed_at,
+                     h.gateway_node, h.received_at),
+                )
+                out.append(cur.rowcount == 1)
+        return out
+
+    def hints_for(self, msg_ids: list[str]) -> list[dict[str, Any]]:
+        if not msg_ids:
+            return []
+        marks = ",".join("?" * len(msg_ids))
+        rows = self._q(f"SELECT * FROM loc_hints WHERE ref_msg_id IN ({marks}) ORDER BY rowid", msg_ids)
+        return [{**dict(r), "key": r["hint_key"]} for r in rows]
+
+    def ticket_for_msg(self, msg_id: str) -> int | None:
+        return self._linked_ticket(msg_id)
+
+    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+        with self.tx() as c:
+            if self.get_ticket(ticket_no) is None:
+                return False
+            fixed = c.execute(
+                "SELECT 1 FROM ticket_packets tp JOIN packets p ON p.msg_id = tp.msg_id "
+                "WHERE tp.ticket_no = ? AND p.loc_acc != 0 LIMIT 1", (ticket_no,),
+            ).fetchone()
+            if fixed is not None:
+                return False
+            self.update_ticket(ticket_no, geo=geo)
+            return True
+
     def origins_for_ticket(self, ticket_no: int) -> list[dict[str, Any]]:
         """One packet per distinct origin_node (the origin's earliest packet), oldest first."""
         seen: dict[str, dict[str, Any]] = {}
@@ -399,7 +459,7 @@ class SqliteStore:
             cur = self.get_ticket(ticket_no)
             if cur is None or cur["status"] != "OPEN" or cur["report_count"] != report_count:
                 return False
-            self.update_ticket(ticket_no, **fields)
+            self.update_ticket(ticket_no, **keep_mesh_geo(cur.get("geo"), fields))
             return True
 
     def approve_ticket(

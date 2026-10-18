@@ -59,7 +59,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 ## Layout
 
 ```
-app/codec.py            wire frame + NEED/ACK/HELLO/INVENTORY codec (strict; raises CodecError)
+app/codec.py            wire frame + NEED/ACK/HELLO/INVENTORY/LOC_HINT codec (strict; raises CodecError)
+app/meshgeo.py          approximate position from LOC_HINTs: intersection of discs, RSSI as a weak weight (pure)
 app/store/base.py       Store interface (ingest, approve_ticket, acks, ...) and shared types
 app/store/sqlite.py     SqliteStore (local dev, tests)
 app/store/firestore.py  FirestoreStore (packets, tickets, acks, gateways, counters; transactions)
@@ -104,6 +105,29 @@ asks Gemini, one structured-JSON call per touched ticket (8 s hard timeout), for
 a tier adjustment clamped to one tier, and a polished + translated dispatch draft. The score is
 never model-written; ACK text is never model-written; any error or invalid field falls back to
 the deterministic value and is logged.
+
+## Mesh-assisted location (LOC_HINT)
+
+A NEED with `loc_acc = 0` (no GPS fix) gets an approximate position when nearby phones that *do* have a fix
+heard it directly from its requester and said so (`protocol/SPEC.md` §5.5). Gateways upload those hint frames in
+the same `POST /v1/sync` as the NEEDs; the response then also carries `"hints": {"accepted", "duplicates", "rejected"}`
+(absent when the upload held none). Hints are stored per NEED (`loc_hints` table / collection, one per relay and NEED,
+first wins) and resolved to the ticket, whichever arrives first; a hint for a NEED not yet triaged is kept.
+
+The estimate (`app/meshgeo.py`) is the **intersection of discs** centred on the relays with radius = relay accuracy
+bound + 100 m, taken over the largest group of hints that agree (a wrong or forged hint is left out); RSSI is only
+a weak weight (at most 2x) for where inside the intersection to put the point. It is served as the ticket's `geo`:
+`{"lat","lon","source":"mesh","radius_m":130,"hint_count":2}`. Rules:
+
+- never on a ticket with a GPS fix (the store refuses, in both SQLite and Firestore);
+- replaces a gazetteer / Maps landmark estimate, and a later landmark lookup can no longer replace it;
+- `has_location`, `loc_acc`, `lat`/`lon` are unchanged, so the ticket still counts as "without location";
+- the dispatch ETA and order text use it ("approx. ..., within about 130 m, estimated from 2 nearby phone(s)");
+- hints with `relay_node != sender`, a position of exactly 0,0, or an `observed_at` older than 72 h / more than 24 h
+  ahead are rejected; hints are accepted from any holder of the device key, the same trust as NEEDs.
+
+`POST /v1/dev/inject` takes `mesh_hints: [{lat, lon, accuracy_m (<= 100), rssi_dbm?}]` on a `loc_acc: 0` need to seed
+phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
 
 ## Control room: teams, dispatch, sitrep
 

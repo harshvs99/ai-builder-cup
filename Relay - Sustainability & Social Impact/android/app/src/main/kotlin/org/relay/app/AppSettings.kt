@@ -41,6 +41,12 @@ data class Settings(
     val gatewayMode: GatewayMode = GatewayMode.AUTOMATIC,
     /** Keep the mesh service running when the app is closed. */
     val carryInBackground: Boolean = true,
+    /**
+     * Opt-in "Help locate neighbours" (mesh-assisted location, SPEC 5.5): when a neighbour's NEED has no position,
+     * this phone publishes its own position (about 100 m or better) to the mesh and the control room. Default on in
+     * demo builds, off in village builds (`relay.helpLocateDefault`).
+     */
+    val helpLocateNeighbours: Boolean = BuildConfig.HELP_LOCATE_DEFAULT,
 ) {
     /** The old "Pretend offline" behaviour: never act as a gateway. */
     val pretendOffline: Boolean get() = gatewayMode == GatewayMode.NEVER
@@ -92,6 +98,7 @@ class AppSettings(ctx: Context) {
         gatewayMode = prefs.getString("gateway_mode", null)?.let { enumOr(it, GatewayMode.AUTOMATIC) }
             ?: if (prefs.getBoolean("offline", false)) GatewayMode.NEVER else GatewayMode.AUTOMATIC,
         carryInBackground = prefs.getBoolean("carry_bg", true),
+        helpLocateNeighbours = prefs.getBoolean("help_locate", BuildConfig.HELP_LOCATE_DEFAULT),
     )
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
@@ -117,6 +124,7 @@ class AppSettings(ctx: Context) {
             .putString("area", next.areaLabel)
             .putString("gateway_mode", next.gatewayMode.name)
             .putBoolean("carry_bg", next.carryInBackground)
+            .putBoolean("help_locate", next.helpLocateNeighbours)
             .apply()
         _flow.value = next
         for (l in listeners) try { l(next) } catch (_: Exception) {}

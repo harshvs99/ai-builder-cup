@@ -17,6 +17,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.relay.app.gateway.GatewayState
 import org.relay.app.gateway.GatewaySyncer
+import org.relay.app.gateway.HintCounts
 import org.relay.app.gateway.SyncClient
 import org.relay.app.gateway.SyncConfig
 import org.relay.core.frame.FrameCodec
@@ -221,5 +222,113 @@ class SyncTest {
         assertEquals(3, r.accepted); assertEquals(1, r.duplicates); assertEquals(17L, r.ackCursor)
         assertArrayEquals(byteArrayOf(1, 2, 3), r.acks.single())
         assertNull(runCatching { c.parse("not json") }.getOrNull())
+    }
+
+    // ---------------------------------------------------------------- LOC_HINT upload (SPEC 5.5)
+
+    private fun typesIn(r: Req): List<Int> = framesIn(r).map { FrameCodec.decode(it)!!.type }
+
+    @Test fun storedHintIsUploadedWithNeedsOnceAndNotAgain() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val state = GatewayState(null)
+        val s = syncer(node, store, state)
+        node.originateNeed(TestSupport.need(1))
+        val hint = TestSupport.hint(1, gatewayId)
+        assertNotNull(node.originateLocHint(hint))
+
+        val first = s.syncOnce()
+        assertTrue(first.ok); assertEquals(2, first.uploaded); assertEquals(1, first.hintsUploaded)
+        val r1 = requests.single()
+        assertEquals(listOf(FrameTypes.NEED, FrameTypes.LOC_HINT), typesIn(r1))
+        // the hint goes out as its exact stored raw bytes
+        assertArrayEquals(store.all().first { it.type == FrameTypes.LOC_HINT }.raw, framesIn(r1)[1])
+        assertTrue(state.isUploaded(hint.keyHex))
+        assertTrue(s.pendingNeedKeys().isEmpty())
+
+        // Second round: nothing new, so an empty upload.
+        val second = s.syncOnce()
+        assertEquals(0, second.uploaded); assertEquals(0, second.hintsUploaded)
+        assertEquals(0, framesIn(requests[1]).size)
+
+        // A later hint uploads alone.
+        node.originateLocHint(TestSupport.hint(2, gatewayId))
+        assertEquals(1, s.syncOnce().uploaded)
+        assertEquals(listOf(FrameTypes.LOC_HINT), typesIn(requests[2]))
+    }
+
+    @Test fun pendingNeedKeysIgnoreHintsAndAFailedRoundKeepsTheHintForRetry() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val state = GatewayState(null)
+        val s = syncer(node, store, state)
+        val hint = TestSupport.hint(1, gatewayId)
+        node.originateLocHint(hint)
+        assertTrue("hints are not NEEDs", s.pendingNeedKeys().isEmpty())
+
+        status = 500
+        assertFalse(s.syncOnce().ok)
+        assertFalse(state.isUploaded(hint.keyHex))
+
+        status = 200
+        val ok = s.syncOnce()
+        assertTrue(ok.ok); assertEquals(1, ok.uploaded); assertEquals(1, ok.hintsUploaded)
+        assertTrue(state.isUploaded(hint.keyHex))
+    }
+
+    @Test fun needsGoBeforeHintsUnderTheCapAndMoreWaitingCountsBoth() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val state = GatewayState(null)
+        // Hints are stored first, NEEDs after: the NEEDs must still be uploaded first.
+        node.originateLocHint(TestSupport.hint(1, gatewayId))
+        node.originateLocHint(TestSupport.hint(2, gatewayId))
+        repeat(3) { node.originateNeed(TestSupport.need(10 + it)) }
+        val s = GatewaySyncer(node, store, state, SyncClient(), { cfg }, {}, maxFramesPerSync = 4)
+
+        val a = s.syncOnce()
+        assertEquals(4, a.uploaded); assertEquals(1, a.hintsUploaded)
+        assertEquals(
+            listOf(FrameTypes.NEED, FrameTypes.NEED, FrameTypes.NEED, FrameTypes.LOC_HINT),
+            typesIn(requests[0]),
+        )
+        assertTrue(s.moreWaiting)
+
+        val b = s.syncOnce()
+        assertEquals(1, b.uploaded); assertEquals(1, b.hintsUploaded)
+        assertEquals(listOf(FrameTypes.LOC_HINT), typesIn(requests[1]))
+        assertFalse(s.moreWaiting)
+        assertEquals(5, state.uploadedCount())
+    }
+
+    @Test fun outcomeReportsHintsAcceptedOnlyWhenTheBackendSentTheHintsObject() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val s = syncer(node, store, GatewayState(null))
+        node.originateLocHint(TestSupport.hint(1, gatewayId))
+
+        responder = {
+            JSONObject().put("accepted", 0).put("duplicates", 0).put("rejected", 0).put("acks", JSONArray()).put("ack_cursor", 1)
+                .put("hints", JSONObject().put("accepted", 1).put("duplicates", 0).put("rejected", 0))
+        }
+        val withHints = s.syncOnce()
+        assertTrue(withHints.ok); assertEquals(1, withHints.hintsAccepted)
+
+        node.originateLocHint(TestSupport.hint(2, gatewayId))
+        responder = { JSONObject().put("accepted", 0).put("duplicates", 0).put("rejected", 0).put("acks", JSONArray()).put("ack_cursor", 2) }
+        val without = s.syncOnce()
+        assertTrue(without.ok); assertEquals(1, without.hintsUploaded); assertNull(without.hintsAccepted)
+    }
+
+    @Test fun clientParsingToleratesTheOptionalHintsObject() {
+        val c = SyncClient()
+        val base = "\"accepted\":1,\"duplicates\":0,\"rejected\":0,\"acks\":[],\"ack_cursor\":2"
+        assertNull(c.parse("{$base}").hints)
+        assertEquals(HintCounts(2, 1, 3), c.parse("{$base,\"hints\":{\"accepted\":2,\"duplicates\":1,\"rejected\":3}}").hints)
+        assertEquals(HintCounts(4, 0, 0), c.parse("{$base,\"hints\":{\"accepted\":4}}").hints)
+        // A malformed hints value is ignored, not a failure.
+        assertNull(c.parse("{$base,\"hints\":\"nope\"}").hints)
+        assertNull(c.parse("{$base,\"hints\":null}").hints)
+        assertEquals(2L, c.parse("{$base,\"hints\":[1]}").ackCursor)
     }
 }

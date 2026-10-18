@@ -6,6 +6,7 @@ object FrameTypes {
     const val ACK = 0x71
     const val HELLO = 0x72
     const val INVENTORY = 0x73
+    const val LOC_HINT = 0x74
 }
 
 /** Outer frame (SPEC section 3). Arrays are compared by content. */

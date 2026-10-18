@@ -26,9 +26,26 @@ class LinkRegistry(private val myId: ByteArray) {
     private val macToNode = object : LinkedHashMap<String, String>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > MAX_MAC_ENTRIES
     }
+    /** MAC -> last scan RSSI in dBm, access-ordered and bounded like [macToNode]. Written from the BLE scan callback. */
+    private val macRssi = object : LinkedHashMap<String, Int>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean = size > MAX_MAC_ENTRIES
+    }
     private val myIdHex = Hex.encode(myId)
 
     companion object { const val MAX_MAC_ENTRIES = 64 }
+
+    /** Remember the RSSI of the latest scan result from [mac]; values outside -127..0 dBm ("unavailable") are ignored. */
+    @Synchronized fun noteScanRssi(mac: String, rssi: Int) {
+        if (rssi in -127..0) macRssi[mac] = rssi
+    }
+
+    /**
+     * Last scan RSSI (dBm) of the advertiser behind [linkId], or null when unknown. Only central links ("c:<mac>")
+     * are known: we connected to the MAC we scanned. A peripheral link's MAC is the remote's connection address,
+     * which was never scanned, so it has no entry.
+     */
+    @Synchronized fun rssiFor(linkId: String): Int? =
+        if (linkId.startsWith("c:")) macRssi[linkId.substring(2)] else null
 
     @Synchronized fun add(linkId: String, mac: String, role: LinkRole) {
         links[linkId] = Link(linkId, mac, role)
@@ -36,7 +53,7 @@ class LinkRegistry(private val myId: ByteArray) {
 
     @Synchronized fun remove(linkId: String) { links.remove(linkId) }
 
-    @Synchronized fun clear() { links.clear(); macToNode.clear() }
+    @Synchronized fun clear() { links.clear(); macToNode.clear(); macRssi.clear() }
 
     @Synchronized fun get(linkId: String): Link? = links[linkId]
     @Synchronized fun knownMacCount(): Int = macToNode.size

@@ -12,6 +12,9 @@ private const val USAGE = """Relay mesh simulator
   scenario all                         every scenario above with its defaults
   e2e --backend http://localhost:8080 [--approve] [--text "..."] [--lang or] [--timeout 30] [--poll-ms 1000]
   e2e --fake [--approve]               same, against an in-process fake backend
+  locate --backend http://localhost:8080 [--no-help]   mesh-assisted location: a no-fix NEED relayed by two phones with
+                                       a fix; passes iff the backend's ticket gets a "mesh" geo estimate near the truth
+                                       (--no-help = "Help locate neighbours" off: passes iff no hint is sent)
 
 Common options: --seed N (default 42). Exit code 0 iff delivery is 100%."""
 
@@ -74,6 +77,16 @@ fun main(args: Array<String>) {
             val result = try { E2e.run(cfg) } finally { fake?.close() }
             println(if (result.success) "E2E PASS (ticket #${result.ticketNo})" else "E2E FAIL: ${result.reason}")
             exitProcess(if (result.success) 0 else 1)
+        }
+        "locate" -> {
+            val o = parseOpts(args.drop(1))
+            val help = o["no-help"] != "true"
+            val cfg = LocateConfig(backend = o["backend"] ?: "http://localhost:8080", helpLocate = help,
+                timeoutMs = ((o["timeout"]?.toDoubleOrNull() ?: 30.0) * 1000).toLong())
+            println("locate: backend=${cfg.backend} help-locate-neighbours=${if (help) "on" else "off"}")
+            val r = LocateE2e.run(cfg)
+            println(if (r.success) "LOCATE PASS" else "LOCATE FAIL: ${r.reason}")
+            exitProcess(if (r.success) 0 else 1)
         }
         else -> { System.err.println("unknown command '${args[0]}'\n$USAGE"); exitProcess(2) }
     }

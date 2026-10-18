@@ -102,6 +102,25 @@ class MeshHardeningTest {
         assertEquals(0, r.knownMacCount())
     }
 
+    @Test fun scanRssiIsKeptPerMacForCentralLinksOnlyAndBounded() {
+        val r = LinkRegistry(ByteArray(8) { 1 })
+        assertNull(r.rssiFor("c:aa"))
+        r.noteScanRssi("aa", -71)
+        r.noteScanRssi("bb", 127)   // "unavailable" is ignored
+        r.noteScanRssi("cc", -200)  // out of range is ignored
+        assertEquals(-71, r.rssiFor("c:aa"))
+        assertNull("peripheral links were never scanned", r.rssiFor("p:aa"))
+        assertNull(r.rssiFor("c:bb")); assertNull(r.rssiFor("c:cc"))
+        r.noteScanRssi("aa", -60) // latest scan wins
+        assertEquals(-60, r.rssiFor("c:aa"))
+
+        repeat(LinkRegistry.MAX_MAC_ENTRIES * 3) { r.noteScanRssi("m$it", -50) }
+        assertNull("oldest entries are evicted", r.rssiFor("c:aa"))
+        assertEquals(-50, r.rssiFor("c:m${LinkRegistry.MAX_MAC_ENTRIES * 3 - 1}"))
+        r.clear()
+        assertNull(r.rssiFor("c:m${LinkRegistry.MAX_MAC_ENTRIES * 3 - 1}"))
+    }
+
     @Test fun throttleResetAfterBluetoothToggleStormAllowsScanAgain() {
         val t = ScanThrottle()
         repeat(5) { assertTrue(t.tryAcquire(it * 1_000L)) } // five toggles in five seconds

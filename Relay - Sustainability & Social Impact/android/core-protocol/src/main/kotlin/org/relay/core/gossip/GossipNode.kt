@@ -9,6 +9,8 @@ import org.relay.core.payload.AckCodec
 import org.relay.core.payload.Hello
 import org.relay.core.payload.HelloCodec
 import org.relay.core.payload.Inventory
+import org.relay.core.payload.LocHint
+import org.relay.core.payload.LocHintCodec
 import org.relay.core.payload.InventoryCodec
 import org.relay.core.payload.Need
 import org.relay.core.payload.NeedCodec
@@ -118,6 +120,14 @@ class GossipNode(
         }
     }
 
+    fun storedLocHints(): List<Pair<LocHint, Frame>> = synchronized(lock) {
+        store.all().filter { it.type == FrameTypes.LOC_HINT }.mapNotNull { p ->
+            val f = FrameCodec.decode(p.raw) ?: return@mapNotNull null
+            val h = LocHintCodec.decode(f.payload) ?: return@mapNotNull null
+            h to f
+        }
+    }
+
     fun storedAcks(): List<Pair<Ack, Frame>> = synchronized(lock) {
         store.all().filter { it.type == FrameTypes.ACK }.mapNotNull { p ->
             val f = FrameCodec.decode(p.raw) ?: return@mapNotNull null
@@ -156,7 +166,7 @@ class GossipNode(
         }
     }
 
-    /** Drop NEED/ACK frames older than 72 h from the store. Seen-set keys stay until LRU eviction. */
+    /** Drop NEED/ACK/LOC_HINT frames older than 72 h from the store. Seen-set keys stay until LRU eviction. */
     fun expire() = locked { out -> expireLocked(out) }
 
     fun originateNeed(need: Need): Frame {
@@ -183,6 +193,26 @@ class GossipNode(
             acceptAck(out, ack, frame, raw, fromLink = null)
         }
         return frame
+    }
+
+    /**
+     * Originate a LOC_HINT (SPEC 5.5) with this node as relay: [hint]'s relay_node must be this node. Returns null when
+     * this node already put a hint for that NEED into the mesh (the derived key is in the seen-set), so a relay never
+     * sends two.
+     */
+    fun originateLocHint(hint: LocHint): Frame? {
+        require(hint.relayNode.contentEquals(nodeId)) { "relay_node must be this node" }
+        val frame = Frame(
+            type = FrameTypes.LOC_HINT, ttl = INITIAL_TTL, timestampMs = clock.nowMs(),
+            senderId = nodeId, payload = LocHintCodec.encode(hint),
+        )
+        val raw = FrameCodec.encode(frame)
+        var fresh = false
+        locked { out ->
+            fresh = !isKnown(hint.keyHex)
+            acceptLocHint(out, hint, frame, raw, fromLink = null)
+        }
+        return if (fresh) frame else null
     }
 
     /** Entry point for every whole frame received on [linkId]. Never throws on malformed input. */
@@ -224,6 +254,13 @@ class GossipNode(
                 val ack = AckCodec.decode(frame.payload)
                 if (ack == null) { reject(); return@locked }
                 acceptAck(out, ack, frame, bytes, linkId)
+            }
+            FrameTypes.LOC_HINT -> {
+                if (!knownVersion) return@locked acceptOpaque(out, frame, bytes, linkId)
+                val hint = LocHintCodec.decode(frame.payload)
+                // like HELLO: the relay named in the payload must be the node that sent the frame
+                if (hint == null || !hint.relayNode.contentEquals(frame.senderId)) { reject(); return@locked }
+                acceptLocHint(out, hint, frame, bytes, linkId)
             }
             FrameTypes.HELLO -> {
                 val hello = HelloCodec.decode(frame.payload)
@@ -268,6 +305,17 @@ class GossipNode(
         stats = stats.copy(acksDelivered = stats.acksDelivered + 1)
         out.actions += { listener.onAckSeen(ack, frame) }
         if (ack.targetNode.contentEquals(nodeId)) out.actions += { listener.onAckForMe(ack, frame) }
+        scheduleFlood(out, frame, raw, key, fromLink)
+    }
+
+    private fun acceptLocHint(out: Out, hint: LocHint, frame: Frame, raw: ByteArray, fromLink: String?) {
+        val key = hint.keyHex
+        fromLink?.let { links[it]?.peerKeys?.add(key) }
+        if (isKnown(key)) { stats = stats.copy(duplicates = stats.duplicates + 1); return }
+        markSeen(key)
+        store.put(StoredPacket(key, FrameTypes.LOC_HINT, raw, clock.nowMs()))
+        stats = stats.copy(locHintsDelivered = stats.locHintsDelivered + 1)
+        out.actions += { listener.onLocHint(hint, frame, fromLink) }
         scheduleFlood(out, frame, raw, key, fromLink)
     }
 
@@ -332,13 +380,14 @@ class GossipNode(
     }
 
     /**
-     * Push the next capped batch of what the peer lacks (ACKs, then NEEDs newest first). Pushed keys are
+     * Push the next capped batch of what the peer lacks (ACKs, then NEEDs newest first, then LOC_HINTs). Pushed keys are
      * recorded in [LinkState.peerKeys] so flooding does not repeat them. A remainder is continued after
      * [pushContinueMs] on the same link, without waiting for the next 30 s inventory exchange.
      */
     private fun pushBatch(out: Out, linkId: String, st: LinkState) {
         val candidates = store.all().filter {
-            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK) && !st.peerKeys.contains(it.key)
+            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK || it.type == FrameTypes.LOC_HINT) &&
+                !st.peerKeys.contains(it.key)
         }
         if (candidates.isEmpty()) return
         val plan = PushPlanner.plan(candidates, st.hello?.nodeId, pushBudgetBytes)

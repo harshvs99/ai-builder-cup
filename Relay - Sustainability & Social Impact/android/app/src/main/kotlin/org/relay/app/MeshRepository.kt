@@ -56,6 +56,8 @@ data class MeshStatus(
     val meshHoursRemaining: Double? = null,
     /** Last peers with a successful exchange (node id hex), newest first. */
     val recentPeerIds: List<String> = emptyList(),
+    /** Stored LOC_HINT frames (mesh-assisted location, SPEC 5.5). */
+    val storedHints: Int = 0,
 )
 
 /**
