@@ -7,6 +7,7 @@ module existed render correctly with no migration.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any, Iterable
 
 LOC_ACC_LABELS: tuple[str | None, ...] = (None, "<10 m", "<50 m", "<200 m", "<1 km", "≥1 km")
@@ -60,3 +61,23 @@ def scrub_legacy_draft(text: str, landmark: str) -> str:
     if landmark:
         text = text.replace(f"{zero} near {landmark}", f"Location: unknown (no GPS fix) — near {landmark}")
     return text.replace(zero, "Location: unknown (no GPS fix)")
+
+
+def tokenize(text: str) -> list[str]:
+    """Lowercase word tokens for Latin, Devanagari and Odia text.
+
+    Splits on punctuation, symbols and whitespace only. ``\\w`` is not used because it treats
+    Indic vowel signs (combining marks) as separators and would shred "पानी" into fragments.
+    """
+    out: list[str] = []
+    cur: list[str] = []
+    for ch in unicodedata.normalize("NFKC", text).casefold():
+        if unicodedata.category(ch)[0] in "PSZC":
+            if cur:
+                out.append("".join(cur))
+                cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        out.append("".join(cur))
+    return out

@@ -8,6 +8,7 @@ one issues BEGIN/COMMIT).
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import tempfile
@@ -16,7 +17,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
 from ..codec import CATEGORY_NAMES, Need
-from .base import TICKET_COLUMNS, AckSpec, IngestOutcome, Lookup, PacketIn, Plan, RecordStatus
+from .base import JSON_COLUMNS, TICKET_COLUMNS, AckSpec, IngestOutcome, Lookup, PacketIn, Plan, RecordStatus
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
@@ -42,7 +43,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     first_reported_at  INTEGER NOT NULL,
     max_hops           INTEGER NOT NULL DEFAULT 0,
     created_at         INTEGER NOT NULL,
-    updated_at         INTEGER NOT NULL
+    updated_at         INTEGER NOT NULL,
+    geo                TEXT,    -- JSON {lat, lon, source, query}: estimate from the landmark, no GPS fix
+    reclass            TEXT     -- JSON {from, to, reason}: category corrected at triage
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_open ON tickets(status, category);
 
@@ -131,6 +134,10 @@ class SqliteStore:
             if self.path != ":memory:":
                 conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(SCHEMA)
+            have = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
+            for col in JSON_COLUMNS:  # databases created before these columns existed
+                if col not in have:
+                    conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
             conn.execute(_SEED_SEQUENCE)
             self._conn = conn
         return self._conn
@@ -160,6 +167,18 @@ class SqliteStore:
             if self._conn is not None:
                 self._conn.close()
                 self._conn = None
+
+    @staticmethod
+    def _row(r: sqlite3.Row) -> dict[str, Any]:
+        d = dict(r)
+        for col in JSON_COLUMNS:
+            if col in d:
+                d[col] = json.loads(d[col]) if d[col] else None
+        return d
+
+    @staticmethod
+    def _enc(fields: dict[str, Any]) -> list[Any]:
+        return [json.dumps(v, ensure_ascii=False) if k in JSON_COLUMNS and v is not None else v for k, v in fields.items()]
 
     def _q(self, sql: str, args: tuple | list = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -277,7 +296,7 @@ class SqliteStore:
         cols = ",".join(fields)
         marks = ",".join("?" * len(fields))
         with self.tx() as c:
-            cur = c.execute(f"INSERT INTO tickets({cols}) VALUES ({marks})", list(fields.values()))
+            cur = c.execute(f"INSERT INTO tickets({cols}) VALUES ({marks})", self._enc(fields))
             return int(cur.lastrowid)
 
     def update_ticket(self, ticket_no: int, **fields: Any) -> None:
@@ -286,15 +305,15 @@ class SqliteStore:
             return
         sets = ",".join(f"{k} = ?" for k in fields)
         with self.tx() as c:
-            c.execute(f"UPDATE tickets SET {sets} WHERE ticket_no = ?", [*fields.values(), ticket_no])
+            c.execute(f"UPDATE tickets SET {sets} WHERE ticket_no = ?", [*self._enc(fields), ticket_no])
 
     def get_ticket(self, ticket_no: int) -> dict[str, Any] | None:
         rows = self._q("SELECT * FROM tickets WHERE ticket_no = ?", (ticket_no,))
-        return dict(rows[0]) if rows else None
+        return self._row(rows[0]) if rows else None
 
     def list_tickets(self) -> list[dict[str, Any]]:
         rows = self._q("SELECT * FROM tickets ORDER BY priority_score DESC, first_reported_at ASC, ticket_no ASC")
-        return [dict(r) for r in rows]
+        return [self._row(r) for r in rows]
 
     def open_candidates(self, category: str, reported_at: int, window_s: int) -> list[dict[str, Any]]:
         rows = self._q(
@@ -302,7 +321,7 @@ class SqliteStore:
             "AND ABS(first_reported_at - ?) <= ? ORDER BY ticket_no",
             (category, reported_at, window_s),
         )
-        return [dict(r) for r in rows]
+        return [self._row(r) for r in rows]
 
     def update_ticket_if_unchanged(self, ticket_no: int, report_count: int, fields: dict[str, Any]) -> bool:
         with self.tx():
