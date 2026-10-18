@@ -43,6 +43,14 @@ tf_select_workspace() {
   terraform -chdir="${TF_DIR}" workspace select -or-create "${project}" >/dev/null
 }
 
+# Deploy needs the deployer's AI Studio key (paid tier) from $GEMINI_API_KEY; it is
+# handed to Terraform through the environment and never printed.
+require_gemini_key() {
+  [[ -n "${GEMINI_API_KEY:-}" ]] \
+    || die "GEMINI_API_KEY is not set. Create a paid-tier (billing-enabled) Google AI Studio key and run: export GEMINI_API_KEY=..."
+  export TF_VAR_gemini_api_key="${GEMINI_API_KEY}"
+}
+
 TF_APPROVE=()
 if [[ "${RELAY_AUTO_APPROVE:-0}" == "1" ]]; then
   TF_APPROVE=(-auto-approve)

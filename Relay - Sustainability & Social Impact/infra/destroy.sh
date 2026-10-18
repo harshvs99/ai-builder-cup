@@ -16,6 +16,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 require_tools
 require_auth
+# The variable is required but irrelevant when destroying.
+export TF_VAR_gemini_api_key="unused-on-destroy"
 
 TF=(terraform -chdir="${TF_DIR}")
 

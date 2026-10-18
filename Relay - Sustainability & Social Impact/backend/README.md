@@ -49,8 +49,9 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_PUBSUB_TOPIC` | unset | full topic path; set = `/v1/sync` publishes and triage runs in `POST /internal/triage`; unset = in-process triage |
 | `RELAY_PUBSUB_AUDIENCE`, `RELAY_PUBSUB_INVOKER_SA` | unset | expected `aud` and `email` of the push OIDC token; unset = `/internal/triage` answers 503 (fails closed) |
 | `RELAY_TRIAGE_BUDGET_S` | `50` | wall-clock cap for one push delivery (phase 1 + Gemini); over budget returns 503 and Pub/Sub redelivers |
-| `GOOGLE_GENAI_USE_VERTEXAI` | unset | `true` enables Gemini on Vertex AI via ADC (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, default `global`) |
-| `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
+| `GEMINI_API_KEY` | unset | enables Gemini with a Google AI Studio key; this is the production path (Cloud Run gets it from Secret Manager). Use a **paid-tier** key: free-tier prompts may be used to improve Google products, not acceptable for disaster victims' data. Unset (and no Vertex) = deterministic agent |
+| `GOOGLE_GENAI_USE_VERTEXAI` | unset | optional alternative: `true` uses Gemini on Vertex AI via ADC (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, default `global`); wins over `GEMINI_API_KEY` if both are set. Not used by the Terraform deploy |
+| `RELAY_GEOCODER` | unset | `gemini_maps` opts in to Maps-grounded landmark geocoding (works with `GEMINI_API_KEY` or Vertex; `GEMINI_GEOCODE_MODEL` overrides the model). **Check the terms first:** Google's Maps-grounding terms reportedly exclude "emergency response use cases"; the owner must read the current Gemini API and Google Maps Platform terms before enabling it in a pilot. The built-in gazetteer stays the default |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the sitrep prose (set a Pro-tier name here) |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
@@ -67,7 +68,7 @@ app/store/firestore.py  FirestoreStore (packets, tickets, acks, gateways, counte
 app/priority.py         deterministic score, tier bands, reason text
 app/cluster.py          near-duplicate matching + merge rules
 app/templates.py        ACK texts (6 languages; non-English pending native-speaker review)
-app/agent.py            triage pipeline; DeterministicAgent and GeminiAgent (API key or Vertex)
+app/agent.py            triage pipeline; DeterministicAgent and GeminiAgent (API key, or Vertex)
 app/pubsub.py           publish side of /v1/sync, push envelope parsing, OIDC verifier
 app/teams.py            dispatch teams: seed file (data/teams_puri.json), derived load and status
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
@@ -162,7 +163,7 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
 
 ## Deploy
 
-Google Cloud (Cloud Run + Firestore + Pub/Sub + Vertex AI): `../infra/README.md`; the image is built
+Google Cloud (Cloud Run + Firestore + Pub/Sub + Gemini API key in Secret Manager): `../infra/README.md`; the image is built
 from the Relay root with `infra/Dockerfile` (backend plus the built dashboard in `/app/static`).
 
 Standalone SQLite on Cloud Run (demo only), using this folder's own Dockerfile:

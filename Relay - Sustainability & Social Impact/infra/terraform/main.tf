@@ -30,11 +30,9 @@ resource "google_service_account" "push" {
   depends_on = [google_project_service.apis]
 }
 
-# Project-level because Vertex AI and Cloud Logging have no useful
-# resource-level grants.
+# Project-level because Cloud Logging has no useful resource-level grants.
 resource "google_project_iam_member" "run_roles" {
   for_each = toset([
-    "roles/aiplatform.user",
     "roles/logging.logWriter",
   ])
 
@@ -95,6 +93,31 @@ resource "google_secret_manager_secret_version" "device_key" {
 resource "google_secret_manager_secret_iam_member" "run_reads_device_key" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.device_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.run.member
+}
+
+# Google AI Studio (Gemini API) key, supplied by the deployer (use a paid-tier,
+# billing-enabled key). Lives only in Secret Manager and Terraform state.
+resource "google_secret_manager_secret" "gemini_api_key" {
+  project   = var.project_id
+  secret_id = "gemini-api-key"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "gemini_api_key" {
+  secret      = google_secret_manager_secret.gemini_api_key.id
+  secret_data = var.gemini_api_key
+}
+
+resource "google_secret_manager_secret_iam_member" "run_reads_gemini_api_key" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.gemini_api_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = google_service_account.run.member
 }
@@ -271,20 +294,21 @@ resource "google_cloud_run_v2_service" "relay" {
         value = google_service_account.push.email
       }
       env {
-        name  = "GOOGLE_GENAI_USE_VERTEXAI"
-        value = "true"
-      }
-      env {
         name  = "GOOGLE_CLOUD_PROJECT"
         value = var.project_id
       }
       env {
-        name  = "GOOGLE_CLOUD_LOCATION"
-        value = var.vertex_location
-      }
-      env {
         name  = "GEMINI_MODEL"
         value = var.gemini_model
+      }
+      env {
+        name = "GEMINI_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gemini_api_key.secret_id
+            version = google_secret_manager_secret_version.gemini_api_key.version
+          }
+        }
       }
       env {
         name = "RELAY_DEVICE_KEY"
@@ -303,6 +327,7 @@ resource "google_cloud_run_v2_service" "relay" {
     google_project_iam_member.run_roles,
     google_project_iam_member.run_firestore,
     google_secret_manager_secret_iam_member.run_reads_device_key,
+    google_secret_manager_secret_iam_member.run_reads_gemini_api_key,
     google_pubsub_topic_iam_member.run_publishes,
   ]
 }

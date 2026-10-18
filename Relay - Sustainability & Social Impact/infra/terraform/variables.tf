@@ -9,10 +9,10 @@ variable "region" {
   default     = "us-central1"
 }
 
-variable "vertex_location" {
-  description = "Vertex AI location used for Gemini calls. 'global' routes to any available capacity."
+variable "gemini_api_key" {
+  description = "Google AI Studio (Gemini API) key, paid tier. Stored in Secret Manager as gemini-api-key. deploy.sh passes it via TF_VAR_gemini_api_key from $GEMINI_API_KEY."
   type        = string
-  default     = "global"
+  sensitive   = true
 }
 
 variable "gemini_model" {

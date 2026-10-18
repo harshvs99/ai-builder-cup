@@ -134,9 +134,16 @@ def test_maps_geocoder_never_raises_and_times_out():
 
 def test_geocoder_from_env_is_off_unless_explicit():
     assert geocode.geocoder_from_env({}).name == "none"
-    assert geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps"}).name == "none"  # needs Vertex too
+    assert geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps"}).name == "none"  # needs a credential too
+    assert geocode.geocoder_from_env({"GEMINI_API_KEY": "k"}).name == "none"  # key alone is not the opt-in
     on = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GOOGLE_GENAI_USE_VERTEXAI": "true"})
     assert on.name == "gemini_maps"  # lazy client: no credentials or network needed to construct
+    keyed = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GEMINI_API_KEY": "k"})
+    assert keyed.name == "gemini_maps"
+    assert keyed._finder._kwargs == {"api_key": "k"}
+    vtx = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GEMINI_API_KEY": "k",
+                                     "GOOGLE_GENAI_USE_VERTEXAI": "true", "GOOGLE_CLOUD_PROJECT": "p"})
+    assert vtx._finder._kwargs["vertexai"] is True
 
 
 def test_in_bbox():

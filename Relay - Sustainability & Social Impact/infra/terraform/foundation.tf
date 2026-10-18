@@ -11,7 +11,6 @@ locals {
     "cloudbuild.googleapis.com",
     "firestore.googleapis.com",
     "pubsub.googleapis.com",
-    "aiplatform.googleapis.com",
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
