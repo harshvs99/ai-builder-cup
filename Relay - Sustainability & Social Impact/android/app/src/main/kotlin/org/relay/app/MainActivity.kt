@@ -3,11 +3,13 @@ package org.relay.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import android.content.Intent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.relay.app.ui.RelayRoot
+import org.relay.app.ui.network.CarryPolicy
 import org.relay.app.ui.i18n.LocalStrings
 import org.relay.app.ui.i18n.stringsFor
 import org.relay.app.ui.theme.RelayTheme
@@ -29,6 +31,15 @@ class MainActivity : ComponentActivity() {
                     LocalSpeaker provides speaker,
                 ) { RelayRoot() }
             }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // "Carry messages in the background" off: the mesh only runs while the app is visible. RelayRoot restarts the
+        // service on the next resume. (On: the foreground service keeps running after the app is closed.)
+        if (CarryPolicy.stopWhenBackgrounded(MeshRepository.settings.current, isChangingConfigurations)) {
+            stopService(Intent(this, RelayService::class.java))
         }
     }
 
