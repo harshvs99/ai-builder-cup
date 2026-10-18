@@ -87,6 +87,9 @@ final class AppModel {
     private let network = NetworkMonitor()
     private let battery = BatteryMonitor()
     private let skipFixWait = Broadcaster<Bool>(false)
+    /// Ready mode (pack, plan, household, banner): see `ReadyCenter`.
+    let ready: ReadyCenter
+    @ObservationIgnored private let readyDelegate = ReadyNotificationDelegate()
 
     @ObservationIgnored private var started = false
     @ObservationIgnored private var engineStarted = false
@@ -125,9 +128,19 @@ final class AppModel {
         self.settings = settings.current
         self.villagerStatus = VillagerStatus.from(repository.snapshot.status, now: currentTimeMs())
         self.permissions = Permissions(location: location)
+        self.ready = ReadyCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
         // The Bluetooth prompt needs the mesh started; Permissions calls back into the model for that.
         permissions.startBluetooth = { [weak self] in self?.startMesh() }
         speaker.speed = settings.current.voiceSpeed
+        ready.context = { [weak self] in
+            guard let self else { return (RefreshInput(connected: false, lat: nil, lon: nil, lang: "en", household: Household()), "", "") }
+            let s = self.settings
+            let fix = self.locationFix
+            return (RefreshInput(connected: self.internetAvailable, lat: fix?.lat, lon: fix?.lon, lang: s.effectiveLanguage.tag, household: s.household),
+                    s.backendUrl, s.deviceKey)
+        }
+        readyDelegate.onOpenReady = { [weak self] in Task { @MainActor in self?.ready.openRequested = true } }
+        UNUserNotificationCenter.current().delegate = readyDelegate
     }
 
     /// Starts everything. Idempotent; call it as early as possible (`RelayApp.init`) so a background relaunch by
@@ -149,7 +162,11 @@ final class AppModel {
         }
         network.start { [engine = self.engine, weak self] ok in
             engine.setInternetAvailable(ok)
-            Task { @MainActor in self?.internetAvailable = ok }
+            Task { @MainActor in
+                let regained = ok && self?.internetAvailable == false
+                self?.internetAvailable = ok
+                if regained { await self?.ready.refresh(.networkRegained) }
+            }
         }
         battery.start { [engine = self.engine, weak self] percent, charging in
             engine.setBattery(percent: percent, charging: charging)
@@ -179,6 +196,13 @@ final class AppModel {
         })
         tasks.append(Task { [weak self] in await self?.permissions.refresh() })
         refreshLanguages()
+        tasks.append(Task { [weak self] in
+            await self?.ready.refresh(.appOpen)
+            while !Task.isCancelled { // every 3 h while the app runs (the policy also enforces it)
+                try? await Task.sleep(nanoseconds: UInt64(ReadyPolicy.periodicMs) * 1_000_000)
+                await self?.ready.refresh(.periodic)
+            }
+        })
 
         if CBManager.authorization != .notDetermined { startMesh() }
     }
@@ -235,6 +259,7 @@ final class AppModel {
             location.refreshAuthorization()
             Task { await permissions.refresh() }
             refreshLanguages()
+            Task { await ready.refresh(.appOpen) }
         } else {
             speech.cancel()
             speaker.stop()

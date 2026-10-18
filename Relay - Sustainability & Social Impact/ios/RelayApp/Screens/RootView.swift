@@ -35,6 +35,12 @@ struct RootView: View {
             model.updateSettings { var s = $0; s.languageNoticeFor = gone.tag; return s }
             languageNotice = strings.home.languageUnavailable(AppLanguages.of(gone).englishName)
         }
+        .onChange(of: model.ready.openRequested) { _, requested in
+            guard requested else { return }
+            model.ready.openRequested = false
+            router.select(.home)
+            router.navigator(.home).push(.ready)
+        }
         .alert(languageNotice ?? "", isPresented: Binding(get: { languageNotice != nil }, set: { if !$0 { languageNotice = nil } })) {
             Button(strings.common.done) { languageNotice = nil }
         }

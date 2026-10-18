@@ -17,7 +17,7 @@ final class RoutesTests: XCTestCase {
     func testPathRoundTrips() {
         let all: [Route] = [
             .language, .home, .requests, .request(msgId: "ab12"), .ask(mode: .voice, prefillFrom: nil),
-            .ask(mode: .text, prefillFrom: "ab12"), .check, .network, .console, .settings, .developer,
+            .ask(mode: .text, prefillFrom: "ab12"), .check, .network, .console, .settings, .developer, .ready, .household,
         ]
         for r in all { XCTAssertEqual(r, Route(path: r.path), r.path) }
         XCTAssertNil(Route(path: "nonsense"))
@@ -48,6 +48,10 @@ final class RoutesTests: XCTestCase {
         XCTAssertEqual(.network, Route.console.tab)
         XCTAssertEqual(.settings, Route.settings.tab)
         XCTAssertEqual(.settings, Route.developer.tab)
+        XCTAssertEqual(.home, Route.ready.tab)
+        XCTAssertEqual(.settings, Route.household.tab)
+        XCTAssertFalse(Route.ready.hidesTabBar || Route.household.hidesTabBar)
+        XCTAssertEqual("ready", Route.ready.path); XCTAssertEqual("settings/household", Route.household.path)
         XCTAssertNil(Route.check.tab)
         XCTAssertNil(Route.language.tab)
     }

@@ -39,6 +39,7 @@ struct HomeScreen: View {
         ScrollView {
             VStack(spacing: Theme.Space.xl) {
                 headerLine(home)
+                readyBanner()
                 statusCard(home)
                 micSection(home)
                 requests(home)
@@ -58,6 +59,35 @@ struct HomeScreen: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(home.headerLine)
+    }
+
+    /// The cyclone warning banner (only while the stored pack has an active warning): severity colour, headline,
+    /// "Landfall in about N h" and a "Get ready" button.
+    @ViewBuilder
+    private func readyBanner() -> some View {
+        let nowSec = Int64(Date().timeIntervalSince1970)
+        if let w = ReadyView.activeWarning(model.ready.snapshot.pack, nowSec: nowSec) {
+            let r = strings.ready
+            let level = ReadyView.level(w)
+            let colors = levelColors(level)
+            let hours = ReadyView.landfallHours(w, nowSec: nowSec)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(r.levelWord(level)).font(.subheadline.weight(.semibold))
+                Text(w.headline).font(.headline)
+                if let h = hours { Text(r.landfallIn(h)).font(.subheadline) }
+                Button { nav.push(.ready) } label: {
+                    Text(r.getReady).font(.headline).frame(minHeight: Theme.Size.minTouch, alignment: .leading)
+                }
+            }
+            .foregroundStyle(colors.foreground)
+            .tint(colors.foreground)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.l)
+            .background(colors.background, in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(r.bannerDescription(level, headline: w.headline, hours: hours))
+            .accessibilityAddTraits(.isButton)
+        }
     }
 
     private func statusCard(_ home: HomeModel) -> some View {

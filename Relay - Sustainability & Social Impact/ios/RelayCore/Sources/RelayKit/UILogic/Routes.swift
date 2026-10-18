@@ -63,6 +63,10 @@ public enum Route: Hashable, Sendable {
     case settings
     /// Developer settings, pushed from Settings (last row).
     case developer
+    /// "Get ready": warning, plan, shelters, checklist (pushed from the Home banner or Settings).
+    case ready
+    /// "My household", pushed from Settings.
+    case household
 
     /// Routes that hide the tab bar: the ask flow and the first-run language screen.
     public var hidesTabBar: Bool {
@@ -83,10 +87,10 @@ public enum Route: Hashable, Sendable {
     /// Which tab a route belongs to (Request detail counts as Requests). Nil = none.
     public var tab: AppTab? {
         switch self {
-        case .home: return .home
+        case .home, .ready: return .home
         case .requests, .request: return .requests
         case .network, .console: return .network
-        case .settings, .developer: return .settings
+        case .settings, .developer, .household: return .settings
         default: return nil
         }
     }
@@ -105,6 +109,8 @@ public enum Route: Hashable, Sendable {
         case .console: return "network/console"
         case .settings: return "settings"
         case .developer: return "settings/developer"
+        case .ready: return "ready"
+        case .household: return "settings/household"
         }
     }
 
@@ -121,6 +127,8 @@ public enum Route: Hashable, Sendable {
         case "network/console": self = .console
         case "settings": self = .settings
         case "settings/developer": self = .developer
+        case "ready": self = .ready
+        case "settings/household": self = .household
         case "ask":
             var mode: String?
             var from: String?

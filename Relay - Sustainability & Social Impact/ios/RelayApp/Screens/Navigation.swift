@@ -89,6 +89,8 @@ struct RouteDestination: View {
         case .check: CheckScreen()
         case .console: DeveloperScreen(isConsole: true)
         case .developer: DeveloperScreen(isConsole: false)
+        case .ready: ReadyScreen()
+        case .household: HouseholdScreen()
         case .language, .home, .requests, .network, .settings: EmptyView()
         }
     }

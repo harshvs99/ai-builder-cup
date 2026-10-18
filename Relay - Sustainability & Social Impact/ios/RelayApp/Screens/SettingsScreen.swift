@@ -55,14 +55,13 @@ struct SettingsScreen: View {
             }
 
             Section(s.groupBeforeDisaster) {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(s.householdPlan).font(.body)
-                        Text(s.householdPlanHelp).font(.subheadline).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    valueRow(strings.ready.settingsHousehold, value: settings.householdSet ? strings.common.people(settings.household.people) : nil) {
+                        nav.push(.household)
                     }
-                    Button(s.setUp) { sheet = .comingSoon }.buttonStyle(.relayTinted(Theme.Palette.accent))
+                    Text(strings.ready.settingsHouseholdHelp).font(.subheadline).foregroundStyle(.secondary)
                 }
-                .padding(.vertical, Theme.Space.xs)
+                valueRow(strings.ready.settingsReady, value: nil) { nav.push(.ready) }
             }
 
             Section {

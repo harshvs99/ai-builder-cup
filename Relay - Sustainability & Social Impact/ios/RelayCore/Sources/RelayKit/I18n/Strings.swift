@@ -18,6 +18,7 @@ public struct Strings: Equatable, Sendable {
     public let ask: AskStrings
     public let request: RequestStrings
     public let network: NetworkSettingsStrings
+    public let ready: ReadyStrings
 
     /// [timeZone] only affects clock times and "yesterday" wording; tests pin it, the app follows the device.
     public init(_ lang: Lang, timeZone: TimeZone = .autoupdatingCurrent) {
@@ -27,6 +28,7 @@ public struct Strings: Equatable, Sendable {
         ask = AskStrings(lang)
         request = RequestStrings(lang)
         network = NetworkSettingsStrings(lang, timeZone: timeZone)
+        ready = ReadyStrings(lang, timeZone: timeZone)
     }
 
     /// English, for environment defaults, previews and tests.
