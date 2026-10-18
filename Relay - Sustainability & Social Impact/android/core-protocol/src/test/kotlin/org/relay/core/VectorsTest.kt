@@ -29,7 +29,9 @@ import org.relay.core.payload.Inventory
 import org.relay.core.payload.InventoryCodec
 import org.relay.core.payload.Lang
 import org.relay.core.payload.Need
+import org.relay.core.payload.NeedAnswer
 import org.relay.core.payload.NeedCodec
+import org.relay.core.intake.QuestionBank
 import org.relay.core.payload.OpaqueKey
 import java.io.File
 
@@ -61,9 +63,10 @@ class VectorsTest {
         item = if (decodedStrings) fl["item_decoded"]?.jsonPrimitive?.content ?: fl.s("item") else fl.s("item"),
         landmark = if (decodedStrings) fl["landmark_decoded"]?.jsonPrimitive?.content ?: fl.s("landmark") else fl.s("landmark"),
         summary = if (decodedStrings) fl["summary_decoded"]?.jsonPrimitive?.content ?: fl.s("summary") else fl.s("summary"),
+        answers = fl["answers"]?.jsonArray?.map { NeedAnswer(it.jsonObject.i("id"), it.jsonObject.i("value")) } ?: emptyList(),
     )
 
-    @Test fun vectorsFilePresent() { assertEquals(6, vectors.size) }
+    @Test fun vectorsFilePresent() { assertEquals(9, vectors.size) }
 
     @Test fun everyVectorEncodesAndDecodes() {
         for (v in vectors) {
@@ -129,6 +132,34 @@ class VectorsTest {
         assertEquals(sizes.i("need1_payload"), h(byName["need_insulin_odisha"]!!.s("payload_hex")).size)
         assertEquals(sizes.i("need2_payload"), h(byName["need_truncation_negative_coords"]!!.s("payload_hex")).size)
         assertEquals(sizes.i("ack1_payload"), h(byName["ack_received_directed"]!!.s("payload_hex")).size)
+        assertEquals(sizes.i("need_v2_max_payload"), h(byName["need_v2_max_size"]!!.s("payload_hex")).size)
+        assertEquals(NeedCodec.MAX_PAYLOAD_V2, sizes.i("need_v2_max_payload"))
+        assertTrue(h(byName["need_v2_max_size"]!!.s("frame_hex")).size <= 182)
+    }
+
+    @Test fun v1VectorsStayV1AndAnswerVectorsAreV2() {
+        for (v in vectors.filter { it.s("kind") == "NEED" }) {
+            val hasAnswers = v["fields"]!!.jsonObject["answers"] != null
+            assertEquals(v.s("name"), if (hasAnswers) 2 else 1, h(v.s("payload_hex"))[0].toInt())
+        }
+    }
+
+    @Test fun questionBankMatchesSharedTable() {
+        val bank = root["answer_bank"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(QuestionBank.all.size, bank.size)
+        for (b in bank) {
+            val q = QuestionBank.byId(b.i("id"))!!
+            assertEquals(b.s("key"), q.key)
+            val opts = b["options"]!!.jsonArray.map { it.jsonObject }
+            assertEquals(q.options.size, opts.size)
+            for (o in opts) assertEquals(o.s("key"), q.option(o.i("value"))!!.key)
+        }
+    }
+
+    @Test fun mustRejectNeedPayloadsAreRejected() {
+        val bad = root["must_reject_need_payloads"]!!.jsonObject
+        assertTrue(bad.size >= 9)
+        for ((name, hexv) in bad) assertNull("must reject $name", NeedCodec.decode(h(hexv.jsonPrimitive.content)))
     }
 
     @Test fun broadcastRecipientAllFfIsBroadcast() {
@@ -165,7 +196,8 @@ class VectorsTest {
         val good = h(vectors.first().s("payload_hex"))
         assertNotNull(NeedCodec.decode(good))
         fun mut(i: Int, v: Int) = good.copyOf().also { it[i] = v.toByte() }
-        assertNull("bad payload_version", NeedCodec.decode(mut(0, 2)))
+        assertNull("bad payload_version", NeedCodec.decode(mut(0, 3)))
+        assertNull("v2 body without answer bytes", NeedCodec.decode(mut(0, 2)))
         assertNull("category 7", NeedCodec.decode(mut(1 + 8 + 8 + 4, 7)))
         assertNull("urgency 4", NeedCodec.decode(mut(1 + 8 + 8 + 4 + 1, 4)))
         assertNull("loc_acc 6", NeedCodec.decode(mut(1 + 8 + 8 + 4 + 4 + 8, 6)))

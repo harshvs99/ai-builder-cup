@@ -32,11 +32,12 @@ TICKET_COLUMNS = {
     "vuln_flags", "lang", "report_count", "priority_score", "priority_tier", "tier_adjust",
     "priority_reason", "status", "dispatch_draft_en", "dispatch_draft_local",
     "first_reported_at", "max_hops", "created_at", "updated_at",
-    # JSON objects, null when unset: estimated location from a landmark; category correction
-    "geo", "reclass",
+    # JSON objects, null when unset: estimated location from a landmark; category correction;
+    # intake answers {question key: answer key}
+    "geo", "reclass", "answers",
 }
 # Columns added after the first release: SQLite adds them to existing databases on connect.
-JSON_COLUMNS = ("geo", "reclass")
+JSON_COLUMNS = ("geo", "reclass", "answers")
 
 class TeamAtCapacity(Exception):
     """``approve_ticket`` refused to assign a team that already carries its capacity."""

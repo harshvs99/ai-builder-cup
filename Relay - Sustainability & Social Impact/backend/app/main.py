@@ -33,6 +33,7 @@ from .codec import (
     VULN_NAMES,
     CodecError,
     Need,
+    answers_from_json,
     decode_frame,
     decode_need,
     encode_frame,
@@ -88,6 +89,7 @@ class NeedJson(BaseModel):
     origin_node: str | None = Field(default=None, pattern=HEX16)
     loc_acc: int = Field(default=1, ge=0, le=5)  # extra, optional
     created_at: int | None = Field(default=None, ge=0, lt=1 << 32)  # extra, optional (unix s)
+    answers: dict[str, str] = Field(default_factory=dict)  # extra, optional: {question key: answer key}, max 3
 
     @field_validator("category")
     @classmethod
@@ -105,6 +107,17 @@ class NeedJson(BaseModel):
         if bad:
             raise ValueError(f"unknown vuln flags {bad}; allowed {list(VULN_NAMES)}")
         return out
+
+    @field_validator("answers")
+    @classmethod
+    def _answers(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 3:
+            raise ValueError("at most 3 answers")
+        try:
+            answers_from_json(v)
+        except CodecError as e:
+            raise ValueError(str(e)) from e
+        return v
 
     @field_validator("lang")
     @classmethod
@@ -167,8 +180,9 @@ def _ticket_json(
         "msg_ids": [lk["msg_id"] for lk in links],
     }
     # Optional fields, absent when unset. ``geo`` is an estimate from the landmark for a ticket with no
-    # GPS fix (has_location stays false); ``reclass`` is {from, to, reason} and ``category`` is the new one.
-    for key in ("geo", "reclass"):
+    # GPS fix (has_location stays false); ``reclass`` is {from, to, reason} and ``category`` is the new one;
+    # ``answers`` is {question key: answer key} from the intake follow-up questions.
+    for key in ("geo", "reclass", "answers"):
         if row.get(key):
             out[key] = row[key]
     for key in ("proposal", "dispatch"):  # optional: absent until proposed / approved
@@ -563,6 +577,7 @@ def create_app(
                     category=CATEGORY_NAMES.index(nj.category), urgency=nj.urgency, people=nj.people,
                     vuln_flags=flags, lat=nj.lat, lon=nj.lon, loc_acc=nj.loc_acc,
                     lang=LANG_CODES.index(nj.lang), item=nj.item, landmark=nj.landmark, summary=nj.summary,
+                    answers=answers_from_json(nj.answers),
                 )
                 frame = encode_frame(TYPE_NEED, INITIAL_TTL, int(now * 1000), origin, encode_need(need))
                 # round-trip through the decoder so injected needs see exactly what the wire would carry

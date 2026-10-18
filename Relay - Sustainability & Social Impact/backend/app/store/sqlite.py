@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL,
     geo                TEXT,    -- JSON {lat, lon, source, query}: estimate from the landmark, no GPS fix
-    reclass            TEXT     -- JSON {from, to, reason}: category corrected at triage
+    reclass            TEXT,    -- JSON {from, to, reason}: category corrected at triage
+    answers            TEXT     -- JSON {question key: answer key}: intake answers (first report wins)
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_open ON tickets(status, category);
 

@@ -124,6 +124,7 @@ def need_frame(
     summary: str = "needs insulin",
     created_at: int = T0,
     ttl: int = 7,
+    answers: tuple[tuple[int, int], ...] = (),
 ) -> tuple[bytes, codec.Need]:
     n = next(_msg_counter)
     origin = origin if origin is not None else n.to_bytes(8, "big")
@@ -131,7 +132,7 @@ def need_frame(
     need = codec.Need.make(
         msg_id=msg_id, origin_node=origin, created_at=created_at, category=category, urgency=urgency,
         people=people, vuln_flags=vuln_flags, lat=lat, lon=lon, loc_acc=loc_acc, lang=lang,
-        item=item, landmark=landmark, summary=summary,
+        item=item, landmark=landmark, summary=summary, answers=answers,
     )
     frame = codec.encode_frame(codec.TYPE_NEED, ttl, (created_at + 1) * 1000, origin, codec.encode_need(need))
     return frame, need

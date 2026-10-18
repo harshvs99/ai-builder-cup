@@ -209,10 +209,12 @@ class GossipNode(
             out.log("dropped frame >24h in the future from $linkId")
             return@locked
         }
-        val knownVersion = frame.payload.isNotEmpty() && (frame.payload[0].toInt() and 0xFF) == 1
+        val payloadVersion = if (frame.payload.isNotEmpty()) frame.payload[0].toInt() and 0xFF else -1
+        val knownVersion = payloadVersion == 1
         when (frame.type) {
             FrameTypes.NEED -> {
-                if (!knownVersion) return@locked acceptOpaque(out, frame, bytes, linkId)
+                // v2 = v1 plus intake answers (SPEC 5.1); an older build treats it as opaque and only relays it
+                if (!knownVersion && payloadVersion != NeedCodec.VERSION_WITH_ANSWERS) return@locked acceptOpaque(out, frame, bytes, linkId)
                 val need = NeedCodec.decode(frame.payload)
                 if (need == null) { reject(); return@locked }
                 acceptNeed(out, need, frame, bytes, linkId)

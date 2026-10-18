@@ -111,9 +111,14 @@ Any other type: decoded, not processed, deduplicated by its opaque key (§5), an
 
 ## 5. Payloads
 
-Every payload starts with a 1-byte `payload_version = 0x01`. A `NEED` or `ACK` with any other
-`payload_version` is treated like an unknown type (§4): relayed if `ttl > 1`, never stored or
-shown.
+Every payload starts with a 1-byte `payload_version`: `0x01` for every type, plus `0x02` for `NEED`
+(§5.1, intake answers). A `NEED` or `ACK` with any other `payload_version` is treated like an unknown type (§4):
+relayed if `ttl > 1`, never stored or shown.
+
+**Upgrade consequence of NEED v2:** a build that predates v2 sees `payload_version = 2` as unknown, so it
+**relays** the frame (opaque key, at most once per node) but does **not** show, store or upload it; a gateway on an
+old build therefore never uploads a v2 NEED. Encoders emit v1 whenever a NEED has no answers, so v1 traffic is
+unaffected; only a NEED that carries answers needs a v2-aware gateway somewhere on its path to reach the backend.
 
 **Opaque key** (for unknown types and unknown payload versions): the first 8 bytes of
 SHA-256 over `type ‖ sender_id ‖ timestamp_ms (8 bytes BE) ‖ payload`. It goes in the same
@@ -123,7 +128,7 @@ seen-set, so opaque frames are relayed at most once per node.
 
 ```
 size field
-1    payload_version   = 0x01
+1    payload_version   = 0x01 (no answers) or 0x02 (v1 layout + 3 answer bytes, below)
 8    msg_id            random 64-bit, end-to-end identity and dedupe key
 8    origin_node       node_id of the requester (ACKs are addressed here)
 4    created_at        unix seconds, u32
@@ -140,11 +145,43 @@ size field
 1+n  summary           ≤ 40 bytes
 ```
 
-Fixed part 35 bytes, plus 3 length bytes, plus at most 80 string bytes: **max 118 bytes**.
-A NEED frame is at most 22 + 118 = 140 bytes.
+Fixed part 35 bytes, plus 3 length bytes, plus at most 80 string bytes: **max 118 bytes** (v1).
+A v1 NEED frame is at most 22 + 118 = 140 bytes.
 
-Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
-within limits, valid UTF-8, no trailing bytes. Invalid → drop.
+**`payload_version = 0x02`** is exactly the v1 layout (with the version byte set to 2) followed by **3 answer
+bytes** after `summary`: answers to the fixed follow-up questions a dispatcher would ask. "How many people" is not
+an answer; it is the `people` field. Max v2 payload 118 + 3 = **121 bytes**, frame 22 + 121 = **143 bytes**
+(≤ 182 = MTU 185 − 3; the vector `need_v2_max_size` pins it).
+
+```
+answer byte   bit7..bit3  question id, 1..31 (0 = empty slot, whole byte is 0x00)
+              bit2..bit0  answer value, 0..7 (0 = unknown)
+              e.g. conscious=no  -> id 1, value 2 -> 0x0A
+```
+Occupied slots come first, then empty (`0x00`) slots; a question id appears at most once. The question bank
+(ids, JSON keys, answer values) is fixed data, never renumbered; `protocol/vectors.json` carries it as
+`answer_bank` and both codecs' tests check their tables against it:
+
+| id | key | asked for | values (0 is always unknown) |
+|---|---|---|---|
+| 1 | `conscious` | MEDICAL | 1 yes, 2 no |
+| 2 | `road_reachable` | MEDICAL | 1 yes, 2 no |
+| 3 | `water_rising` | RESCUE | 1 yes, 2 no |
+| 4 | `roof_or_ground` | RESCUE | 1 roof, 2 ground |
+| 5 | `children_or_elderly` | WATER, FOOD | 1 yes, 2 no |
+| 6 | `how_long` | WATER, FOOD | 1 today, 2 `1-2 days`, 3 `3+ days` |
+| 7 | `house_damaged` | SHELTER | 1 yes, 2 no |
+| 8 | `last_seen_today` | MISSING_PERSON | 1 yes, 2 no |
+
+OTHER has no questions. Question text per language (en, hi, or, tl, war) lives in the app's core as data, so a
+model or the rules only ever choose a question id. A new question needs a new id, and a new answer value on an
+existing question needs a new `payload_version` (decoders reject what they do not know).
+
+Encoders emit **v1 when there are no answers and v2 when there is at least one**. Decoders (Kotlin and Python) accept
+both. Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
+within limits, valid UTF-8, no trailing bytes; for v2 additionally exactly 3 answer bytes, every non-empty byte a
+known question id with a value that question defines, no duplicate id, no occupied slot after an empty one, and at
+least one answer (all-empty v2 is invalid). Invalid → drop.
 
 ### 5.2 `ACK` (type `0x71`), ≤ 145 bytes
 
@@ -272,9 +309,13 @@ Response:
   "report_count": 1, "priority_score": 8.4, "priority_reason": "...",
   "status": "OPEN", "dispatch_draft": {"en": "...", "local": "..."},
   "first_reported_at": 1790000000, "max_hops": 2, "gateways": ["a1b2c3d4e5f60718"],
-  "msg_ids": ["0011223344556677"]
+  "msg_ids": ["0011223344556677"],
+  "answers": {"conscious": "no", "road_reachable": "yes"}
 }
 ```
+`answers` (optional, omitted when the ticket has none) maps question key to answer key (§5.1 table; `unknown` is a
+real answer). For a merged ticket it holds the first report's answers, and a later report fills only keys the ticket
+does not have yet.
 `status` is `OPEN` or `DISPATCHED`.
 
 Location quality is derived from the ticket's linked NEED packets (§5.1 `loc_acc`):
@@ -291,5 +332,7 @@ also carries its own `loc_acc`.
 
 `protocol/vectors.json` holds hex encodings produced by `protocol/gen_vectors.py` (the
 reference encoder). Both codecs must (a) encode each vector's fields to exactly the given hex
-and (b) decode the hex back to the same fields. Regenerate with
+and (b) decode the hex back to the same fields. The v1 vectors are byte-identical to the originals; the `need_v2_*`
+vectors cover the answer bytes. `must_reject_need_payloads` lists NEED payloads both decoders must refuse, and
+`answer_bank` is the question table both codecs must match. Regenerate with
 `python3 protocol/gen_vectors.py > protocol/vectors.json`.

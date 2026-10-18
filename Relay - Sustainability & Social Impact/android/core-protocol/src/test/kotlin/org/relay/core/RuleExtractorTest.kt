@@ -51,15 +51,17 @@ class RuleExtractorTest {
     @Test fun english1() = x("Please help! We are 5 people trapped on the roof, water rising fast, near the temple").check(
         Category.RESCUE, 3, "rescue", "temple", 5, Lang.EN, setOf(VulnFlag.TRAPPED))
     @Test fun english2() = x("My grandfather is bleeding badly, we are at the hospital gate").check(
-        Category.MEDICAL, 3, "first aid", "hospital", 2, Lang.EN, setOf(VulnFlag.ELDERLY, VulnFlag.INJURED))
+        Category.MEDICAL, 3, "first aid", "hospital", 1, Lang.EN, setOf(VulnFlag.ELDERLY, VulnFlag.INJURED))
     @Test fun english3() = x("We need drinking water and food, 3 children and 2 adults, behind the market").check(
-        Category.WATER, 1, "drinking water", "market", 5, Lang.EN, setOf(VulnFlag.CHILD))
+        Category.WATER, 1, "water", "market", 5, Lang.EN, setOf(VulnFlag.CHILD))
     @Test fun english4() = x("pregnant woman in labour, need ambulance by the bridge").check(
-        Category.MEDICAL, 3, "delivery help", "bridge", 1, Lang.EN, setOf(VulnFlag.PREGNANT))
+        Category.MEDICAL, 3, "ambulance", "bridge", 1, Lang.EN, setOf(VulnFlag.PREGNANT))
     @Test fun english5() = x("My brother was bitten by a snake near the river").check(
         Category.MEDICAL, 3, "snake bite", "river", 1, Lang.EN)
     @Test fun english6() = x("our house collapsed, we have no shelter, 4 people").check(
-        Category.RESCUE, 2, null, "", 4, Lang.EN)
+        Category.SHELTER, 1, "shelter", "", 4, Lang.EN)
+    @Test fun collapsedWithPeopleUnderDebrisStaysRescue() = x("house collapsed, two people under the debris").check(
+        Category.RESCUE, 3, "rescue", "", 2, Lang.EN, setOf(VulnFlag.TRAPPED))
     @Test fun english7() = x("my son is missing since the flood, last seen at the bus stand").check(
         Category.MISSING_PERSON, 1, "missing person", "bus stand", 1, Lang.EN)
     @Test fun english8() = x("my 80 year old grandmother has fever and needs medicine").check(
@@ -69,7 +71,7 @@ class RuleExtractorTest {
         x("drowning, please send a boat").check(Category.RESCUE, 3, "rescue", "", 1, Lang.EN)
     }
     @Test fun hospitalAsLandmarkIsNotAMedicalNeed() =
-        x("no food since two days, we are near the hospital").check(Category.FOOD, 1, "food", "hospital", 2, Lang.EN)
+        x("no food since two days, we are near the hospital").check(Category.FOOD, 1, "food", "hospital", 1, Lang.EN)
 
     // ------------------------------------------------------------------ Hindi
     @Test fun hindiDevanagari1() = x("मेरी माँ को इंसुलिन चाहिए, स्कूल के पास").check(
@@ -77,7 +79,7 @@ class RuleExtractorTest {
     @Test fun hindiDevanagari2() = x("हम 6 लोग छत पर फंसे हैं, बाढ़ का पानी बढ़ रहा है, मंदिर के पास").check(
         Category.RESCUE, 2, "rescue", "temple", 6, Lang.HI, setOf(VulnFlag.TRAPPED))
     @Test fun hindiDevanagari3() = x("बच्चा बुखार से बेहोश है, दवा चाहिए, अस्पताल के पीछे").check(
-        Category.MEDICAL, 3, "first aid", "hospital", 1, Lang.HI, setOf(VulnFlag.CHILD))
+        Category.MEDICAL, 3, "medicine", "hospital", 1, Lang.HI, setOf(VulnFlag.CHILD))
     @Test fun hindiHinglish1() = x("meri maa ko dawai chahiye, mandir ke paas").check(
         Category.MEDICAL, 2, "medicine", "temple", 1, Lang.HI)
     @Test fun hindiHinglish2() = x("hum 5 log chhat par fase hain, baadh aa gayi, bachao").check(
@@ -94,7 +96,7 @@ class RuleExtractorTest {
         Category.RESCUE, 2, "rescue", "", 4, Lang.OR, setOf(VulnFlag.TRAPPED))
     @Test fun odiaScript3() = x("ଝିଅ ଜ୍ୱର ହୋଇଛି, ଔଷଧ ଦରକାର, ମନ୍ଦିର ପାଖରେ").check(
         Category.MEDICAL, 2, "medicine", "temple", 1, Lang.OR)
-    @Test fun odiaScript4() = x("ପାଣି ଓ ଖାଦ୍ୟ ଦରକାର").check(Category.WATER, 1, "drinking water", "", null, Lang.OR)
+    @Test fun odiaScript4() = x("ପାଣି ଓ ଖାଦ୍ୟ ଦରକାର").check(Category.WATER, 1, "water", "", null, Lang.OR)
     @Test fun odiaRoman1() = x("mo maa ku ausadha darkar, school pakhare").check(
         Category.MEDICAL, 2, "medicine", "school", 1, Lang.OR)
     @Test fun odiaRoman2() = x("amaku pani darkar, 5 jane ghara bhasi gala, bapa ku bukhar").check(

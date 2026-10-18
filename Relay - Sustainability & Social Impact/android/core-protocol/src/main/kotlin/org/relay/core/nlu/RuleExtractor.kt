@@ -3,6 +3,7 @@ package org.relay.core.nlu
 import org.relay.core.payload.Category
 import org.relay.core.payload.Lang
 import org.relay.core.payload.Need
+import org.relay.core.payload.NeedAnswer
 import org.relay.core.payload.Utf8
 import org.relay.core.payload.VulnFlag
 
@@ -33,10 +34,12 @@ data class NeedDraft(
         lonE5: Int,
         locAcc: Int,
         lang: Lang = this.lang,
+        answers: List<NeedAnswer> = emptyList(),
     ): Need = Need(
         msgId = msgId, originNode = originNode, createdAt = createdAtSec, category = category,
         urgency = urgency, people = people, vulnFlags = vulnMask, latE5 = latE5, lonE5 = lonE5,
         locAcc = locAcc, lang = lang, item = item, landmark = landmark, summary = summary,
+        answers = answers,
     )
 }
 
@@ -78,7 +81,7 @@ object RuleExtractor {
 
         // Ages ("80 years old") feed the vulnerability flags and are removed before counting people.
         val flags = java.util.EnumSet.noneOf(VulnFlag::class.java)
-        val (ageStripped, ages) = Lexicons.stripAges(withoutLandmark)
+        val (ageStripped, ages) = Lexicons.stripAges(Lexicons.stripAvailable(withoutLandmark))
         for (a in ages) { if (a >= 60) flags += VulnFlag.ELDERLY; if (a in 0..12) flags += VulnFlag.CHILD }
 
         // Concepts
@@ -104,7 +107,9 @@ object RuleExtractor {
         }
         val category = top.category
         val urgency = top.urgency
-        val item = ordered.firstOrNull { it.item != null && it.category == category }?.item
+        // "send a doctor" beats "unconscious": the item is what is asked for when something specific was asked
+        val item = ordered.firstOrNull { it.request && !it.context && it.category == category }?.item
+            ?: ordered.firstOrNull { it.item != null && it.category == category }?.item
             ?: top.item ?: Lexicons.defaultItem(category)
 
         val summary = buildSummary(ordered, subject?.first, people, flags)

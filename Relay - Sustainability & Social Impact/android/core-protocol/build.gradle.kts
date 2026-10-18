@@ -27,6 +27,9 @@ tasks.test {
     useJUnit()
     // Golden vectors live in the repo-level protocol/ directory (android/ is a sibling of protocol/).
     systemProperty("relay.vectors", rootProject.file("../protocol/vectors.json").absolutePath)
+    // Labelled prompts for the RuleExtractor per-field report (RuleScoreTest).
+    systemProperty("relay.labels", rootProject.file("../ml/voice-spike/eval").absolutePath)
+    systemProperty("relay.reportdir", layout.buildDirectory.dir("reports").get().asFile.absolutePath)
     testLogging {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

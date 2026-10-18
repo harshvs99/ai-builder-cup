@@ -18,10 +18,25 @@ internal object People {
         add(12, "twelve", "barah", "बारह")
         add(15, "fifteen", "pandrah", "पंद्रह")
         add(20, "twenty", "bees", "बीस")
+        add(30, "thirty", "tees", "तीस")
+        add(40, "forty", "chalis", "chaalis", "चालीस")
+        add(50, "fifty", "pachas", "pachaas", "पचास")
+        add(60, "sixty", "साठ")
+        add(70, "seventy", "sattar", "सत्तर")
+        add(80, "eighty", "assi", "अस्सी")
+        add(90, "ninety", "nabbe", "नब्बे")
     }
 
-    private val numAlt = numberWords.keys.sortedByDescending { it.length }
+    /** Alternation of every number word, longest first, for building regexes. */
+    internal val numAlt = numberWords.keys.sortedByDescending { it.length }
         .joinToString("|") { Regex.escape(it) }
+
+    /** Spelled-out decades (thirty..ninety): unambiguous enough to read as an age after "is". */
+    internal val decadeAlt = numberWords.filterValues { it in 30..90 }.keys.sortedByDescending { it.length }
+        .joinToString("|") { Regex.escape(it) }
+
+    /** Value of a digit string or number word; 0 if neither. */
+    internal fun valueOf(tok: String): Int = numberWords[tok] ?: Lexicons.digits(tok)
 
     private val groupUnits = setOf(
         "adults", "adult", "children", "child", "kids", "kid", "men", "women", "babies", "elders",
@@ -50,9 +65,6 @@ internal object People {
         "हमें", "हमको", "ଆମେ", "ଆମକୁ", "ଆମର", "ପରିବାର*", "kami", "namin", "amin", "amon", "pamilya*", "kita", "tayo",
         "mi", "among", "atong", "amo",
     )
-
-    private fun valueOf(tok: String): Int =
-        numberWords[tok] ?: Lexicons.digits(tok)
 
     /** Number of people the text speaks about; 1 if unstated, 2 if only a plural subject is stated. */
     fun count(text: String): Int {
