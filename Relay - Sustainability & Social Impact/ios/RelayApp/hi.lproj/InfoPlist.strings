@@ -1,0 +1,5 @@
+/* needs native review */
+"NSBluetoothAlwaysUsageDescription" = "नेटवर्क न होने पर Relay ब्लूटूथ से पास के फ़ोनों के बीच मदद के अनुरोध पहुँचाता है।";
+"NSMicrophoneUsageDescription" = "Relay माइक्रोफ़ोन इस्तेमाल करता है ताकि आप टाइप करने की जगह बोलकर बता सकें कि आपको क्या चाहिए।";
+"NSSpeechRecognitionUsageDescription" = "Relay आपकी आवाज़ को इसी फ़ोन पर, बिना इंटरनेट के, लिखे हुए शब्दों में बदलकर आपका अनुरोध भरता है।";
+"NSLocationWhenInUseUsageDescription" = "भेजते समय Relay आपके अनुरोध में आपकी लोकेशन जोड़ता है, ताकि बचावकर्ता आप तक पहुँच सकें।";

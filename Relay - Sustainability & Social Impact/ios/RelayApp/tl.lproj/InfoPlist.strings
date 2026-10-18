@@ -1,0 +1,5 @@
+/* needs native review */
+"NSBluetoothAlwaysUsageDescription" = "Gumagamit ang Relay ng Bluetooth para ipasa ang mga kahilingan ng tulong sa pagitan ng malalapit na telepono kapag walang network.";
+"NSMicrophoneUsageDescription" = "Gumagamit ang Relay ng mikropono para masabi ninyo ang kailangan ninyo sa halip na mag-type.";
+"NSSpeechRecognitionUsageDescription" = "Ginagawang teksto ng Relay ang boses ninyo sa teleponong ito, kahit walang internet, para mapunan ang kahilingan ninyo.";
+"NSLocationWhenInUseUsageDescription" = "Idinadagdag ng Relay ang lokasyon ninyo sa kahilingan kapag ipinadala ito, para mahanap kayo ng mga rescuer.";

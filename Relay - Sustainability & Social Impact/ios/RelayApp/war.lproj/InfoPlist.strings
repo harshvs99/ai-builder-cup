@@ -1,0 +1,5 @@
+/* needs native review */
+"NSBluetoothAlwaysUsageDescription" = "Gingagamit han Relay an Bluetooth basi ipasa an mga hangyo hin bulig tungod ha mga kasumpay nga telepono kon waray network.";
+"NSMicrophoneUsageDescription" = "Gingagamit han Relay an mikropono basi masiring niyo an kinahanglan niyo sa baylo hin pagsurat.";
+"NSSpeechRecognitionUsageDescription" = "Gin-aaragian han Relay ha teksto an boses niyo ha telepono ini, bisan waray internet, basi mapunan an hangyo niyo.";
+"NSLocationWhenInUseUsageDescription" = "Gindudugang han Relay an lokasyon niyo ha hangyo kon ipadara ito, basi makita kamo han mga mangtatabang.";

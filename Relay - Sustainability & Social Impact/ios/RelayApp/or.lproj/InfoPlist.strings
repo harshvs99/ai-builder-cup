@@ -1,0 +1,5 @@
+/* needs native review */
+"NSBluetoothAlwaysUsageDescription" = "ନେଟୱର୍କ ନଥିଲେ Relay ବ୍ଲୁଟୁଥ୍ ଦ୍ୱାରା ପାଖ ଫୋନ୍ ମଧ୍ୟରେ ସାହାଯ୍ୟ ଅନୁରୋଧ ପଠାଏ।";
+"NSMicrophoneUsageDescription" = "Relay ମାଇକ୍ରୋଫୋନ୍ ବ୍ୟବହାର କରେ, ଯେପରି ଆପଣ ଟାଇପ୍ ନକରି କହି ପାରିବେ ଆପଣଙ୍କୁ କଣ ଦରକାର।";
+"NSSpeechRecognitionUsageDescription" = "Relay ଆପଣଙ୍କ ସ୍ୱରକୁ ଏହି ଫୋନରେ, ଇଣ୍ଟରନେଟ ବିନା, ଲେଖାରେ ବଦଳାଇ ଆପଣଙ୍କ ଅନୁରୋଧ ଭରେ।";
+"NSLocationWhenInUseUsageDescription" = "ପଠାଇବା ସମୟରେ Relay ଆପଣଙ୍କ ଅନୁରୋଧରେ ଆପଣଙ୍କ ଲୋକେସନ୍ ଯୋଡ଼େ, ଯେପରି ଉଦ୍ଧାରକାରୀ ଆପଣଙ୍କୁ ଖୋଜି ପାରିବେ।";

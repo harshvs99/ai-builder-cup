@@ -1,0 +1,160 @@
+import SwiftUI
+import RelayCore
+import RelayKit
+
+/// Home tab: area and status line, status card, the yellow mic, "Type instead" and the two latest requests.
+struct HomeScreen: View {
+    @Environment(AppModel.self) private var model
+    @Environment(AppRouter.self) private var router
+    @Environment(TabNavigator.self) private var nav
+    @Environment(\.strings) private var strings
+    @State private var showHelp = false
+    @State private var askedBluetooth = false
+
+    var body: some View {
+        NowClock { now in
+            let home = HomeModel.make(
+                villager: model.villagerStatus, area: model.settings.areaLabel, needs: model.myNeeds, now: now, strings: strings)
+            content(home)
+                .sheet(isPresented: $showHelp) { HelpSheet(help: home.help) }
+        }
+        .navigationTitle(strings.home.title)
+        .navigationBarTitleDisplayMode(.large)
+        .background(Theme.Palette.surface.ignoresSafeArea())
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showHelp = true } label: { Image(systemName: "questionmark.circle") }
+                    .accessibilityLabel(strings.home.helpLabel)
+            }
+        }
+        .task {
+            // The Bluetooth prompt appears on the first Home, not at launch.
+            if askedBluetooth { return }
+            askedBluetooth = true
+            await model.ensureBluetooth()
+        }
+    }
+
+    private func content(_ home: HomeModel) -> some View {
+        ScrollView {
+            VStack(spacing: Theme.Space.xl) {
+                headerLine(home)
+                statusCard(home)
+                micSection(home)
+                requests(home)
+            }
+            .padding(.horizontal, Theme.Space.gutter)
+            .padding(.bottom, Theme.Space.xl)
+        }
+    }
+
+    private func headerLine(_ home: HomeModel) -> some View {
+        HStack(spacing: Theme.Space.xs + 2) {
+            if !home.area.isEmpty {
+                Text("\(home.area) ·").font(.subheadline).foregroundStyle(.secondary)
+            }
+            StatusLabel(kind: StatusKind(tone: home.statusTone), text: home.statusWord)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(home.headerLine)
+    }
+
+    private func statusCard(_ home: HomeModel) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Button { router.selected = .network } label: {
+                HStack(spacing: Theme.Space.m) {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text(home.statusTitle).font(.headline).foregroundStyle(Color.primary)
+                        Text(home.statusDetail).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(home.statusAccessibility)
+            .accessibilityAddTraits(.isButton)
+
+            if home.showsTurnOnBluetooth {
+                Button(home.turnOnLabel) { model.openAppSettings() }
+                    .buttonStyle(.relayTinted(Theme.Palette.accent))
+            }
+        }
+        .padding(Theme.Space.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .relayGlassCard()
+    }
+
+    private func micSection(_ home: HomeModel) -> some View {
+        VStack(spacing: Theme.Space.m) {
+            MicButton(accessibilityLabel: home.micAccessibility) { nav.startAsk(mode: .voice) }
+            Text(home.micTitle).font(.title2.weight(.semibold)).multilineTextAlignment(.center)
+            Text(home.micSubtitle).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button { nav.startAsk(mode: .text) } label: {
+                Label(home.typeInstead, systemImage: "keyboard")
+            }
+            .buttonStyle(.relayTinted(Theme.Palette.accent))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func requests(_ home: HomeModel) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack {
+                Text(home.yourRequests).font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button(home.seeAll) { router.selected = .requests }
+            }
+            if home.recent.isEmpty {
+                Text(home.noRequests).font(.subheadline).foregroundStyle(.secondary)
+                    .padding(.vertical, Theme.Space.s)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(home.recent.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 { Divider() }
+                        RequestRowButton(row: row)
+                    }
+                }
+                .padding(.horizontal, Theme.Space.l)
+                .relaySurfaceCard()
+            }
+        }
+    }
+}
+
+/// A tappable request row that opens Request detail on the current tab's stack.
+struct RequestRowButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(TabNavigator.self) private var nav
+    var row: RequestRowModel
+
+    var body: some View {
+        let urgency = model.myNeeds.first { $0.msgIdHex == row.msgIdHex }?.urgency
+        Button { nav.push(.request(msgId: row.msgIdHex)) } label: {
+            RequestRowView(row: row, urgency: urgency)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct HelpSheet: View {
+    var help: HomeModel.Help
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            Text(help.title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+            ForEach(Array(help.lines.enumerated()), id: \.offset) { _, line in
+                Text(line).font(.body)
+            }
+            Spacer(minLength: 0)
+            Button(help.close) { dismiss() }.buttonStyle(.relayTinted(Theme.Palette.accent, fullWidth: true))
+        }
+        .padding(Theme.Space.gutter)
+        .presentationDetents([.medium, .large])
+    }
+}
