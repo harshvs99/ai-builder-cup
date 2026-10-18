@@ -116,7 +116,8 @@ CREATE INDEX IF NOT EXISTS idx_loc_hints_ref ON loc_hints(ref_msg_id);
 CREATE TABLE IF NOT EXISTS broadcasts (
     bcast_id  TEXT PRIMARY KEY,                -- 16 hex chars
     issued_at INTEGER NOT NULL,
-    payload   BLOB    NOT NULL
+    payload   BLOB    NOT NULL,
+    label     TEXT    NOT NULL DEFAULT ''     -- operator's description; control room only, never on the wire
 );
 CREATE INDEX IF NOT EXISTS idx_broadcasts_issued ON broadcasts(issued_at);
 
@@ -237,6 +238,8 @@ class SqliteStore:
             for col in JSON_COLUMNS:  # databases created before these columns existed
                 if col not in have:
                     conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
+            if "label" not in {r["name"] for r in conn.execute("PRAGMA table_info(broadcasts)")}:
+                conn.execute("ALTER TABLE broadcasts ADD COLUMN label TEXT NOT NULL DEFAULT ''")
             conn.execute(_SEED_SEQUENCE)
             self._conn = conn
         return self._conn
@@ -407,10 +410,17 @@ class SqliteStore:
         return [{**dict(r), "key": r["hint_key"]} for r in rows]
 
     # ------------------------------------------------------------------ control-room broadcasts
-    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes) -> bool:
+    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes, label: str = "") -> bool:
         with self.tx() as c:
-            cur = c.execute("INSERT OR IGNORE INTO broadcasts(bcast_id, issued_at, payload) VALUES (?,?,?)", (bcast_id, issued_at, payload))
+            cur = c.execute(
+                "INSERT OR IGNORE INTO broadcasts(bcast_id, issued_at, payload, label) VALUES (?,?,?,?)",
+                (bcast_id, issued_at, payload, label),
+            )
             return cur.rowcount == 1
+
+    def broadcast_labels(self, since: int) -> dict[str, str]:
+        rows = self._q("SELECT bcast_id, label FROM broadcasts WHERE issued_at >= ? AND label != ''", (since,))
+        return {r["bcast_id"]: r["label"] for r in rows}
 
     def live_broadcasts(self, since: int) -> list[bytes]:
         return [bytes(r["payload"]) for r in self._q("SELECT payload FROM broadcasts WHERE issued_at >= ? ORDER BY issued_at, rowid", (since,))]

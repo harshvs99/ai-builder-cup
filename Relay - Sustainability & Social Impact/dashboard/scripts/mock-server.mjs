@@ -120,13 +120,27 @@ function propose(only) {  // one ticket, as the real API
   return out;
 }
 
+// Control-room broadcasts; the mock reads a declaration with keywords where the backend asks Gemini.
+const broadcasts = [];
+function mockDraft(text, district) {
+  const t = text.toLowerCase();
+  const disaster = /slide|slope/.test(t) ? 'landslide' : /quake|collapse|rubble/.test(t) ? 'earthquake'
+    : /cyclone|storm(?! surge)/.test(t) ? 'cyclone' : /flood|surge|dam|tsunami/.test(t) ? 'flood' : null;
+  return {
+    kind: /withdraw|all clear|is over/.test(t) ? 'cleared' : 'disaster', disaster,
+    area: district ? { lat: district.lat, lon: district.lon, radius_km: district.radius_km, source: 'district', name: district.name } : null,
+    label: text.slice(0, 60), reason: 'mock keyword match', source: 'rules', phone_effect: '',
+    notes: disaster ? [] : ['None of the four disaster codes fits this text, so nothing can be broadcast for it.'], wire_bytes: 25,
+  };
+}
+
 const summarize = ({ packets: _p, ...rest }) => rest;
 const sorted = () => [...tickets.values()].sort((a, b) => b.priority_score - a.priority_score);
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Relay-Key',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Relay-Key, X-Operator-Key',
 };
 function send(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json', ...CORS });
@@ -152,6 +166,24 @@ const server = http.createServer((req, res) => {
     if (!t) return send(res, 404, { detail: 'unknown ticket' });
     if (t.status !== 'OPEN') return send(res, 409, { detail: 'ticket is not open' });
     return send(res, 200, { proposals: propose(n) });
+  }
+  if (req.method === 'GET' && path === '/v1/broadcasts') {
+    return send(res, 200, { broadcasts: broadcasts.filter((b) => b.expires_at > now()) });
+  }
+  if (req.method === 'POST' && (path === '/v1/broadcasts' || path === '/v1/broadcasts/interpret')) {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const j = body ? JSON.parse(body) : {};
+      if (path === '/v1/broadcasts/interpret') return send(res, 200, mockDraft(j.text ?? '', j.district));
+      const b = { id: Math.random().toString(16).slice(2, 18).padEnd(16, '0'), kind: j.kind ?? 'disaster', disaster: j.disaster,
+        issued_at: now(), expires_at: now() + 86400 };
+      if (j.radius_km > 0) b.area = { lat: j.lat, lon: j.lon, radius_km: j.radius_km };
+      if (j.label) b.label = j.label;
+      broadcasts.push(b);
+      send(res, 200, b);
+    });
+    return;
   }
   if (req.method === 'GET' && path === '/v1/sitreps/latest') return sitrep ? send(res, 200, sitrep) : send(res, 404, { detail: 'no sitrep yet' });
   if (req.method === 'POST' && path === '/v1/sitreps/run') {

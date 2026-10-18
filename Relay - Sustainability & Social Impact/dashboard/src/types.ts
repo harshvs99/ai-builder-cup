@@ -150,3 +150,41 @@ export interface Sitrep {
   local_lang: string;
   ticket_nos: number[];
 }
+
+export type DisasterKey = 'flood' | 'cyclone' | 'earthquake' | 'landslide';
+
+/** A circle on the wire (SPEC 5.6): the declaration applies within radius_km of the centre. */
+export interface BroadcastArea {
+  lat: number;
+  lon: number;
+  radius_km: number;
+}
+
+/** A control-room broadcast as GET /v1/broadcasts lists it (live for 24 h from issued_at). */
+export interface Broadcast {
+  id: string;
+  kind: 'disaster' | 'cleared';
+  disaster: DisasterKey;
+  /** unix seconds */
+  issued_at: number;
+  expires_at: number;
+  /** absent = every phone, whatever its position */
+  area?: BroadcastArea;
+  /** The operator's description; stays in the control room. */
+  label?: string;
+}
+
+/** POST /v1/broadcasts/interpret: the operator's words as a draft. Nothing is sent until it is confirmed. */
+export interface DeclarationDraft {
+  kind: 'disaster' | 'cleared';
+  /** null when none of the four codes fits */
+  disaster: DisasterKey | null;
+  area: (BroadcastArea & { source: 'gazetteer' | 'model' | 'district' | 'rules'; name: string }) | null;
+  label: string;
+  reason: string;
+  /** 'model' = Gemini read it, 'rules' = keyword fallback */
+  source: 'model' | 'rules';
+  phone_effect: string;
+  notes: string[];
+  wire_bytes: number;
+}

@@ -416,9 +416,16 @@ Response:
 - `POST /v1/tickets/{ticket_no}/approve` → queues a `DISPATCHED` ACK for every linked NEED's
   origin, returns the updated `Ticket`.
 - `POST /v1/broadcasts` → body `{ "kind": "disaster" | "cleared" (default "disaster"), "disaster": "flood" | "cyclone" | "earthquake" | "landslide",
-  "lat", "lon", "radius_km" }` (area optional; `radius_km > 0` needs `lat` and `lon`) → `{ "id", "kind", "disaster", "issued_at",
-  "expires_at", "area"? }`. Stored and served to gateways for 24 h (§5.6).
+  "lat", "lon", "radius_km", "label"? }` (area optional; `radius_km > 0` needs `lat` and `lon`) → `{ "id", "kind", "disaster", "issued_at",
+  "expires_at", "area"?, "label"? }`. Stored and served to gateways for 24 h (§5.6). `label` (≤ 80 chars) is the operator's
+  description; it stays in the control room and is never part of the payload.
 - `GET /v1/broadcasts` → `{ "broadcasts": [ ...the same objects, live only ] }`.
+- `POST /v1/broadcasts/interpret` → body `{ "text", "district"?: { "name", "lat", "lon", "radius_km" } }` → a **draft**
+  `{ "kind", "disaster" (null when no code fits), "area": { "lat", "lon", "radius_km", "source", "name" } | null, "label",
+  "reason", "source": "model" | "rules", "phone_effect", "notes": [...], "wire_bytes": 25 }`. Gemini (keyword rules without it)
+  maps the operator's words onto what §5.6 can carry. A place found in the gazetteer sets the centre; the model's own
+  coordinates are used only within 300 km of `district` and come back with `source: "model"` for the operator to check;
+  with no usable place the centre is the district's. Sends nothing: the operator confirms with `POST /v1/broadcasts`.
 - `GET /v1/stats` → `{ "open_by_category": {...}, "gateways_online": n, "tickets": n }`
   (a gateway is online if it synced in the last 60 s).
 - `POST /v1/dev/inject` → body `{ "needs": [NeedJson...] }`; dev only.

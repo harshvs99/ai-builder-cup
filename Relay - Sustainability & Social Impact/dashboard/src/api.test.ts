@@ -66,3 +66,32 @@ describe('api client', () => {
     await expect(createClient('http://x').listTickets()).rejects.toThrow(/Malformed/);
   });
 });
+
+describe('broadcasts', () => {
+  it('declares with the area flattened into the request, and clears by disaster', async () => {
+    const f = vi.fn().mockImplementation(async () => json({ id: 'x' }));
+    vi.stubGlobal('fetch', f);
+    const c = createClient('http://x');
+    await c.declare({ disaster: 'flood', area: { lat: 19.8, lon: 85.8, radius_km: 20 }, label: 'Flood' });
+    await c.declare({ disaster: 'cyclone', area: null });
+    await c.clearDisaster('flood');
+    const bodies = f.mock.calls.map((call) => JSON.parse(call[1].body));
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/broadcasts');
+    expect(bodies[0]).toEqual({ disaster: 'flood', label: 'Flood', kind: 'disaster', lat: 19.8, lon: 85.8, radius_km: 20 });
+    expect(bodies[1]).toEqual({ disaster: 'cyclone', kind: 'disaster' });
+    expect(bodies[2]).toEqual({ kind: 'cleared', disaster: 'flood' });
+  });
+
+  it('reads an empty list from a backend without broadcasts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ detail: 'Not Found' }, 404)));
+    expect(await createClient('http://x').listBroadcasts()).toEqual([]);
+  });
+
+  it('sends the operator text and the district to interpret', async () => {
+    const f = vi.fn().mockResolvedValue(json({ disaster: 'flood' }));
+    vi.stubGlobal('fetch', f);
+    await createClient('http://x').interpretDeclaration('dam breach', { name: 'Puri', lat: 19.81, lon: 85.83, radius_km: 60 });
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/broadcasts/interpret');
+    expect(JSON.parse(f.mock.calls[0]?.[1].body)).toEqual({ text: 'dam breach', district: { name: 'Puri', lat: 19.81, lon: 85.83, radius_km: 60 } });
+  });
+});

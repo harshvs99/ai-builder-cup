@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { detectNewTickets } from './lib/diff';
 import { ALL_DISTRICTS, DEFAULT_DISTRICT, districtById } from './lib/districts';
-import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type { Broadcast, Gateway, Sitrep, Stats, Team, Ticket } from './types';
 
 export const POLL_MS = 2000;
 export const PULSE_MS = 4000;
@@ -13,6 +13,8 @@ export interface LiveData {
   teams: Team[];
   /** null when the backend predates GET /v1/gateways. */
   gateways: Gateway[] | null;
+  /** Control-room broadcasts still inside their 24 h life (declarations and all-clears). */
+  broadcasts: Broadcast[];
   /** Epoch ms of the last successful ticket poll. */
   updatedAt: number | null;
   connected: boolean;
@@ -29,6 +31,7 @@ export function useLiveData(): LiveData {
   const [stats, setStats] = useState<Stats | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [gateways, setGateways] = useState<Gateway[] | null>(null);
+  const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [connected, setConnected] = useState(true);
   const [loaded, setLoaded] = useState(false);
@@ -42,11 +45,12 @@ export function useLiveData(): LiveData {
     const ctl = new AbortController();
 
     const run = async () => {
-      const [t, s, tm, gw] = await Promise.allSettled([
+      const [t, s, tm, gw, bc] = await Promise.allSettled([
         api.listTickets(ctl.signal),
         api.getStats(ctl.signal),
         api.listTeams(ctl.signal),
         api.listGateways(ctl.signal),
+        api.listBroadcasts(ctl.signal),
       ]);
       if (stopped) return;
       if (t.status === 'fulfilled') {
@@ -70,6 +74,7 @@ export function useLiveData(): LiveData {
       if (s.status === 'fulfilled') setStats(s.value);
       if (tm.status === 'fulfilled' && Array.isArray(tm.value)) setTeams(tm.value);
       if (gw.status === 'fulfilled') setGateways(gw.value);
+      if (bc.status === 'fulfilled') setBroadcasts(bc.value);
       timer = setTimeout(run, POLL_MS);
     };
     tick.current = () => {
@@ -85,7 +90,7 @@ export function useLiveData(): LiveData {
   }, []);
 
   const refresh = useCallback(() => tick.current(), []);
-  return { tickets, stats, teams, gateways, updatedAt, connected, loaded, fresh, refresh };
+  return { tickets, stats, teams, gateways, broadcasts, updatedAt, connected, loaded, fresh, refresh };
 }
 
 /** Current unix time in seconds, re-rendering every `ms`. */

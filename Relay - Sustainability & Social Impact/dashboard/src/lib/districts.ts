@@ -7,12 +7,14 @@ export interface District {
   /** [lon, lat] the map opens on when the district is picked. */
   center: [number, number];
   zoom: number;
+  /** Default reach of a disaster declared from this district's view (km around the centre). */
+  radiusKm: number;
 }
 
 /** The backend has no district field: a ticket or team belongs to the nearest centre below. */
 export const DISTRICTS: readonly District[] = [
-  { id: 'puri', name: 'Puri', center: [85.83, 19.81], zoom: 11 },
-  { id: 'delhi', name: 'Delhi', center: [77.209, 28.614], zoom: 10.5 },
+  { id: 'puri', name: 'Puri', center: [85.83, 19.81], zoom: 11, radiusKm: 60 },
+  { id: 'delhi', name: 'Delhi', center: [77.209, 28.614], zoom: 10.5, radiusKm: 40 },
 ];
 
 export const ALL_DISTRICTS = 'all';

@@ -11,7 +11,8 @@ import {
 // maplibre-gl v6 ships an ES-module worker that imports a shared chunk by relative
 // path; let Vite bundle it into one self-contained file and point maplibre at it.
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import type { Team, Ticket } from '../types';
+import type { Broadcast, BroadcastArea, Team, Ticket } from '../types';
+import { circleRing, declarationAreas } from '../lib/declare';
 import type { Theme } from '../hooks';
 import { PULSE_MS } from '../hooks';
 import {
@@ -46,6 +47,10 @@ interface Props {
   fresh: ReadonlyMap<number, number>;
   selected: number | null;
   onSelect: (no: number) => void;
+  /** Disaster declarations in force: their areas are shaded. */
+  declarations?: Broadcast[];
+  /** The area of a declaration being drafted, outlined so the operator can check it before sending. */
+  draftArea?: BroadcastArea | null;
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -54,6 +59,15 @@ const PULSE_PERIOD_MS = 1300;
 /** Urgency colours, shared with the legend in styles.css (--life, --urgent, --soon, --wait). */
 export const TIER_COLOR = { P1: '#e5484d', P2: '#f08c2e', P3: '#e9c23b', P4: '#9aa3ad' } as const;
 const TEAM_COLOR = '#2f6fed';
+const DECLARED_COLOR = '#8e4ec6';
+
+function draftFeatures(a: BroadcastArea | null | undefined): GeoJSON.FeatureCollection {
+  if (!a || !(a.radius_km > 0)) return EMPTY;
+  return {
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [circleRing(a.lat, a.lon, a.radius_km)] }, properties: {} }],
+  };
+}
 
 const colorExpr: ExpressionSpecification = [
   'match', ['get', 'tier'],
@@ -93,7 +107,7 @@ function teamFeatures(teams: readonly Team[]): GeoJSON.FeatureCollection {
   };
 }
 
-export function MapView({ ref, tickets, teams, district, layers, theme, fresh, selected, onSelect }: Props) {
+export function MapView({ ref, tickets, teams, district, layers, theme, fresh, selected, onSelect, declarations = [], draftArea = null }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const ready = useRef(false);
@@ -107,6 +121,10 @@ export function MapView({ ref, tickets, teams, district, layers, theme, fresh, s
   const onSelectRef = useRef(onSelect);
   const raf = useRef<number | null>(null);
   const estMarkers = useRef(new Map<number, { marker: Marker; el: HTMLDivElement }>());
+  const declarationsRef = useRef(declarations);
+  const draftRef = useRef(draftArea);
+  declarationsRef.current = declarations;
+  draftRef.current = draftArea;
   const districtRef = useRef(district);
   districtRef.current = district;
   ticketsRef.current = tickets;
@@ -196,6 +214,8 @@ export function MapView({ ref, tickets, teams, district, layers, theme, fresh, s
     (map.getSource('estimates') as GeoJSONSource | undefined)?.setData(
       toEstimateAreas(ticketsRef.current, selectedRef.current),
     );
+    (map.getSource('declared') as GeoJSONSource | undefined)?.setData(declarationAreas(declarationsRef.current));
+    (map.getSource('draft') as GeoJSONSource | undefined)?.setData(draftFeatures(draftRef.current));
     syncEstimateMarkers(map);
     if (!fitted.current && ticketsRef.current.some((t) => isMappable(t) || hasMeshEstimate(t))) {
       fitted.current = true; // first load only
@@ -287,6 +307,15 @@ export function MapView({ ref, tickets, teams, district, layers, theme, fresh, s
       map.addSource('pulses', { type: 'geojson', data: EMPTY });
       map.addSource('teams', { type: 'geojson', data: EMPTY });
       map.addSource('estimates', { type: 'geojson', data: EMPTY });
+      map.addSource('declared', { type: 'geojson', data: EMPTY });
+      map.addSource('draft', { type: 'geojson', data: EMPTY });
+      // Declared disaster areas sit under everything else: context, not something to click.
+      map.addLayer({ id: 'declared-fill', type: 'fill', source: 'declared', paint: { 'fill-color': DECLARED_COLOR, 'fill-opacity': 0.06 } });
+      map.addLayer({ id: 'declared-line', type: 'line', source: 'declared', paint: { 'line-color': DECLARED_COLOR, 'line-width': 1.5, 'line-opacity': 0.7 } });
+      map.addLayer({
+        id: 'draft-line', type: 'line', source: 'draft',
+        paint: { 'line-color': DECLARED_COLOR, 'line-width': 2.5, 'line-dasharray': [3, 2] },
+      });
       // Mesh-estimate uncertainty discs: translucent fill + dashed outline, beneath the GPS dots.
       map.addLayer({
         id: 'estimate-fill',
@@ -396,7 +425,18 @@ export function MapView({ ref, tickets, teams, district, layers, theme, fresh, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(pushData, [tickets, teams, selected]);
+  useEffect(pushData, [tickets, teams, selected, declarations, draftArea]);
+
+  // A drafted area is framed so the operator sees what it covers before sending.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !draftArea || !(draftArea.radius_km > 0)) return;
+    const ring = circleRing(draftArea.lat, draftArea.lon, draftArea.radius_km, 16);
+    const b = new LngLatBounds(ring[0]!, ring[0]!);
+    for (const p of ring) b.extend(p);
+    map.resize();
+    map.fitBounds(b, { padding: 40, duration: 500 });
+  }, [draftArea?.lat, draftArea?.lon, draftArea?.radius_km]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(applyLayers, [layers]);
   useEffect(applyTheme, [theme]);
 

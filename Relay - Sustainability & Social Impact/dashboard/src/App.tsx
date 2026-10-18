@@ -3,13 +3,15 @@ import { Header, type View } from './components/Header';
 import { MapView, type MapHandle, type MapLayers } from './components/MapView';
 import { Queue } from './components/Queue';
 import { Detail, type DetailAction } from './components/Detail';
+import { DeclarePanel } from './components/DeclarePanel';
 import { GatewaysView, SitrepView, TeamsView } from './components/Views';
 import { useDistrict, useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
 import { districtById, districtName, teamInDistrict, ticketInDistrict } from './lib/districts';
 import { sortTickets } from './lib/sort';
 import { countEstimated, hasMeshEstimate, isMappable } from './lib/location';
 import { QUEUE_FILTERS, matchesFilter, matchesSearch, orderQueue, ticketRef, type SortKey } from './lib/triage';
-import type { Ticket } from './types';
+import { inForce } from './lib/declare';
+import type { BroadcastArea, Ticket } from './types';
 
 const LEGEND = [
   ['life', 'Life at risk'],
@@ -19,7 +21,7 @@ const LEGEND = [
 ] as const;
 
 export function App() {
-  const { tickets: allTickets, stats, teams: allTeams, gateways, connected, loaded, fresh, refresh } = useLiveData();
+  const { tickets: allTickets, stats, teams: allTeams, gateways, broadcasts, connected, loaded, fresh, refresh } = useLiveData();
   const [district, chooseDistrict] = useDistrict();
   const tickets = useMemo(() => allTickets.filter((t) => ticketInDistrict(t, district)), [allTickets, district]);
   const teams = useMemo(() => allTeams.filter((t) => teamInDistrict(t, district)), [allTeams, district]);
@@ -31,6 +33,8 @@ export function App() {
   const [search, setSearch] = useState('');
   const [filterId, setFilterId] = useState('all');
   const [sort, setSort] = useState<SortKey>('priority');
+  const [declaring, setDeclaring] = useState(false);
+  const [draftArea, setDraftArea] = useState<BroadcastArea | null>(null);
   const [layers, setLayers] = useState<MapLayers>({ requests: true, teams: false, heat: false });
   const mapRef = useRef<MapHandle>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -55,6 +59,7 @@ export function App() {
     setSelected(null);
   };
   const select = (no: number | null) => {
+    if (no !== null) setDeclaring(false);
     setSelected(no);
     if (no !== null) markSeen(no);
   };
@@ -124,10 +129,17 @@ export function App() {
         onDistrict={switchDistrict}
         theme={theme}
         onToggleTheme={toggleTheme}
+        broadcasts={broadcasts}
+        declaring={declaring}
+        onDeclare={() => {
+          setView('board');
+          setSelected(null);
+          setDeclaring((d) => !d);
+        }}
       />
       {!connected && <div className="banner" role="alert">Backend unreachable. Showing the last data received; retrying every 2 s.</div>}
 
-      <main className={`board ${view === 'board' ? '' : 'hidden'} ${shown ? 'with-detail' : ''}`}>
+      <main className={`board ${view === 'board' ? '' : 'hidden'} ${shown || declaring ? 'with-detail' : ''}`}>
         <Queue
           tickets={searched}
           filterId={filterId}
@@ -152,6 +164,8 @@ export function App() {
             fresh={fresh}
             selected={selected}
             onSelect={select}
+            declarations={inForce(broadcasts, nowSec)}
+            draftArea={declaring ? draftArea : null}
           />
           <div className="map-toggles" role="group" aria-label="Map layers">
             {([['requests', 'Requests'], ['teams', 'Teams'], ['heat', 'Heat']] as const).map(([k, label]) => (
@@ -190,6 +204,16 @@ export function App() {
             )}
           </div>
         </section>
+        {declaring && !shown && (
+          <DeclarePanel
+            district={districtById(district)}
+            broadcasts={broadcasts}
+            nowSec={nowSec}
+            onClose={() => setDeclaring(false)}
+            onChanged={refresh}
+            onDraftArea={setDraftArea}
+          />
+        )}
         {shown && (
           <Detail
             ticket={shown}

@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
-import type { Gateway, Stats, Ticket } from '../types';
+import type { Broadcast, Gateway, Stats, Ticket } from '../types';
+import { disasterLabel, inForce } from '../lib/declare';
 import type { Theme } from '../hooks';
 import { tierOf } from '../lib/sort';
 import { median } from '../lib/triage';
@@ -29,6 +30,9 @@ interface Props {
   onDistrict: (id: string) => void;
   theme: Theme;
   onToggleTheme: () => void;
+  broadcasts: Broadcast[];
+  declaring: boolean;
+  onDeclare: () => void;
 }
 
 /** Most recent gateway sync (unix seconds), null when none has synced. */
@@ -43,6 +47,23 @@ function ago(nowSec: number, then: number | null): string {
   if (d < 60) return `${d} s ago`;
   if (d < 3600) return `${Math.floor(d / 60)} min ago`;
   return `${Math.floor(d / 3600)} h ago`;
+}
+
+/** Opens the declaration panel; while something is declared it says what, so nobody forgets it is on. */
+function DeclareButton({ broadcasts, nowSec, active, onClick }: { broadcasts: Broadcast[]; nowSec: number; active: boolean; onClick: () => void }) {
+  const live = inForce(broadcasts, nowSec);
+  const kinds = [...new Set(live.map((b) => disasterLabel(b.disaster)))];
+  return (
+    <button
+      type="button"
+      className={`declare-btn${live.length ? ' on' : ''}${active ? ' open' : ''}`}
+      aria-pressed={active}
+      onClick={onClick}
+      title={live.length ? 'Disasters declared to phones; click to review or end' : 'Declare a disaster to every phone'}
+    >
+      <i aria-hidden /> {live.length ? `${kinds.join(', ')} declared` : 'Declare disaster'}
+    </button>
+  );
 }
 
 export function Header(p: Props) {
@@ -98,6 +119,7 @@ export function Header(p: Props) {
         <div className="opt"><dt>Last upload</dt><dd className="mono">{ago(nowSec, lastUploadSec(gateways))}</dd></div>
       </dl>
       <div className="topbar-right">
+        <DeclareButton broadcasts={p.broadcasts} nowSec={nowSec} active={p.declaring} onClick={p.onDeclare} />
         <label className="search">
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden><path d="M10 4a6 6 0 1 0 3.7 10.7l4.8 4.8 1.4-1.4-4.8-4.8A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" fill="currentColor" /></svg>
           <input

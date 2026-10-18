@@ -179,12 +179,17 @@ class Store(Protocol):
         ...
 
     # ------------------------------------------------------------------ control-room broadcasts (SPEC 5.6)
-    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes) -> bool:
-        """Store a BROADCAST payload idempotently on ``bcast_id`` (hex). True if stored now."""
+    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes, label: str = "") -> bool:
+        """Store a BROADCAST payload idempotently on ``bcast_id`` (hex). True if stored now. ``label`` is the operator's
+        short description; it stays in the control room and never goes on the wire."""
         ...
 
     def live_broadcasts(self, since: int) -> list[bytes]:
         """Payloads of the broadcasts with ``issued_at >= since``, oldest first."""
+        ...
+
+    def broadcast_labels(self, since: int) -> dict[str, str]:
+        """``bcast_id`` -> label of the broadcasts with ``issued_at >= since`` (empty labels left out)."""
         ...
 
     def origins_for_ticket(self, ticket_no: int) -> list[dict[str, Any]]: ...

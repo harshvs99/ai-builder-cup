@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import declare as declaring
 from . import dispatch as dispatching
 from . import sitrep as sitreps
 from . import teams as team_data
@@ -52,6 +53,7 @@ from .codec import (
     encode_need,
     to_e5,
 )
+from .geocode import default_gazetteer
 from .location import add_no_fix_note, scrub_legacy_draft, ticket_location
 from .priority import vuln_names
 from .pubsub import (
@@ -96,6 +98,7 @@ class BroadcastRequest(BaseModel):
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int = Field(default=0, ge=0, le=65535)  # 0 = the whole control-room area
+    label: str = Field(default="", max_length=80)  # the operator's description; shown in the control room, never sent
 
     @field_validator("kind")
     @classmethod
@@ -110,6 +113,22 @@ class BroadcastRequest(BaseModel):
         if v not in DISASTER_CODES.values():
             raise ValueError(f"disaster must be one of {sorted(DISASTER_CODES.values())}")
         return v
+
+
+class DistrictJson(BaseModel):
+    """The district the operator is looking at: the default area of a declaration that names no place."""
+
+    name: str = Field(default="", max_length=40)
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    radius_km: int = Field(default=0, ge=0, le=500)
+
+
+class InterpretRequest(BaseModel):
+    """Free text from the operator ("cyclone landfall near Puri, storm surge"), to be turned into a broadcast draft."""
+
+    text: str = Field(min_length=1, max_length=600)
+    district: DistrictJson | None = None
 
 
 class MeshHintJson(BaseModel):
@@ -244,11 +263,13 @@ def _ticket_json(
     return out
 
 
-def _broadcast_json(b: Broadcast) -> dict[str, Any]:
+def _broadcast_json(b: Broadcast, label: str = "") -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": b.bcast_id.hex(), "kind": b.kind, "disaster": b.disaster, "issued_at": b.issued_at,
         "expires_at": b.issued_at + BROADCAST_TTL_S,
     }
+    if label:
+        out["label"] = label
     if b.radius_km:
         out["area"] = {"lat": b.lat_e5 / 100000, "lon": b.lon_e5 / 100000, "radius_km": b.radius_km}
     return out
@@ -744,14 +765,27 @@ def create_app(
             lon_e5=to_e5(body.lon) if has_area and body.lon is not None else 0,
             radius_km=body.radius_km if has_area else 0,
         )
-        store.add_broadcast(b.bcast_id.hex(), b.issued_at, encode_broadcast(b))
-        return _broadcast_json(b)
+        label = " ".join(body.label.split())
+        store.add_broadcast(b.bcast_id.hex(), b.issued_at, encode_broadcast(b), label)
+        return _broadcast_json(b, label)
 
     @app.get("/v1/broadcasts", dependencies=operator)
     def live() -> dict[str, Any]:
         from .codec import decode_broadcast
 
-        return {"broadcasts": [_broadcast_json(decode_broadcast(p)) for p in store.live_broadcasts(int(clock()) - BROADCAST_TTL_S)]}
+        since = int(clock()) - BROADCAST_TTL_S
+        labels = store.broadcast_labels(since)
+        out = [decode_broadcast(p) for p in store.live_broadcasts(since)]
+        return {"broadcasts": [_broadcast_json(b, labels.get(b.bcast_id.hex(), "")) for b in out]}
+
+    @app.post("/v1/broadcasts/interpret", dependencies=operator)
+    def interpret_declaration(body: InterpretRequest) -> dict[str, Any]:
+        """The operator's words as a draft declaration (Gemini, else keyword rules). Sends nothing: the operator
+        reviews the draft and confirms it with ``POST /v1/broadcasts``."""
+        return declaring.interpret(
+            body.text, textgen=textgen, gazetteer=default_gazetteer(),
+            district=body.district.model_dump() if body.district else None,
+        )
 
     # ------------------------------------------------------------------ dev only
     if env != "prod":

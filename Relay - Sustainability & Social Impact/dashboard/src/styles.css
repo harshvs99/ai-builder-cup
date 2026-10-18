@@ -19,6 +19,7 @@
   --soon: #e9c23b;
   --wait: #9aa3ad;
   --team: #2f6fed;
+  --declared: #8e4ec6;
   --sel: #e6eefe;
   --fresh: #fff3bf;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.06);
@@ -343,3 +344,26 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .est-marker.selected { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--panel); }
 .est-marker.dispatched { opacity: 0.5; }
+
+/* ------------------------------------------------------------------ disaster declaration */
+.declare-btn {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; font-weight: 650;
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel);
+}
+.declare-btn i { width: 8px; height: 8px; border-radius: 2px; background: var(--declared); transform: rotate(45deg); }
+.declare-btn:hover, .declare-btn.open { background: var(--hover); }
+.declare-btn.on { background: var(--declared); color: #fff; border-color: transparent; }
+.declare-btn.on i { background: #fff; }
+.declare .detail-head { display: flex; align-items: center; justify-content: space-between; }
+.declared-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.declare-text, .declare-label, .declare select, .declare-coords input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); margin: 4px 0 8px;
+}
+.declare-text { resize: vertical; font: inherit; }
+.declare-draft { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.declare-area { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.declare-coords { display: grid; grid-template-columns: 1fr 1fr 0.8fr; gap: 6px; }
+.declare-ok { color: var(--ok); margin-top: 8px; }
+.declare-err { color: var(--bad); margin-top: 4px; }
+.declare-warn { color: var(--warn); }
+.btn.danger { background: var(--declared); }
