@@ -141,10 +141,11 @@ fun RelayRoot() {
                             nav,
                             AskMode.fromArg(e.arguments?.getString("mode")),
                             e.arguments?.getString("prefillFrom"),
-                            navController.getBackStackEntry(Routes.ASK_FLOW),
+                            remember(e) { navController.getBackStackEntry(Routes.ASK_FLOW) },
                         )
                     }
-                    composable(Routes.CHECK) { CheckScreen(nav, navController.getBackStackEntry(Routes.ASK_FLOW)) }
+                    // remember: after Send pops the flow, this screen still composes during its exit animation.
+                    composable(Routes.CHECK) { e -> CheckScreen(nav, remember(e) { navController.getBackStackEntry(Routes.ASK_FLOW) }) }
                 }
                 composable(Routes.NETWORK) { NetworkScreen(nav) }
                 composable(Routes.CONSOLE) { ConsoleScreen(nav) }
