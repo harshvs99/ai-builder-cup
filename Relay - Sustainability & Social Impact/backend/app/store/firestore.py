@@ -5,7 +5,7 @@ Layout (all top-level collections in the configured database):
   packets/{msg_id}      NEED packet; ``ticket_no`` + ``link_ord`` are set when it is triaged
   tickets/{ticket_no}   ticket; ``links`` = [{msg_id, gateway_node, loc_acc}] (denormalised so the
                         dashboard list needs one read per ticket, not one per packet);
-                        ``open_category`` = category while OPEN, null once DISPATCHED
+                        ``open_category`` = category while OPEN, null once DISPATCHED (and after: ON_THE_WAY, RESOLVED)
   acks/{seq}            ACK; ``seq`` is the gateway sync cursor
   ack_keys/{ref}_{st}   marker doc: at most one ack per (ref_msg_id, status)
   gateways/{node}       last_seen
@@ -38,15 +38,18 @@ from typing import Any, Callable
 
 from ..codec import CATEGORY_NAMES
 from .base import (
+    ADVANCE_FROM,
     TICKET_COLUMNS,
     TICKET_DEFAULTS,
     AckSpec,
+    AdvanceResult,
     IngestOutcome,
     Lookup,
     PacketIn,
     Plan,
     RecordStatus,
     TeamAtCapacity,
+    merge_dispatch,
 )
 
 log = logging.getLogger("relay.store.firestore")
@@ -330,6 +333,48 @@ class FirestoreStore:
         with self._write_lock:
             return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
+    def advance_ticket(
+        self, ticket_no: int, status: str, now: int, make_ack: Callable[[dict[str, Any]], AckSpec], *,
+        patch: dict[str, Any] | None = None,
+    ) -> AdvanceResult | None:
+        from google.cloud import firestore
+
+        tref = self._col("tickets").document(str(ticket_no))
+        dref = self._col("dispatch").document(str(ticket_no))
+
+        @firestore.transactional
+        def run(txn) -> AdvanceResult | None:
+            snap = tref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            if snap.get("status") == status:
+                return "noop"
+            if snap.get("status") not in ADVANCE_FROM[status]:
+                return "conflict"
+            dsnap = dref.get(transaction=txn)
+            acks = [make_ack(p) for p in self._origins(self._packets_of(ticket_no, txn))]
+            ack_counter_ref, seq = self._next(txn, "ack_seq")
+            keys = [(a, self._col("ack_keys").document(f"{a.ref_msg_id}_{a.status}")) for a in acks]
+            fresh = [(a, k) for a, k in keys if not k.get(transaction=txn).exists]
+            txn.update(tref, {"status": status, "updated_at": now, "open_category": None})
+            doc: dict[str, Any] = {"ticket_no": ticket_no}
+            if patch:
+                doc["dispatch"] = merge_dispatch((dsnap.to_dict() or {}).get("dispatch") if dsnap.exists else None, patch)
+            if status == "RESOLVED":
+                doc["active"] = False
+            if len(doc) > 1:
+                txn.set(dref, doc, merge=True)
+            for a, k in fresh:
+                txn.set(self._col("acks").document(str(seq)), _ack_doc(a, seq, now))
+                txn.set(k, {"seq": seq})
+                seq += 1
+            if fresh:
+                txn.set(ack_counter_ref, {"value": seq - 1})
+            return "done"
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
     def stats(self) -> dict[str, Any]:
         tickets = self._col("tickets")
         open_by_cat = {
@@ -350,7 +395,7 @@ class FirestoreStore:
             "open": len(open_rows),
             "p1_open": len(p1),
             "p1_open_nos": p1,
-            "dispatched": self._count(self._eq(tickets, "status", "==", "DISPATCHED")),
+            "dispatched": sum(self._count(self._eq(tickets, "status", "==", st)) for st in ("DISPATCHED", "ON_THE_WAY")),
             "resolved": self._count(self._eq(tickets, "status", "==", "RESOLVED")),
             "open_by_category": open_by_cat,
             "oldest_open_no": oldest["ticket_no"] if oldest else None,

@@ -4,6 +4,13 @@ import { formatRelative } from '../lib/time';
 import { tierOf, ticketTitle } from '../lib/sort';
 import { noLocationBadge } from '../lib/location';
 
+const STATUS_LABEL: Record<Ticket['status'], string> = {
+  OPEN: 'Open',
+  DISPATCHED: 'Dispatched',
+  ON_THE_WAY: 'On the way',
+  RESOLVED: 'Resolved',
+};
+
 interface Props {
   tickets: Ticket[];
   loaded: boolean;
@@ -31,7 +38,7 @@ export function Queue({ tickets, loaded, nowSec, fresh, selected, onSelect }: Pr
             const cls = [
               'row',
               t.ticket_no === selected ? 'selected' : '',
-              t.status === 'DISPATCHED' ? 'dispatched' : '',
+              t.status !== 'OPEN' ? 'dispatched' : '',
               fresh.has(t.ticket_no) ? 'fresh' : '',
             ].join(' ');
             return (
@@ -44,7 +51,7 @@ export function Queue({ tickets, loaded, nowSec, fresh, selected, onSelect }: Pr
                     <span className="meta">
                       <span>{formatRelative(nowSec, t.first_reported_at)}</span>
                       <span>{t.max_hops} hop{t.max_hops === 1 ? '' : 's'}</span>
-                      <span className={`status ${t.status}`}>{t.status === 'DISPATCHED' ? 'Dispatched' : 'Open'}</span>
+                      <span className={`status ${t.status}`}>{STATUS_LABEL[t.status] ?? 'Open'}</span>
                     </span>
                     {noLoc && <span className="noloc">{noLoc}</span>}
                   </span>

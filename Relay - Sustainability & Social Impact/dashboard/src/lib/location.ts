@@ -59,7 +59,7 @@ export function toFeatures(tickets: readonly Ticket[], selected: number | null):
         ticket_no: t.ticket_no,
         category: t.category,
         score: t.priority_score,
-        dispatched: t.status === 'DISPATCHED' ? 1 : 0,
+        dispatched: t.status !== 'OPEN' ? 1 : 0,
         selected: t.ticket_no === selected ? 1 : 0,
       },
     })),

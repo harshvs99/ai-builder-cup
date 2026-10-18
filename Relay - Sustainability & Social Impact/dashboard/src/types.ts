@@ -10,7 +10,7 @@ export const CATEGORIES = [
 export type Category = (typeof CATEGORIES)[number];
 
 export type Tier = 'P1' | 'P2' | 'P3' | 'P4';
-export type Status = 'OPEN' | 'DISPATCHED';
+export type Status = 'OPEN' | 'DISPATCHED' | 'ON_THE_WAY' | 'RESOLVED';
 
 export interface PacketInfo {
   msg_id: string;

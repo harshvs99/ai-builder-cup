@@ -29,6 +29,8 @@ from .codec import (
     INITIAL_TTL,
     LANG_CODES,
     STATUS_DISPATCHED,
+    STATUS_ON_THE_WAY,
+    STATUS_RESOLVED,
     TYPE_NEED,
     VULN_NAMES,
     CodecError,
@@ -135,6 +137,12 @@ class ApproveRequest(BaseModel):
     team_id: str | None = Field(default=None, max_length=64)
     eta_min: int | None = Field(default=None, ge=0, le=dispatching.MAX_ETA_MIN)
     order_en: str | None = Field(default=None, max_length=dispatching.MAX_ORDER_CHARS)
+
+
+class OnTheWayRequest(BaseModel):
+    """Optional body of ``POST /v1/tickets/{no}/on-the-way``: the ETA for the on-the-way ACK."""
+
+    eta_min: int | None = Field(default=None, ge=0, le=dispatching.MAX_ETA_MIN)
 
 
 class InjectRequest(BaseModel):
@@ -255,6 +263,7 @@ def create_app(
     agent: Agent | None = None,
     clock: Callable[[], float] | None = None,
     device_key: str | None = None,
+    operator_key: str | None = None,
     env: str | None = None,
     enrich_budget_s: float | None = None,
     pubsub_topic: str | None = None,
@@ -273,6 +282,7 @@ def create_app(
     both default to Gemini when the environment enables it, else to templates."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
+    operator_key = operator_key if operator_key is not None else os.environ.get("RELAY_OPERATOR_KEY", "")
     env = env if env is not None else os.environ.get("RELAY_ENV", "dev")
     cors = DEFAULT_CORS + [o.strip() for o in os.environ.get("RELAY_CORS_ORIGINS", "").split(",") if o.strip()]
     topic = (pubsub_topic if pubsub_topic is not None else os.environ.get("RELAY_PUBSUB_TOPIC", "")).strip()
@@ -319,6 +329,20 @@ def create_app(
         )
         if not ok:
             raise HTTPException(status_code=401, detail="invalid or missing X-Relay-Key")
+
+    # Control-room routes: open while RELAY_OPERATOR_KEY is unset, X-Operator-Key required once it is set.
+    operator_key_digest = hashlib.sha256(operator_key.encode()).digest() if operator_key else None
+
+    def require_operator(x_operator_key: str | None = Header(default=None)) -> None:
+        if operator_key_digest is None:
+            return
+        ok = x_operator_key is not None and hmac.compare_digest(
+            hashlib.sha256(x_operator_key.encode()).digest(), operator_key_digest
+        )
+        if not ok:
+            raise HTTPException(status_code=401, detail="invalid or missing X-Operator-Key")
+
+    operator = [Depends(require_operator)]
 
     # Teams are seeded on first use, not at startup: importing the app must not touch the store.
     teams_seeded = threading.Event()
@@ -441,12 +465,12 @@ def create_app(
         return await run_in_threadpool(run_triage, await request.body())
 
     # ------------------------------------------------------------------ dashboard
-    @app.get("/v1/tickets")
+    @app.get("/v1/tickets", dependencies=operator)
     def list_tickets() -> dict[str, Any]:
         records = store.dispatch_records()
         return {"tickets": [_ticket_json(r, links, records.get(r["ticket_no"])) for r, links in store.list_tickets_with_links()]}
 
-    @app.get("/v1/tickets/{ticket_no}")
+    @app.get("/v1/tickets/{ticket_no}", dependencies=operator)
     def get_ticket(ticket_no: int) -> dict[str, Any]:
         row = ticket_or_404(ticket_no)
         packets = store.ticket_packets(ticket_no)
@@ -454,7 +478,7 @@ def create_app(
         out["packets"] = [_packet_json(p) for p in packets]
         return out
 
-    @app.post("/v1/tickets/{ticket_no}/approve")
+    @app.post("/v1/tickets/{ticket_no}/approve", dependencies=operator)
     def approve(ticket_no: int, body: ApproveRequest | None = None) -> dict[str, Any]:
         body = body or ApproveRequest()
         record = store.get_dispatch_record(ticket_no) or {}
@@ -507,12 +531,45 @@ def create_app(
         row = ticket_or_404(ticket_no)
         return _ticket_json(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
 
+    def advance(
+        ticket_no: int, status: str, ack_status: int, eta: int | None, patch: dict[str, Any]
+    ) -> dict[str, Any]:
+        def make_ack(p: dict[str, Any]):
+            return dispatching.build_status_ack(
+                ref_msg_id=p["msg_id"], target_node=p["origin_node"], ticket_no=ticket_no,
+                lang=LANG_CODES[p["lang"]], status=ack_status, eta_min=eta,
+            )
+
+        # atomic and idempotent: only the first call transitions and queues the acks
+        result = store.advance_ticket(ticket_no, status, int(clock()), make_ack, patch=patch)
+        if result is None:
+            raise HTTPException(status_code=404, detail="ticket not found")
+        if result == "conflict":
+            cur = ticket_or_404(ticket_no)["status"]
+            raise HTTPException(status_code=409, detail=f"cannot mark a {cur} ticket {status}")
+        row = ticket_or_404(ticket_no)
+        return _ticket_json(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
+
+    @app.post("/v1/tickets/{ticket_no}/on-the-way", dependencies=operator)
+    def on_the_way(ticket_no: int, body: OnTheWayRequest | None = None) -> dict[str, Any]:
+        """DISPATCHED -> ON_THE_WAY; queues an ON_THE_WAY ack (with the ETA if given) per reporter."""
+        eta = body.eta_min if body else None
+        patch: dict[str, Any] = {"on_the_way_at": int(clock())}
+        if eta is not None:
+            patch["eta_min"] = eta
+        return advance(ticket_no, "ON_THE_WAY", STATUS_ON_THE_WAY, eta, patch)
+
+    @app.post("/v1/tickets/{ticket_no}/resolve", dependencies=operator)
+    def resolve(ticket_no: int) -> dict[str, Any]:
+        """DISPATCHED / ON_THE_WAY -> RESOLVED; queues a RESOLVED ack per reporter and frees the team."""
+        return advance(ticket_no, "RESOLVED", STATUS_RESOLVED, None, {"resolved_at": int(clock())})
+
     # ------------------------------------------------------------------ teams + dispatch
-    @app.get("/v1/teams")
+    @app.get("/v1/teams", dependencies=operator)
     def list_teams() -> list[dict[str, Any]]:
         return team_views()
 
-    @app.post("/v1/dispatch/propose")
+    @app.post("/v1/dispatch/propose", dependencies=operator)
     def propose() -> dict[str, Any]:
         """Draft a team, ETA and order for every open ticket. Stored on the tickets as pending
         proposals (replacing earlier ones); nothing is sent to the mesh until an operator approves."""
@@ -531,18 +588,18 @@ def create_app(
         return {"proposals": proposals}
 
     # ------------------------------------------------------------------ sitreps
-    @app.post("/v1/sitreps/run")
+    @app.post("/v1/sitreps/run", dependencies=operator)
     def run_sitrep() -> dict[str, Any]:
         return sitreps.run(store, sitrep_textgen, clock())
 
-    @app.get("/v1/sitreps/latest")
+    @app.get("/v1/sitreps/latest", dependencies=operator)
     def latest_sitrep() -> dict[str, Any]:
         latest = store.latest_sitrep()
         if latest is None:
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
 
-    @app.get("/v1/stats")
+    @app.get("/v1/stats", dependencies=operator)
     def stats() -> dict[str, Any]:
         s = store.stats()
         c = store.ticket_counts()
