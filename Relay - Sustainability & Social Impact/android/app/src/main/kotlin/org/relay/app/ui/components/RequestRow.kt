@@ -1,9 +1,25 @@
 package org.relay.app.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -14,11 +30,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -105,33 +117,54 @@ fun RequestRow(need: MyNeed, now: Long, onClick: () -> Unit, modifier: Modifier 
     }
 }
 
-/** A [RequestRow] that reveals a red Delete background when swiped left and calls [onDelete] once the swipe completes. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * A [RequestRow] that slides left to reveal a Delete button. Nothing is deleted by the swipe itself: the row settles
+ * open (or closed) and only a tap on the button calls [onDelete]. Tapping the open row closes it.
+ */
 @Composable
 fun SwipeableRequestRow(need: MyNeed, now: Long, onClick: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier) {
     val label = LocalStrings.current.common.delete
-    val state = rememberSwipeToDismissBoxState(
-        confirmValueChange = { v ->
-            if (v == SwipeToDismissBoxValue.EndToStart) onDelete()
-            v == SwipeToDismissBoxValue.EndToStart
-        },
-    )
-    SwipeToDismissBox(
-        state = state,
-        modifier = modifier,
-        enableDismissFromStartToEnd = false,
-        backgroundContent = {
+    val revealPx = with(LocalDensity.current) { REVEAL_WIDTH.toPx() }
+    val offset = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val open = offset.value < -revealPx / 2
+    fun settle(openIt: Boolean) { scope.launch { offset.animateTo(if (openIt) -revealPx else 0f) } }
+
+    Box(modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(
+            Modifier.matchParentSize().background(MaterialTheme.colorScheme.error),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
             Box(
-                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.error).padding(end = 24.dp),
-                contentAlignment = Alignment.CenterEnd,
+                Modifier.width(REVEAL_WIDTH).fillMaxHeight()
+                    .clickable(role = Role.Button, onClickLabel = label) { onDelete() },
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Outlined.Delete, contentDescription = label, tint = MaterialTheme.colorScheme.onError)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.onError)
+                    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onError)
+                }
             }
-        },
-    ) {
-        RequestRow(need, now, onClick, Modifier.background(MaterialTheme.colorScheme.surface))
+        }
+        RequestRow(
+            need, now, { if (offset.value < 0f) settle(false) else onClick() },
+            Modifier
+                .offset { IntOffset(offset.value.roundToInt(), 0) }
+                .background(MaterialTheme.colorScheme.surface)
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { d -> scope.launch { offset.snapTo((offset.value + d).coerceIn(-revealPx, 0f)) } },
+                    onDragStopped = { v -> settle(offset.value < -revealPx / 2 || v < -FLING_PX_PER_S) },
+                )
+                .semantics {
+                    customActions = listOf(CustomAccessibilityAction(label) { onDelete(); true })
+                },
+        )
     }
 }
+
+private val REVEAL_WIDTH = 88.dp
+private const val FLING_PX_PER_S = 800f
 
 private fun sample(item: String, cat: Category, urgency: Int, ack: Int = -1, cancelled: Boolean = false): MyNeed {
     val now = System.currentTimeMillis()
