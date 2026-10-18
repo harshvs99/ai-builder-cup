@@ -22,16 +22,28 @@ public struct LanguageScreenModel: Equatable, Sendable {
     public let title: String
     public let subtitle: String
     public let continueLabel: String
+    public let addLanguageLabel: String
     public let rows: [Row]
+    /// Languages added earlier (settings.extraLanguages); they stay on the list even when another is selected.
+    public let addedLangs: [Lang]
 
-    public static func make(selected: Lang, strings s: Strings) -> LanguageScreenModel {
+    /// Languages every first run starts with; any other language is added by the user ("Add a language").
+    public static let defaultLangs: [Lang] = [.en, .hi]
+
+    /// First-run list: the default languages, those the user added, and the selected one.
+    public var shownRows: [Row] { rows.filter { Self.defaultLangs.contains($0.lang) || addedLangs.contains($0.lang) || $0.isSelected } }
+    /// What "Add a language" reveals: everything not already shown.
+    public var addableRows: [Row] { rows.filter { r in !shownRows.contains { $0.lang == r.lang } } }
+
+    public static func make(selected: Lang, added: [Lang] = [], strings s: Strings) -> LanguageScreenModel {
         LanguageScreenModel(
             appName: s.home.title, title: s.home.chooseTitle, subtitle: s.home.chooseSubtitle,
-            continueLabel: s.common.continueAction,
+            continueLabel: s.common.continueAction, addLanguageLabel: s.home.addLanguage,
             rows: AppLanguages.all.map {
                 Row(lang: $0.lang, nativeName: $0.nativeName, englishName: $0.englishName, isSelected: $0.lang == selected,
                     speakLabel: s.home.speakLanguage($0.englishName), greeting: s.home.greeting($0.lang))
-            }
+            },
+            addedLangs: added
         )
     }
 
@@ -152,10 +164,12 @@ public enum VoiceUi: Equatable, Sendable {
 
 /// A category chip of New request or the Check editor.
 public struct CategoryChipModel: Equatable, Sendable, Identifiable {
-    public var id: NeedCategory { category }
+    public var id: String { isTransport ? "transport" : "\(category)" }
     public let category: NeedCategory
     public let label: String
     public let isSelected: Bool
+    /// The "Transport out" chip: not a category of its own (it rides on RESCUE), so it has its own tap.
+    public var isTransport = false
 }
 
 /// New request, step 1 of 3 (spec section 3).
@@ -221,7 +235,8 @@ public struct AskScreenModel: Equatable, Sendable {
             understoodTitle: s.ask.understoodSoFar,
             understoodChips: AskLogic.understood(s.common, near: s.ask.nearLandmark, d),
             nothingYet: s.ask.nothingYet, orTapWhat: s.ask.orTapWhat, somethingElse: s.common.somethingElse,
-            mainChips: chips(AskLogic.mainCategories), moreChips: showMore ? chips(AskLogic.moreCategories) : [],
+            mainChips: chips(AskLogic.mainCategories)
+                + [CategoryChipModel(category: .rescue, label: s.common.transportOut, isSelected: d.transportOut, isTransport: true)], moreChips: showMore ? chips(AskLogic.moreCategories) : [],
             moreIsOpen: showMore, doneLabel: s.ask.doneCheckIt,
             canContinue: AskLogic.hasContent(d, state.transcript) && !busy,
             micButtonLabel: state.typing ? nil : (listening ? s.ask.stopListening : s.ask.startListening),
@@ -283,7 +298,8 @@ public struct CheckModel: Equatable, Sendable {
     public static func make(draft d: AskDraft, locUi: LocUi, accuracyM: Double?, phase: SendPhase, lang: Lang, strings s: Strings) -> CheckModel {
         let c = s.common
         let sending = phase != .idle
-        let needWords = ([AskLogic.needWords(c, d)] + d.extraCategories.map { AskLogic.chipLabel(c, $0) }).filter { !$0.isEmpty }
+        let needWords = ([AskLogic.needWords(c, d)] + d.extraCategories.map { AskLogic.chipLabel(c, $0) } + (d.transportOut ? [c.transportOut] : []))
+            .filter { !$0.isEmpty }
         let needValue = needWords.isEmpty ? s.ask.nothingChosen : needWords.joined(separator: ", ")
         let rows = [
             Row(editor: .need, label: s.ask.rowNeed, value: needValue,
@@ -317,6 +333,6 @@ public struct CheckModel: Equatable, Sendable {
     public static func needEditorChips(_ d: AskDraft, strings s: Strings) -> [CategoryChipModel] {
         AskLogic.editorCategories.map {
             CategoryChipModel(category: $0, label: s.common.categoryName($0), isSelected: d.categories.contains($0))
-        }
+        } + [CategoryChipModel(category: .rescue, label: s.common.transportOut, isSelected: d.transportOut, isTransport: true)]
     }
 }

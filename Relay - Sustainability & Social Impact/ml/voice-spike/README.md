@@ -52,10 +52,10 @@ the cold row-0 text request. The 270M engine is loaded after E2B inside the eval
 backend preference as E2B (GPU, then CPU); force CPU with `--es backend cpu` if GPU init is slow for such a small model.
 
 ## Guided recording (default screen) - build a labelled test set
-The app opens on **Record**: 34 prompts (15 English in Indian-English phrasing, 15 Hindi in Devanagari, 4 Hinglish in Latin
-script; all 7 categories, all 5 vulnerability flags, counts, landmarks with and without "near", negation and implicit-meaning
+The app opens on **Record**: 59 prompts (15 English in Indian-English phrasing, 15 Hindi in Devanagari, 4 Hinglish in Latin
+script, plus 15 Bengali and 10 Bhojpuri written by Claude and NOT yet native-reviewed: read results for `bn`/`bho` as a baseline only; all 7 categories, all 5 vulnerability flags, counts, landmarks with and without "near", negation and implicit-meaning
 cases, plus the real utterance that fooled `RuleExtractor`). Source of truth: `eval/guided_prompts.json`
-(`id`, `lang` en/hi - Hinglish is `hi` -, `text`, `expected{category,urgency,people,vuln[],item,landmark}`); the build copies it into
+(`id`, `lang` en/hi/bn/bho - Hinglish is `hi` -, `text`, `expected{category,urgency,people,vuln[],item,landmark}`); the build copies it into
 the APK assets, so edit that file and rebuild. `people` = headcount stated or clearly meant, `0` = unknown; `item` is one bare
 noun; `landmark` is the bare place noun.
 - **Hold** the big button and read the sentence (16 kHz mono WAV, max 15 s, under 0.8 s is discarded). **Play** to check.

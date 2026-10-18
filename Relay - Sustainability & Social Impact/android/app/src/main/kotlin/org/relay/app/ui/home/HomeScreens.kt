@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material3.AlertDialog
@@ -93,6 +94,9 @@ internal fun rememberNow(): State<Long> = produceState(System.currentTimeMillis(
 // ---------------------------------------------------------------------------------------------------------------
 // 1. Choose your language
 
+/** Languages every first run starts with; any other language is added by the user. */
+private val DEFAULT_LANGS = setOf(Lang.EN, Lang.HI)
+
 /** First run: pick the app language (the app switches at once), then Continue goes to Home. */
 @Composable
 fun LanguageScreen(nav: RelayNav) {
@@ -102,8 +106,9 @@ fun LanguageScreen(nav: RelayNav) {
     val s = LocalStrings.current
     LanguageContent(
         selected = settings.language,
+        added = settings.extraLanguages,
         voiceMessage = voiceMessage,
-        onSelect = { l -> MeshRepository.settings.update { it.copy(language = l) } },
+        onSelect = { l -> MeshRepository.settings.update { it.withLanguage(l) } },
         onSpeak = { l ->
             val name = AppLanguages.of(l).englishName
             val ok = speaker != null && speaker.isVoiceAvailable(l) && speaker.speak(s.home.greeting(l), l)
@@ -119,12 +124,17 @@ fun LanguageScreen(nav: RelayNav) {
 @Composable
 private fun LanguageContent(
     selected: Lang,
+    added: List<Lang>,
     voiceMessage: String?,
     onSelect: (Lang) -> Unit,
     onSpeak: (Lang) -> Unit,
     onContinue: () -> Unit,
 ) {
     val s = LocalStrings.current
+    var showAddable by remember { mutableStateOf(false) }
+    // English and Hindi always, plus languages the user added and the selected one; the rest sit under "Add a language".
+    val shown = AppLanguages.all.filter { it.lang in DEFAULT_LANGS || it.lang in added || it.lang == selected }
+    val addable = AppLanguages.all.filter { e -> shown.none { it.lang == e.lang } }
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp),
@@ -135,11 +145,14 @@ private fun LanguageContent(
             Text(s.home.chooseSubtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             SectionCard(contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp, horizontal = 8.dp)) {
-                AppLanguages.all.forEach { e ->
+                (shown + if (showAddable) addable else emptyList()).forEach { e ->
                     Row(
                         Modifier.fillMaxWidth()
                             .clip(MaterialTheme.shapes.small)
-                            .selectable(selected = e.lang == selected, role = Role.RadioButton, onClick = { onSelect(e.lang) })
+                            .selectable(
+                                selected = e.lang == selected, role = Role.RadioButton,
+                                onClick = { showAddable = false; onSelect(e.lang) },
+                            )
                             .padding(start = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -150,6 +163,13 @@ private fun LanguageContent(
                             Text(e.englishName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         SpeakIconButton(s.home.speakLanguage(e.englishName), { onSpeak(e.lang) })
+                    }
+                }
+                if (!showAddable && addable.isNotEmpty()) {
+                    TextButton(onClick = { showAddable = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.home.addLanguage, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -415,8 +435,8 @@ private fun RequestsEmptyPreview() = RelayPreview { RequestsContent(emptyList(),
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun LanguagePreview() = RelayPreview { LanguageContent(Lang.HI, "No Waray voice is installed on this phone.", {}, {}, {}) }
+private fun LanguagePreview() = RelayPreview { LanguageContent(Lang.HI, emptyList(), "No Waray voice is installed on this phone.", {}, {}, {}) }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun LanguageDarkPreview() = RelayPreview(dark = true) { LanguageContent(Lang.EN, null, {}, {}, {}) }
+private fun LanguageDarkPreview() = RelayPreview(dark = true) { LanguageContent(Lang.EN, listOf(Lang.OR), null, {}, {}, {}) }

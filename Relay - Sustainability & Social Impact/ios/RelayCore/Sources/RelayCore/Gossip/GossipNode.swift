@@ -12,6 +12,8 @@ import Foundation
 public final class GossipNode: @unchecked Sendable {
     public static let seenCapacity = 10_000
     public static let expiryMs: Int64 = 72 * 3600 * 1000
+    /// A BROADCAST lives 24 h from issue (SPEC 5.6), not the 72 h of the other types.
+    public static let broadcastTtlMs: Int64 = BroadcastCodec.ttlSec * 1000
     public static let futureLimitMs: Int64 = 24 * 3600 * 1000
     public static let jitterMinMs = 10
     public static let jitterMaxMs = 220
@@ -135,6 +137,17 @@ public final class GossipNode: @unchecked Sendable {
         }
     }
 
+    /// Control-room broadcasts still inside their 24 h life, as stored (carried) by this node.
+    public func storedBroadcasts() -> [(Broadcast, Frame)] {
+        guarded {
+            let nowSec = clock.nowMs() / 1000
+            return store.all().filter { $0.type == FrameTypes.broadcast }.compactMap { p in
+                guard let f = FrameCodec.decode(p.raw), let b = BroadcastCodec.decode(f.payload), b.isLive(nowSec: nowSec) else { return nil }
+                return (b, f)
+            }
+        }
+    }
+
     public func storedAcks() -> [(Ack, Frame)] {
         guarded {
             store.all().filter { $0.type == FrameTypes.ack }.compactMap { p in
@@ -221,6 +234,23 @@ public final class GossipNode: @unchecked Sendable {
         return fresh ? frame : nil
     }
 
+    /// Originate a BROADCAST (SPEC 5.6) into the mesh: a gateway does this for every broadcast the backend returns, so every
+    /// gateway puts the control room's word into the phones around it. Returns nil when this node already holds it (the id is
+    /// in the seen-set) or it is outside its 24 h life, so calling it with the same list every sync is free.
+    @discardableResult
+    public func originateBroadcast(_ b: Broadcast) throws -> Frame? {
+        if !b.isLive(nowSec: clock.nowMs() / 1000) { return nil }
+        let frame = Frame(type: FrameTypes.broadcast, ttl: Self.initialTtl, timestampMs: clock.nowMs(),
+                          senderId: nodeId, payload: try BroadcastCodec.encode(b))
+        let raw = try FrameCodec.encode(frame)
+        var fresh = false
+        locked { out in
+            fresh = !isKnown(b.keyHex)
+            acceptBroadcast(out, b, frame, raw, fromLink: nil)
+        }
+        return fresh ? frame : nil
+    }
+
     /// Entry point for every whole frame received on [linkId]. Never fails on malformed input.
     public func onFrame(_ linkId: String, _ bytes: [UInt8]) {
         handleFrame(linkId, bytes)
@@ -260,6 +290,12 @@ public final class GossipNode: @unchecked Sendable {
                 // like HELLO: the relay named in the payload must be the node that sent the frame
                 guard let hint = LocHintCodec.decode(frame.payload), hint.relayNode == frame.senderId else { reject(); return }
                 acceptLocHint(out, hint, frame, bytes, fromLink: linkId)
+            case FrameTypes.broadcast:
+                if !knownVersion { return acceptOpaque(out, frame, bytes, linkId) }
+                guard let b = BroadcastCodec.decode(frame.payload) else { reject(); return }
+                // Outside its life: neither stored nor relayed, so a stale declaration cannot circulate for ever.
+                if !b.isLive(nowSec: now / 1000) { log(out, "dropped expired broadcast \(b.idHex)"); return }
+                acceptBroadcast(out, b, frame, bytes, fromLink: linkId)
             case FrameTypes.hello:
                 guard let hello = HelloCodec.decode(frame.payload), hello.nodeId == frame.senderId else { reject(); return }
                 onHello(out, linkId, hello)
@@ -312,6 +348,19 @@ public final class GossipNode: @unchecked Sendable {
         store.put(StoredPacket(key: key, type: FrameTypes.locHint, raw: raw, expiryBasisMs: clock.nowMs()))
         statsValue.locHintsDelivered += 1
         out.actions.append { [listener] in listener.onLocHint(hint, frame: frame, fromLink: fromLink) }
+        scheduleFlood(out, frame, raw, key, fromLink)
+    }
+
+    private func acceptBroadcast(_ out: Out, _ b: Broadcast, _ frame: Frame, _ raw: [UInt8], fromLink: String?) {
+        let key = b.keyHex
+        if let fromLink { links[fromLink]?.peerKeys.insert(key) }
+        if isKnown(key) { statsValue.duplicates += 1; return }
+        markSeen(key)
+        // The shared 72 h expiry (`basis + expiryMs`) lands exactly 24 h after issue when the basis is issued_at minus 48 h.
+        store.put(StoredPacket(key: key, type: FrameTypes.broadcast, raw: raw,
+                               expiryBasisMs: b.issuedAt * 1000 - (Self.expiryMs - Self.broadcastTtlMs)))
+        statsValue.broadcastsDelivered += 1
+        out.actions.append { [listener] in listener.onBroadcast(b, frame: frame, fromLink: fromLink) }
         scheduleFlood(out, frame, raw, key, fromLink)
     }
 
@@ -383,7 +432,7 @@ public final class GossipNode: @unchecked Sendable {
     /// [pushContinueMs] on the same link, without waiting for the next 30 s inventory exchange.
     private func pushBatch(_ out: Out, _ linkId: String, _ st: LinkState) {
         let candidates = store.all().filter {
-            ($0.type == FrameTypes.need || $0.type == FrameTypes.ack || $0.type == FrameTypes.locHint)
+            ($0.type == FrameTypes.need || $0.type == FrameTypes.ack || $0.type == FrameTypes.locHint || $0.type == FrameTypes.broadcast)
                 && !st.peerKeys.contains($0.key)
         }
         if candidates.isEmpty { return }

@@ -290,3 +290,22 @@ def test_loc_hint_key_is_derived_per_need_and_relay_only():
     h1 = codec.LocHint(a, b, 1, 2, 1, -50, 10)
     h2 = codec.LocHint(a, b, 5, 6, 4, -90, 99)
     assert h1.key == h2.key
+
+
+# ---- BROADCAST (SPEC 5.6)
+@pytest.mark.parametrize("v", VECTORS["broadcast_vectors"], ids=lambda v: v["name"])
+def test_broadcast_vectors_match_byte_for_byte(v):
+    f = v["fields"]
+    b = codec.Broadcast(bytes.fromhex(f["bcast_id"]), f["kind"], f["disaster"], f["issued_at"], f["lat_e5"], f["lon_e5"], f["radius_km"])
+    assert codec.encode_broadcast(b).hex() == v["payload_hex"]
+    assert codec.decode_broadcast(bytes.fromhex(v["payload_hex"])) == b
+    fr = codec.decode_frame(bytes.fromhex(v["frame_hex"]))
+    assert fr.type == codec.TYPE_BROADCAST and fr.recipient_id is None
+    assert f["expires_at"] == b.issued_at + codec.BROADCAST_TTL_S == b.issued_at + VECTORS["broadcast_ttl_s"]
+    assert len(bytes.fromhex(v["payload_hex"])) == VECTORS["sizes"]["broadcast_payload"] == 25
+
+
+@pytest.mark.parametrize("name,hexstr", list(VECTORS["must_reject_broadcast_payloads"].items()))
+def test_must_reject_broadcast_payloads(name, hexstr):
+    with pytest.raises(codec.CodecError):
+        codec.decode_broadcast(bytes.fromhex(hexstr))

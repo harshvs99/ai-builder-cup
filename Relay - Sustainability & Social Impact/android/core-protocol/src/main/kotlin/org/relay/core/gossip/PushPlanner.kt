@@ -7,7 +7,7 @@ import org.relay.core.frame.FrameTypes
  * Orders and caps the frames pushed to a peer after an INVENTORY diff, so one link-up carries what matters
  * most inside a bounded burst and the rest follows later. Local policy only: nothing here is on the wire.
  *
- * Order: ACKs addressed to the peer itself, other ACKs (they close the loop for a villager), then NEEDs, then
+ * Order: ACKs addressed to the peer itself, control-room broadcasts, other ACKs (they close the loop for a villager), then NEEDs, then
  * LOC_HINTs (they refine a location, they never gate a rescue). Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
  * holds at least one frame so progress is guaranteed.
  */
@@ -20,9 +20,11 @@ object PushPlanner {
     fun order(candidates: List<StoredPacket>, peerNodeId: ByteArray?): List<StoredPacket> {
         fun group(p: StoredPacket): Int = when {
             p.type == FrameTypes.ACK && peerNodeId != null && recipientIs(p, peerNodeId) -> 0
-            p.type == FrameTypes.ACK -> 1
-            p.type == FrameTypes.NEED -> 2
-            else -> 3
+            // a broadcast is tiny (about 50 bytes on the wire) and switches on the right questions for every later request
+            p.type == FrameTypes.BROADCAST -> 1
+            p.type == FrameTypes.ACK -> 2
+            p.type == FrameTypes.NEED -> 3
+            else -> 4
         }
         return candidates.sortedWith(compareBy<StoredPacket> { group(it) }.thenByDescending { it.expiryBasisMs })
     }

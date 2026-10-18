@@ -19,6 +19,23 @@ final class ScreenModelsTests: XCTestCase {
         XCTAssertEqual("No Waray-Waray voice is installed on this phone.", LanguageScreenModel.noVoiceMessage(.war, strings: UI.strings(.en)))
     }
 
+    func testFirstRunShowsEnglishHindiAndOffersTheRestToAdd() {
+        let m = LanguageScreenModel.make(selected: .en, strings: UI.strings(.en))
+        XCTAssertEqual([Lang.en, .hi], m.shownRows.map { $0.lang })
+        XCTAssertEqual([Lang.or, .tl, .war], m.addableRows.map { $0.lang })
+        XCTAssertEqual("Add a language", m.addLanguageLabel)
+        // A language chosen from the added ones stays on the list.
+        let o = LanguageScreenModel.make(selected: .or, strings: UI.strings(.or))
+        XCTAssertEqual([Lang.en, .hi, .or], o.shownRows.map { $0.lang })
+        XCTAssertEqual([Lang.tl, .war], o.addableRows.map { $0.lang })
+    }
+
+    func testAddedLanguagesStayOnTheFirstRunList() {
+        let m = LanguageScreenModel.make(selected: .en, added: [.or], strings: UI.strings(.en))
+        XCTAssertEqual([Lang.en, .hi, .or], m.shownRows.map { $0.lang })
+        XCTAssertEqual([Lang.tl, .war], m.addableRows.map { $0.lang })
+    }
+
     // ---- Home
     func testHomeHeaderLineAndStatusCard() {
         let st = VillagerStatus(kind: .reachable, dot: .green, peers: 3, hopsToGateway: 2, syncedAgoMs: 60_000)

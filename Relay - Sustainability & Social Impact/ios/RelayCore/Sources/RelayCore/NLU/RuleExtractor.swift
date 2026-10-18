@@ -15,11 +15,15 @@ public struct NeedDraft: Equatable, Hashable, Sendable {
     /// English summary, <= 40 bytes
     public var summary: String
     public var lang: Lang
+    /// Other categories the text also asks for ("insulin, medical supplies and food" -> [.food]), most urgent first,
+    /// never `category` itself or `.other`. Only things asked for count, not conditions or context.
+    public var extraCategories: [NeedCategory]
 
     public init(
         category: NeedCategory, urgency: Int, people: Int, vulnFlags: Set<VulnFlag>, item: String, landmark: String,
-        summary: String, lang: Lang
+        summary: String, lang: Lang, extraCategories: [NeedCategory] = []
     ) {
+        self.extraCategories = extraCategories
         self.category = category; self.urgency = urgency; self.people = people; self.vulnFlags = vulnFlags
         self.item = item; self.landmark = landmark; self.summary = summary; self.lang = lang
     }
@@ -100,9 +104,13 @@ public enum RuleExtractor {
             ?? top.item ?? Lexicons.defaultItem(category)
 
         let summary = buildSummary(ordered, subject?.0, people, flags)
+        var extras: [NeedCategory] = []
+        for c in primary.map({ $0.element }) where c.request && c.category != category && c.category != .other && !extras.contains(c.category) {
+            extras.append(c.category)
+        }
         return NeedDraft(category: category, urgency: urgency, people: people, vulnFlags: flags,
                          item: Utf8.truncate(item, 16), landmark: Utf8.truncate(landmark, 24),
-                         summary: summary, lang: lang)
+                         summary: summary, lang: lang, extraCategories: extras)
     }
 
     private static func buildSummary(_ ordered: [Concept], _ subject: String?, _ people: Int, _ flags: Set<VulnFlag>) -> String {

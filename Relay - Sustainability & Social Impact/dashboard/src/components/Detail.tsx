@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { Team, Ticket } from '../types';
 import { formatRelative } from '../lib/time';
@@ -69,9 +69,19 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
   const resolve = () => run('resolve', () => api.resolve(t.ticket_no));
   const propose = () =>
     run('propose', async () => {
-      await api.proposeDispatch();
+      await api.proposeDispatch(t.ticket_no);
       return api.getTicket(t.ticket_no);
     });
+
+  // Opening an open ticket that has no proposal asks the dispatch agent for one, once per ticket per page load, so the
+  // nearest free team is already there. A manual pick still wins (teamOverride), and "Ask dispatch agent" re-asks.
+  const autoProposed = useRef(new Set<number>());
+  useEffect(() => {
+    if (t.status !== 'OPEN' || t.proposal || autoProposed.current.has(t.ticket_no)) return;
+    autoProposed.current.add(t.ticket_no);
+    void propose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t.ticket_no, t.status, t.proposal]);
 
   if (actionRef) {
     actionRef.current = (a) => {

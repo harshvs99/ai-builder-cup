@@ -237,6 +237,15 @@ def tickets_by_no(client):
     return {t["ticket_no"]: t for t in client.get("/v1/tickets").json()["tickets"]}
 
 
+def propose_all(client):
+    """Propose for every open ticket, one call each (the API has no bulk call), in ticket order."""
+    out = []
+    for no, t in sorted(tickets_by_no(client).items()):
+        if t["status"] == "OPEN":
+            out += client.post(f"/v1/dispatch/propose?ticket_no={no}").json()["proposals"]
+    return {"proposals": out}
+
+
 def seed_three(client):
     sync(client, [
         need_frame(category=CAT["RESCUE"], lat=PURI[0], lon=PURI[1], lang=0, item="boat")[0],
@@ -255,7 +264,7 @@ def test_teams_endpoint(client):
 def test_propose_writes_pending_proposals_and_sends_nothing(client):
     seed_three(client)
     acks_before = client.app.state.store.ack_count()
-    r = client.post("/v1/dispatch/propose").json()
+    r = propose_all(client)
     assert sorted(p["ticket_no"] for p in r["proposals"]) == [101, 102, 103]
     by = {p["ticket_no"]: p for p in r["proposals"]}
     assert by[101]["team_id"] == "boat-puri" and by[101]["eta_min"] == 10
@@ -274,9 +283,44 @@ def test_propose_writes_pending_proposals_and_sends_nothing(client):
     assert all(t["load"] == 0 for t in client.get("/v1/teams").json())  # proposals are not load
 
 
+def test_propose_one_ticket_leaves_the_others_alone(client):
+    seed_three(client)
+    full = {p["ticket_no"]: p for p in propose_all(client)["proposals"]}
+    ts = tickets_by_no(client)
+    before = {n: ts[n]["proposal"] for n in (101, 103)}
+    r = client.post("/v1/dispatch/propose?ticket_no=102").json()
+    assert [p["ticket_no"] for p in r["proposals"]] == [102]
+    assert r["proposals"][0]["team_id"] == full[102]["team_id"] and r["proposals"][0]["eta_min"] == full[102]["eta_min"]
+    ts = tickets_by_no(client)
+    assert {n: ts[n]["proposal"] for n in (101, 103)} == before       # untouched, proposed_at included
+
+
+def test_propose_one_ticket_writes_only_that_ticket(client):
+    seed_three(client)
+    r = client.post("/v1/dispatch/propose?ticket_no=102").json()
+    assert [p["ticket_no"] for p in r["proposals"]] == [102]
+    ts = tickets_by_no(client)
+    assert ts[102]["proposal"]["team_id"] == "med-pipili"
+    assert "proposal" not in ts[101] and "proposal" not in ts[103]
+
+
+def test_propose_needs_a_ticket_number(client):
+    seed_three(client)
+    assert client.post("/v1/dispatch/propose").status_code == 422
+    assert "proposal" not in tickets_by_no(client)[101]
+
+
+def test_propose_one_ticket_unknown_is_404_and_not_open_is_409(client):
+    seed_three(client)
+    assert client.post("/v1/dispatch/propose?ticket_no=999").status_code == 404
+    propose_all(client)
+    assert client.post("/v1/tickets/102/approve").status_code == 200
+    assert client.post("/v1/dispatch/propose?ticket_no=102").status_code == 409
+
+
 def test_approve_uses_the_proposal_and_its_eta_in_the_ack(client):
     seed_three(client)
-    client.post("/v1/dispatch/propose")
+    propose_all(client)
     r = client.post("/v1/tickets/102/approve")
     assert r.status_code == 200
     t = r.json()
@@ -293,7 +337,7 @@ def test_approve_uses_the_proposal_and_its_eta_in_the_ack(client):
 
 def test_approve_with_body_overrides_team_eta_and_order(client):
     seed_three(client)
-    client.post("/v1/dispatch/propose")
+    propose_all(client)
     r = client.post("/v1/tickets/101/approve", json={"team_id": "boat-brahmagiri", "eta_min": 90, "order_en": "Go via the canal"})
     t = r.json()
     assert t["dispatch"]["team_id"] == "boat-brahmagiri" and t["dispatch"]["eta_min"] == 90
@@ -347,10 +391,10 @@ def test_approve_unknown_or_off_team_and_missing_ticket(client):
 
 def test_propose_respects_load_and_skips_approved_tickets(client):
     sync(client, [need_frame(category=CAT["RESCUE"], lat=19.8 + i * 0.01, item="boat")[0] for i in range(8)])
-    assert len(client.post("/v1/dispatch/propose").json()["proposals"]) == 8
+    assert len(propose_all(client)["proposals"]) == 8
     for no in (101, 102, 103):
         client.post(f"/v1/tickets/{no}/approve", json={"team_id": "boat-puri"})
-    second = client.post("/v1/dispatch/propose").json()["proposals"]
+    second = propose_all(client)["proposals"]
     assert sorted(p["ticket_no"] for p in second) == [104, 105, 106, 107, 108]
     # boat-puri is full after 3 approvals, so nothing new goes to it
     assert all(p["team_id"] != "boat-puri" for p in second)
@@ -360,10 +404,10 @@ def test_propose_uses_model_text_when_valid(make_client):
     fake = FakeTextGen(lambda p: {"english": "Ticket #101: Puri Rescue Boat 1 to the rooftop, ETA 10 min.", "local": ""})
     client = make_client(textgen=fake)
     sync(client, [need_frame(category=CAT["RESCUE"], lat=PURI[0], lon=PURI[1], item="boat")[0]])
-    [p] = client.post("/v1/dispatch/propose").json()["proposals"]
+    [p] = propose_all(client)["proposals"]
     assert p["order_en"] == "Ticket #101: Puri Rescue Boat 1 to the rooftop, ETA 10 min."
     assert fake.prompts
 
 
 def test_propose_with_nothing_open(client):
-    assert client.post("/v1/dispatch/propose").json() == {"proposals": []}
+    assert propose_all(client) == {"proposals": []}

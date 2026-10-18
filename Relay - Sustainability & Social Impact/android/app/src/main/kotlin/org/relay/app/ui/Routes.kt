@@ -21,6 +21,7 @@ object Routes {
     /** Parent graph of ask + check: a ViewModel scoped to its back stack entry is shared by both screens. */
     const val ASK_FLOW = "askflow"
     const val ASK = "ask?mode={mode}&prefillFrom={prefillFrom}"
+    const val TRIAGE = "triage"
     const val CHECK = "check"
     const val NETWORK = "network"
     const val CONSOLE = "network/console"
@@ -38,7 +39,7 @@ object Routes {
 
     /** Routes that hide the bottom bar. */
     fun hidesBottomBar(route: String?): Boolean = when (base(route)) {
-        "ask", CHECK, LANGUAGE -> true
+        "ask", TRIAGE, CHECK, LANGUAGE -> true
         else -> false
     }
 
@@ -70,6 +71,8 @@ class RelayNav(val controller: NavHostController, val setup: SetupActions) {
     fun startAsk(mode: AskMode = AskMode.VOICE, prefillFrom: String? = null) { controller.navigate(Routes.ask(mode, prefillFrom)) }
     /** Ask step 1 -> step 2. */
     fun toCheck() { controller.navigate(Routes.CHECK) }
+    /** Ask step 1 -> the triage questions (medical and rescue requests), which lead on to Check and send. */
+    fun toTriage() { controller.navigate(Routes.TRIAGE) }
     /** After Send: open the new request's detail and drop the ask/check flow from the back stack. */
     fun finishAskTo(msgId: String) {
         controller.navigate(Routes.request(msgId)) { popUpTo(Routes.ASK_FLOW) { inclusive = true } }

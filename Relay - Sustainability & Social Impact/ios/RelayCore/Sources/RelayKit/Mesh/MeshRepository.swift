@@ -18,12 +18,15 @@ public final class MeshRepository: @unchecked Sendable {
         public static let gatewayState = "gateway_state.json"
         /// This node's identity: 16 hex characters. Android keeps it in SharedPreferences; here it is a file.
         public static let nodeId = "node_id.txt"
+        public static let disasters = "disasters.json"
     }
 
     public let settings: AppSettings
     public let packetStore: FilePacketStore
     public let myNeedsStore: MyNeedsStore
     public let gatewayState: GatewayState
+    /// Disasters the control room declared (SPEC 5.6), carried here by BROADCAST frames; triage reads it.
+    public let disasters: DisasterStore
     public let nodeId: [UInt8]
     public var nodeIdHex: String { Hex.encode(nodeId) }
 
@@ -56,6 +59,7 @@ public final class MeshRepository: @unchecked Sendable {
                                       log: { sink?("store: " + $0) })
         myNeedsStore = MyNeedsStore(file: dataDirectory.appendingPathComponent(FileName.myNeeds))
         gatewayState = GatewayState(file: dataDirectory.appendingPathComponent(FileName.gatewayState))
+        disasters = DisasterStore(store: FileKeyValueStore(file: dataDirectory.appendingPathComponent(FileName.disasters)))
         flow = Broadcaster(MeshSnapshot(myNeeds: myNeedsStore.list()))
         log("init: node id \(Hex.encode(id)), \(packetStore.size()) stored packet(s), \(myNeedsStore.list().count) own need(s)")
     }

@@ -181,6 +181,15 @@ class Store(Protocol):
         landmark estimate. True if written."""
         ...
 
+    # ------------------------------------------------------------------ control-room broadcasts (SPEC 5.6)
+    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes) -> bool:
+        """Store a BROADCAST payload idempotently on ``bcast_id`` (hex). True if stored now."""
+        ...
+
+    def live_broadcasts(self, since: int) -> list[bytes]:
+        """Payloads of the broadcasts with ``issued_at >= since``, oldest first."""
+        ...
+
     def origins_for_ticket(self, ticket_no: int) -> list[dict[str, Any]]: ...
 
     # ------------------------------------------------------------------ tickets

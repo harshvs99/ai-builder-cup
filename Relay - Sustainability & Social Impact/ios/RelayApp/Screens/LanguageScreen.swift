@@ -7,19 +7,33 @@ struct LanguageScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.strings) private var strings
     @State private var noVoiceFor: Lang?
+    @State private var showAddable = false
 
     var body: some View {
-        let screen = LanguageScreenModel.make(selected: model.settings.language, strings: strings)
+        let screen = LanguageScreenModel.make(selected: model.settings.language, added: model.settings.extraLanguages, strings: strings)
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 SmallCapsLabel(screen.appName, color: Theme.Palette.accent)
                 Text(screen.title).font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
                 Text(screen.subtitle).font(.body).foregroundStyle(.secondary)
 
+                let rows = screen.shownRows + (showAddable ? screen.addableRows : [])
                 VStack(spacing: 0) {
-                    ForEach(Array(screen.rows.enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if index > 0 { Divider().padding(.leading, Theme.Space.l) }
                         LanguageRow(row: row, speak: { speak(row) }) { select(row.lang) }
+                    }
+                    if !showAddable && !screen.addableRows.isEmpty {
+                        Divider().padding(.leading, Theme.Space.l)
+                        Button { showAddable = true } label: {
+                            Label(screen.addLanguageLabel, systemImage: "plus.circle")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: Theme.Size.minTouch + 8, alignment: .leading)
+                                .padding(.horizontal, Theme.Space.l)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.Palette.accent)
                     }
                 }
                 .relaySurfaceCard()
@@ -43,7 +57,8 @@ struct LanguageScreen: View {
 
     private func select(_ lang: Lang) {
         noVoiceFor = nil
-        model.updateSettings { var s = $0; s.language = lang; return s }
+        showAddable = false
+        model.updateSettings { $0.withLanguage(lang) }
     }
 
     private func speak(_ row: LanguageScreenModel.Row) {

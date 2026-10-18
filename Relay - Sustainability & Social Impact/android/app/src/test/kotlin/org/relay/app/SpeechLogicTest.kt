@@ -80,4 +80,38 @@ class SpeechLogicTest {
             assertTrue("$code/$off/$on", d.kind == Kind.RETRY_ONLINE || !d.message.isNullOrBlank())
         }
     }
+
+    // ---- pauses: the recogniser ending a segment must not end the utterance while the person is only thinking
+    @Test fun aPauseAfterWordsKeepsListening() {
+        assertEquals(SpeechLogic.Step.LISTEN_AGAIN, SpeechLogic.nextStep(true, false, sinceSpeechMs = 3_000, totalMs = 8_000))
+        assertEquals(SpeechLogic.Step.LISTEN_AGAIN, SpeechLogic.nextStep(true, false, sinceSpeechMs = 5_900, totalMs = 20_000))
+    }
+
+    @Test fun longQuietAfterWordsDelivers() {
+        assertEquals(SpeechLogic.Step.DELIVER, SpeechLogic.nextStep(true, false, sinceSpeechMs = 6_000, totalMs = 20_000))
+        // a yes/no answer waits less
+        assertEquals(SpeechLogic.Step.DELIVER, SpeechLogic.nextStep(true, false, 3_500, 6_000, endAfterSpeechMs = 3_500))
+        assertEquals(SpeechLogic.Step.LISTEN_AGAIN, SpeechLogic.nextStep(true, false, 2_000, 6_000, endAfterSpeechMs = 3_500))
+    }
+
+    @Test fun pressingStopDeliversWhatWasHeardAtOnce() {
+        assertEquals(SpeechLogic.Step.DELIVER, SpeechLogic.nextStep(true, true, 100, 2_000))
+        assertEquals(SpeechLogic.Step.NOTHING_HEARD, SpeechLogic.nextStep(false, true, 100, 2_000))
+    }
+
+    @Test fun waitsForTheFirstWordThenGivesUp() {
+        assertEquals(SpeechLogic.Step.LISTEN_AGAIN, SpeechLogic.nextStep(false, false, 6_000, 6_000))
+        assertEquals(SpeechLogic.Step.NOTHING_HEARD, SpeechLogic.nextStep(false, false, SpeechLogic.WAIT_FOR_FIRST_WORD_MS, SpeechLogic.WAIT_FOR_FIRST_WORD_MS))
+    }
+
+    @Test fun anUtteranceHasAnUpperBound() {
+        assertEquals(SpeechLogic.Step.DELIVER, SpeechLogic.nextStep(true, false, 1_000, SpeechLogic.MAX_UTTERANCE_MS))
+        assertEquals(SpeechLogic.Step.NOTHING_HEARD, SpeechLogic.nextStep(false, false, 1_000, SpeechLogic.MAX_UTTERANCE_MS))
+    }
+
+    @Test fun segmentsJoinWithOneSpace() {
+        assertEquals("a b", SpeechLogic.join("a", "b"))
+        assertEquals("b", SpeechLogic.join("", " b "))
+        assertEquals("a", SpeechLogic.join("a ", "  "))
+    }
 }

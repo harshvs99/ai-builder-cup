@@ -7,6 +7,7 @@ object FrameTypes {
     const val HELLO = 0x72
     const val INVENTORY = 0x73
     const val LOC_HINT = 0x74
+    const val BROADCAST = 0x75
 }
 
 /** Outer frame (SPEC section 3). Arrays are compared by content. */

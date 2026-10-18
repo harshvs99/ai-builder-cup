@@ -150,7 +150,7 @@ private struct LanguagePickerSheet: View {
             VStack(spacing: 0) {
                 ForEach(rows) { row in
                     Button {
-                        model.updateSettings { var x = $0; x.language = row.lang; return x }
+                        model.updateSettings { $0.withLanguage(row.lang) }
                         dismiss()
                     } label: {
                         HStack(spacing: Theme.Space.m) {

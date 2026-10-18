@@ -8,6 +8,12 @@ import Glibc
 #endif
 
 /// The real `URLSession` path against a throwaway loopback HTTP server (a raw socket on a background thread).
+#if canImport(Darwin)
+private let sysBind = Darwin.bind
+#else
+private let sysBind = Glibc.bind
+#endif
+
 final class URLSessionTransportTests: XCTestCase {
     private final class MiniServer: @unchecked Sendable {
         let port: UInt16
@@ -18,7 +24,12 @@ final class URLSessionTransportTests: XCTestCase {
         var requests: [String] { lock.lock(); defer { lock.unlock() }; return _requests }
 
         init(respond: @escaping @Sendable (String) -> (Int, String)) throws {
-            let s = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+            #if canImport(Darwin)
+            let sockStream = SOCK_STREAM
+            #else
+            let sockStream = Int32(SOCK_STREAM.rawValue)
+            #endif
+            let s = socket(AF_INET, sockStream, 0)
             guard s >= 0 else { throw NSError(domain: "socket", code: Int(errno)) }
             var yes: Int32 = 1
             setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
@@ -27,7 +38,7 @@ final class URLSessionTransportTests: XCTestCase {
             addr.sin_addr = in_addr(s_addr: UInt32(0x7F000001).bigEndian)
             addr.sin_port = 0
             let bound = withUnsafePointer(to: &addr) { p in
-                p.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+                p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sysBind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
             }
             guard bound == 0, listen(s, 8) == 0 else { throw NSError(domain: "bind", code: Int(errno)) }
             var len = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -55,7 +66,7 @@ final class URLSessionTransportTests: XCTestCase {
                     let text = String(decoding: data, as: UTF8.self)
                     if let r = text.range(of: "\r\n\r\n") {
                         let head = text[..<r.lowerBound].lowercased()
-                        let want = head.components(separatedBy: "content-length:").dropFirst().first.flatMap { Int($0.prefix { $0 != "\r" }.trimmingCharacters(in: .whitespaces)) } ?? 0
+                        let want = head.components(separatedBy: "content-length:").dropFirst().first.flatMap { Int($0.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces)) } ?? 0
                         if data.count - (text.utf8.distance(from: text.startIndex, to: r.upperBound)) >= want { break }
                     }
                 }

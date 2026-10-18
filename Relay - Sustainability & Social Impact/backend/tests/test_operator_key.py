@@ -16,7 +16,7 @@ CONTROL_ROOM = [
     ("POST", "/v1/tickets/101/on-the-way"),
     ("POST", "/v1/tickets/101/resolve"),
     ("GET", "/v1/teams"),
-    ("POST", "/v1/dispatch/propose"),
+    ("POST", "/v1/dispatch/propose?ticket_no=101"),
     ("POST", "/v1/sitreps/run"),
     ("GET", "/v1/sitreps/latest"),
     ("GET", "/v1/stats"),

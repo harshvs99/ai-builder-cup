@@ -270,6 +270,19 @@ class FirestoreStore:
         with concurrent.futures.ThreadPoolExecutor(max_workers=RECORD_WORKERS) as pool:
             return list(pool.map(one, hints))
 
+    # ------------------------------------------------------------------ control-room broadcasts
+    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes) -> bool:
+        from google.api_core.exceptions import AlreadyExists
+        try:
+            self._col("broadcasts").document(bcast_id).create({"bcast_id": bcast_id, "issued_at": issued_at, "payload": payload})
+            return True
+        except AlreadyExists:
+            return False
+
+    def live_broadcasts(self, since: int) -> list[bytes]:
+        docs = [s.to_dict() for s in self._eq(self._col("broadcasts"), "issued_at", ">=", since).stream()]
+        return [bytes(d["payload"]) for d in sorted(docs, key=lambda d: d["issued_at"])]
+
     def hints_for(self, msg_ids: list[str]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for msg_id in msg_ids:

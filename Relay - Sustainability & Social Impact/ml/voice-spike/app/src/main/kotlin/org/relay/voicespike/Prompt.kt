@@ -2,7 +2,7 @@ package org.relay.voicespike
 
 /** The prompt contract: one call, ONLY JSON back. Few-shot examples are text-only (audio few-shot is not supported). */
 object Prompt {
-    val LANGS = listOf("en", "hi", "or", "tl", "war", "ceb")
+    val LANGS = listOf("en", "hi", "or", "tl", "war", "ceb", "bn", "bho")
 
     val SYSTEM = """
 You convert a disaster survivor's short help request into ONE JSON object. Output ONLY the JSON object: no prose, no markdown, no code fences.

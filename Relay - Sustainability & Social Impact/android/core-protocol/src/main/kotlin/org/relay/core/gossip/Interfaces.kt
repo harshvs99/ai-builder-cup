@@ -1,6 +1,7 @@
 package org.relay.core.gossip
 
 import org.relay.core.payload.Ack
+import org.relay.core.payload.Broadcast
 import org.relay.core.payload.Hello
 import org.relay.core.payload.LocHint
 import org.relay.core.payload.Need
@@ -27,6 +28,8 @@ interface GossipListener {
     fun onAckSeen(ack: Ack, frame: Frame) {}
     /** A LOC_HINT (SPEC 5.5) was stored for the first time; [fromLink] is null for a hint this node originated. */
     fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) {}
+    /** A control-room BROADCAST (SPEC 5.6) was stored for the first time; [fromLink] is null for one this node originated. */
+    fun onBroadcast(broadcast: Broadcast, frame: Frame, fromLink: String?) {}
     fun onPeerHello(linkId: String, hello: Hello) {}
     fun onLog(msg: String) {}
 }
@@ -59,7 +62,7 @@ object DuplicateLinkPolicy {
         org.relay.core.ids.NodeId.compare(myId, peerId) < 0
 }
 
-/** One stored NEED/ACK/LOC_HINT frame. [raw] is the encoded frame as received (or originated). */
+/** One stored NEED/ACK/LOC_HINT/BROADCAST frame. [raw] is the encoded frame as received (or originated). */
 class StoredPacket(
     val key: String,
     val type: Int,
@@ -107,4 +110,5 @@ data class GossipStats(
     val needsDelivered: Long = 0,
     val acksDelivered: Long = 0,
     val locHintsDelivered: Long = 0,
+    val broadcastsDelivered: Long = 0,
 )

@@ -19,6 +19,9 @@ class HomeStrings(private val lang: Lang) {
         "I-tap ang speaker para marinig ito. Puwede mo itong palitan mamaya sa Settings.",
         "Pidlita an speaker basi mapamati ini. Mababag-o mo ini ha ulahi ha Settings.",
     ) // needs native review
+    val addLanguage get() = tr(
+        lang, "Add a language", "भाषा जोड़ें", "ଭାଷା ଯୋଡ଼ନ୍ତୁ", "Magdagdag ng wika", "Pagdugang hin pinulongan",
+    ) // needs native review
     fun speakLanguage(name: String) = tr(
         lang, "Hear $name", "$name सुनें", "$name ଶୁଣନ୍ତୁ", "Pakinggan ang $name", "Pamati an $name",
     ) // needs native review

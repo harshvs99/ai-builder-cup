@@ -18,6 +18,8 @@ public struct Settings: Equatable, Sendable {
     /// Comma-separated node-id hex prefixes; empty = accept every peer.
     public var allowlist: String
     public var language: Lang
+    /// Languages the user added beyond English and Hindi, in the order added (never contains en or hi).
+    public var extraLanguages: [Lang]
     public var themeMode: ThemeMode
     /// Multiplies all text by 1.2 (the iOS UI also respects Dynamic Type).
     public var largerText: Bool
@@ -38,12 +40,13 @@ public struct Settings: Equatable, Sendable {
 
     public init(
         backendUrl: String = BackendDefaults.emulatorUrl, deviceKey: String = BuildConfig.fallbackDeviceKey,
-        allowlist: String = "", language: Lang = .en, themeMode: ThemeMode = .auto, largerText: Bool = false,
+        allowlist: String = "", language: Lang = .en, extraLanguages: [Lang] = [], themeMode: ThemeMode = .auto, largerText: Bool = false,
         readAloud: Bool = false, voiceSpeed: VoiceSpeed = .normal, languageConfirmed: Bool = false,
         areaLabel: String = "", gatewayMode: GatewayMode = .automatic, carryInBackground: Bool = true,
         helpLocateNeighbours: Bool = BuildConfig.standard.helpLocateDefault
     ) {
         self.backendUrl = backendUrl; self.deviceKey = deviceKey; self.allowlist = allowlist; self.language = language
+        self.extraLanguages = Settings.normalizedExtras(extraLanguages)
         self.themeMode = themeMode; self.largerText = largerText; self.readAloud = readAloud
         self.voiceSpeed = voiceSpeed; self.languageConfirmed = languageConfirmed; self.areaLabel = areaLabel
         self.gatewayMode = gatewayMode; self.carryInBackground = carryInBackground
@@ -52,6 +55,29 @@ public struct Settings: Equatable, Sendable {
 
     /// The old "Pretend offline" behaviour: never act as a gateway.
     public var pretendOffline: Bool { gatewayMode == .never }
+
+    /// English and Hindi are always preferred.
+    public static let alwaysPreferred: [Lang] = [.en, .hi]
+
+    /// The languages speech input should expect: English, Hindi, then the user's added languages. The app language
+    /// counts too, so installs from before this setting existed still include theirs. Order is stable, no duplicates.
+    public var preferredLanguages: [Lang] {
+        Settings.alwaysPreferred + Settings.normalizedExtras(extraLanguages + [language])
+    }
+
+    /// Switches the app language; a language beyond English and Hindi is also remembered as a preferred one.
+    public func withLanguage(_ lang: Lang) -> Settings {
+        var s = self
+        s.language = lang
+        s.extraLanguages = Settings.normalizedExtras(extraLanguages + [lang])
+        return s
+    }
+
+    /// Drops en, hi and repeats, keeping first-seen order.
+    static func normalizedExtras(_ langs: [Lang]) -> [Lang] {
+        var seen = Set(alwaysPreferred)
+        return langs.filter { seen.insert($0).inserted }
+    }
 }
 
 /// Persisted settings, observable through `current`, `updates()` and `addListener`.
@@ -107,6 +133,7 @@ public final class AppSettings: @unchecked Sendable {
             deviceKey: locked ? cfg.defaultKey : (prefs.stringValue(forKey: "key") ?? cfg.defaultKey),
             allowlist: prefs.stringValue(forKey: "allowlist") ?? "",
             language: Lang.fromTag(prefs.stringValue(forKey: "lang") ?? "en") ?? .en,
+            extraLanguages: (prefs.stringValue(forKey: "extra_langs") ?? "").split(separator: ",").compactMap { Lang.fromTag(String($0)) },
             themeMode: enumOr(prefs.stringValue(forKey: "theme"), ThemeMode.auto),
             largerText: prefs.boolValue(forKey: "larger_text") ?? false,
             readAloud: prefs.boolValue(forKey: "read_aloud") ?? false,
@@ -131,10 +158,11 @@ public final class AppSettings: @unchecked Sendable {
         if next == flow.value { lock.unlock(); return }
         // The default is stored as "unset" so it keeps following the build-time value.
         if next.backendUrl == defaultBackend { store.removeValue(forKey: "backend") } else { store.setString(next.backendUrl, forKey: "backend") }
-        store.setString(next.deviceKey, forKey: "key")
+        if next.deviceKey == buildConfig.defaultKey { store.removeValue(forKey: "key") } else { store.setString(next.deviceKey, forKey: "key") }
         store.setString(next.allowlist, forKey: "allowlist")
         store.setBool(next.pretendOffline, forKey: "offline")
         store.setString(next.language.tag, forKey: "lang")
+        store.setString(next.extraLanguages.map(\.tag).joined(separator: ","), forKey: "extra_langs")
         store.setString(next.themeMode.rawValue, forKey: "theme")
         store.setBool(next.largerText, forKey: "larger_text")
         store.setBool(next.readAloud, forKey: "read_aloud")

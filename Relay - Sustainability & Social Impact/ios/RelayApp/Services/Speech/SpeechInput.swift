@@ -30,8 +30,8 @@ final class SpeechInput {
     @ObservationIgnored var onText: ((String) -> Void)?
     @ObservationIgnored private let log: @Sendable (String) -> Void
 
-    /// Stop by itself this long after the user went quiet (iOS never ends dictation on its own).
-    private static let silenceAfterSpeechSec = 2.5
+    /// Stop by itself this long after the user went quiet (iOS never ends dictation on its own). Long enough to pause and think.
+    static let silenceAfterSpeechSec = 6.0
     /// Give up when nothing was heard at all.
     private static let noSpeechSec = 9.0
     /// Hard cap on one utterance.
@@ -62,9 +62,12 @@ final class SpeechInput {
     // ---------------------------------------------------------------- control
 
     /// Begins listening. Microphone and speech-recognition permission must already be granted (see `Permissions`).
-    func start(lang: Lang) {
+    /// `quietSec`: how long a quiet spell after speech ends the utterance. Long (the default) for a story told at New
+    /// request; short for a yes/no answer in a triage conversation.
+    func start(lang: Lang, quietSec: Double = SpeechInput.silenceAfterSpeechSec) {
         cancel()
         self.lang = lang
+        self.quietSec = quietSec
         generation += 1
         let gen = generation
         let tag = SpeechLogic.recognizerTag(lang)
@@ -76,6 +79,8 @@ final class SpeechInput {
         }
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: tag)), recognizer.supportsOnDeviceRecognition else {
             log("voice: no on-device recogniser for \(tag)")
+            // The platform has no model for this language (Odia): fill the gap with Gemma's audio input if the phone can run it.
+            if SpeechLogic.useGemmaForSpeech(.languageUnavailable, gemmaUsable: GemmaRunner.canRunHere()), startGemma(gen: gen) { return }
             fail(SpeechLogic.errorLanguageNotSupported, offlineAttempt: true)
             return
         }
@@ -137,6 +142,11 @@ final class SpeechInput {
 
     /// Stop recording and deliver what was heard so far.
     func stop() {
+        if gemmaActive {
+            let gen = generation
+            gemma.stopNow(lang: lang) { [weak self] text, err in self?.gemmaDone(text, err, gen: gen) }
+            return
+        }
         guard state.isListening, let request else { return }
         let gen = generation
         stopAudio()
@@ -231,11 +241,44 @@ final class SpeechInput {
     }
 
     @ObservationIgnored private var silenceTask: Task<Void, Never>?
+    @ObservationIgnored private let gemma = GemmaTranscriber()
+    @ObservationIgnored private var gemmaActive = false
+
+    /// The platform recogniser has no model for `lang`: listen with Gemma's audio input instead (one utterance of up to 15 s).
+    private func startGemma(gen: Int) -> Bool {
+        guard gen == generation else { return false }
+        log("voice: no platform recogniser for \(lang.tag); listening with Gemma audio")
+        do {
+            gemmaActive = true
+            try gemma.start(
+                lang: lang, endAfterSpeechSec: quietSec,
+                onLevel: { [weak self] lvl in
+                    guard let self, self.gemmaActive, case .listening(let partial, _, let note) = self.state else { return }
+                    self.state = .listening(partial: partial, level: lvl, note: note)
+                },
+                onResult: { [weak self] text, err in self?.gemmaDone(text, err, gen: gen) })
+            state = .listening(partial: "", level: 0, note: SpeechLogic.gemmaNote(lang))
+            return true
+        } catch {
+            gemmaActive = false
+            log("voice: gemma recording failed: \(error)")
+            return false
+        }
+    }
+
+    private func gemmaDone(_ text: String?, _ err: String?, gen: Int) {
+        guard gemmaActive, gen == generation else { return }
+        gemmaActive = false
+        log("voice: gemma \(text.map { "\"\($0)\"" } ?? "empty \(err ?? "")")")
+        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { deliver(text); return }
+        finishNoSpeech()
+    }
+    @ObservationIgnored private var quietSec = SpeechInput.silenceAfterSpeechSec
 
     private func armSilenceTimer(_ gen: Int) {
         silenceTask?.cancel()
         silenceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(SpeechInput.silenceAfterSpeechSec * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64((self?.quietSec ?? SpeechInput.silenceAfterSpeechSec) * 1_000_000_000))
             guard !Task.isCancelled, let self, self.generation == gen, self.state.isListening else { return }
             self.stop()
         }
@@ -256,6 +299,7 @@ final class SpeechInput {
     }
 
     private func release() {
+        if gemmaActive { gemmaActive = false; gemma.cancel() }
         for t in timers { t.cancel() }
         timers.removeAll()
         silenceTask?.cancel()

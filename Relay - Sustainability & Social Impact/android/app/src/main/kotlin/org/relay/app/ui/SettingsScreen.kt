@@ -70,6 +70,8 @@ fun DeveloperSettingsScreen(actions: SetupActions) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item { DisasterLab() }
+        item { GemmaLab() }
         item { SectionTitle("Gateway backend") }
         if (!locked) item {
             OutlinedTextField(

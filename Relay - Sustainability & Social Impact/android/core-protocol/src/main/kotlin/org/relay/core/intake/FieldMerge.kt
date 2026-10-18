@@ -11,6 +11,8 @@ import org.relay.core.payload.VulnFlag
  */
 data class ModelFields(
     val category: Category? = null,
+    /** Further categories asked for besides [category]; only used together with a model category. */
+    val extraCategories: List<Category>? = null,
     val item: String? = null,
     val landmark: String? = null,
     val urgency: Int? = null,
@@ -57,7 +59,10 @@ class FieldMerge(private val prefer: Map<IntakeField, FieldSource>) {
             vulnFlags = pick(IntakeField.VULN, rules.vulnFlags, model?.vulnFlags, emptySet()),
             summary = pick(IntakeField.SUMMARY, text(rules.summary, 40), text(model?.summary, 40), ""),
         )
-        return merged to sources
+        // Extra categories are a union: a second need either source noticed is worth a ticket the person can untick.
+        val extras = (rules.extraCategories + (model?.extraCategories ?: emptyList()))
+            .filter { it != merged.category && it != Category.OTHER }.distinct()
+        return merged.copy(extraCategories = extras) to sources
     }
 
     /** Merge, then choose the questions from the merged category (the category may have changed). */

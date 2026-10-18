@@ -104,8 +104,9 @@ and has used up to `0x2C`; we will ask its maintainers to reserve `0x70–0x7F`.
 | `0x72` | `HELLO` | none | 1 | no | n/a |
 | `0x73` | `INVENTORY` | none | 1 | no | n/a |
 | `0x74` | `LOC_HINT` | none (broadcast) | 7 | yes | `hint_key` (§5.5) |
+| `0x75` | `BROADCAST` | none (broadcast) | 7 | yes | `bcast_id` (§5.6) |
 
-Any other type (including `LOC_HINT` on a build that predates it): decoded, not processed, deduplicated by its opaque key (§5), and relayed if
+Any other type (including `LOC_HINT` or `BROADCAST` on a build that predates it): decoded, not processed, deduplicated by its opaque key (§5), and relayed if
 `ttl > 1` (forward compatibility). Not stored.
 
 ---
@@ -283,6 +284,58 @@ room. It is therefore **opt-in per phone**: Settings has a switch "Help locate n
 default: **on in demo builds, off in village builds** (Gradle property `relay.helpLocateDefault`, default `true`). A phone with the switch off
 never emits a hint, though it still relays other phones' hints like any other frame.
 
+### 5.6 `BROADCAST` (type `0x75`), 25 bytes
+
+The control room speaking to every phone. Today it carries one thing: **a disaster declaration** ("flood", "earthquake") or
+the end of one. Phones use it to decide which disaster-specific follow-up questions they may ask a person in need;
+a phone never infers a disaster from what a person says, so without a live declaration it asks
+none.
+
+```
+size field
+1    payload_version   = 0x01
+8    bcast_id          random, unique per broadcast; the dedupe key
+1    kind              1 DISASTER (declared), 2 DISASTER_CLEARED (over)
+1    disaster          0 flood, 1 cyclone, 2 earthquake, 3 landslide
+4    issued_at         unix seconds, u32: when the control room issued it
+4    lat_e5            i32, centre of the area, degrees × 100000 (0 when radius_km = 0)
+4    lon_e5            i32
+2    radius_km         u16; 0 = the whole control-room area, otherwise the declaration applies within this distance of the centre
+```
+
+Frame: broadcast (no recipient), initial TTL 7, `sender_id` = the gateway that put it into the mesh (any node id; it is not
+checked against the payload).
+
+**Life: 24 hours from `issued_at`** (not from when a phone received it, so a phone that meets a carrier late holds it for
+what is left, and nothing circulates for ever). A node drops a `BROADCAST` that is more than 24 h old, or whose
+`issued_at` is more than 10 minutes in the future, without storing or relaying it; it deletes a stored one at
+`issued_at + 24 h`. This differs from the 72 h of the other stored types.
+
+**Delivery, end to end.**
+
+1. An operator declares a disaster at the backend (§7 `POST /v1/broadcasts`); the backend stores the payload.
+2. **Every `POST /v1/sync` response carries every live broadcast** in `broadcasts` (base64 payloads), whichever
+   gateway asks. A gateway originates each one it does not already hold into the mesh (same rule as originating an `ACK`);
+   originating one already held is a no-op, so repeating the list on every sync is free. Every gateway therefore catches it,
+   whenever it comes online.
+3. Phones store it, list it in `INVENTORY`, flood it with TTL 7 and push it to any peer that lacks it (§6), so phones
+   that never reach a gateway still **carry** it from one encounter to the next until it expires. It is pushed ahead of
+   other ACKs and NEEDs: it is about 50 bytes on the wire.
+4. A phone that holds a live `DISASTER` of type T (and, when `radius_km > 0`, knows it is inside the area) treats T as
+   declared. A phone that does not know where it is treats an area-limited declaration as applying to it. A `DISASTER_CLEARED`
+   for T ends every declaration of T issued at or before its `issued_at`. Between 12 h and 24 h after issue a
+   declaration still counts but is marked *aging*, so the phone confirms with the person before relying on it.
+
+**Validation on decode:** `payload_version = 1`, exactly 25 bytes, `kind` in {1, 2}, `disaster` in 0..3, `|lat_e5| ≤ 9 000 000`,
+`|lon_e5| ≤ 18 000 000`; anything else is dropped.
+
+**Upgrade consequence:** a build that predates `BROADCAST` relays it once as an unknown type (§4) but does not store it
+or act on it; the people it serves simply get the questions they got before.
+
+**Authenticity (known gap).** A broadcast is not signed in v1. A forged one can only switch extra questions on or off; it
+cannot remove a question that is always asked (consciousness, breathing, bleeding) or any first-aid advice. Signing it
+with a control-room key is the planned hardening.
+
 ---
 
 ## 6. Gossip engine (behaviour every node implements)
@@ -318,7 +371,9 @@ ACK delivery: every node stores and relays ACKs; only the node whose `node_id ==
 shows it to the user.
 
 `LOC_HINT` frames (§5.5) are stored, inventoried, flooded and expired exactly like ACKs, except that no node
-shows them to the user; the gateway uploads them (§7). A node that is not the NEED's requester never needs the
+shows them to the user; the gateway uploads them (§7). `BROADCAST` frames (§5.6) are stored, inventoried and flooded
+like ACKs but expire 24 h after `issued_at`, are pushed to a peer before other ACKs and NEEDs, and are never uploaded: they
+only travel down from the backend. A node that is not the NEED's requester never needs the
 hint's content for anything but forwarding it.
 
 ---
@@ -348,6 +403,9 @@ Response:
   hint is `rejected` when it does not decode, when its `relay_node` is not the frame's `sender_id`, when its position is
   exactly 0, 0, or when its `observed_at` is more than 24 h in the future or older than 72 h. A hint for a NEED the
   backend has not seen yet is kept (`accepted`) and used when that NEED arrives.
+- `broadcasts` (optional, omitted when empty so older gateways see no change) are the **BROADCAST payloads** (§5.6) that are
+  live now (issued within the last 24 h), oldest first, in every response whichever gateway asks. The gateway decodes
+  each and originates the ones it does not hold into the mesh.
 - `acks` are **ACK payloads** (not frames) with id greater than `ack_cursor`, oldest first,
   at most 50. The gateway wraps each in a frame (`sender_id` = gateway, `recipient_id` =
   `target_node`, TTL 7) and originates it into the mesh.
@@ -357,6 +415,10 @@ Response:
 - `GET /v1/tickets/{ticket_no}` → `Ticket` with `packets: [...]`.
 - `POST /v1/tickets/{ticket_no}/approve` → queues a `DISPATCHED` ACK for every linked NEED's
   origin, returns the updated `Ticket`.
+- `POST /v1/broadcasts` → body `{ "kind": "disaster" | "cleared" (default "disaster"), "disaster": "flood" | "cyclone" | "earthquake" | "landslide",
+  "lat", "lon", "radius_km" }` (area optional; `radius_km > 0` needs `lat` and `lon`) → `{ "id", "kind", "disaster", "issued_at",
+  "expires_at", "area"? }`. Stored and served to gateways for 24 h (§5.6).
+- `GET /v1/broadcasts` → `{ "broadcasts": [ ...the same objects, live only ] }`.
 - `GET /v1/stats` → `{ "open_by_category": {...}, "gateways_online": n, "tickets": n }`
   (a gateway is online if it synced in the last 60 s).
 - `POST /v1/dev/inject` → body `{ "needs": [NeedJson...] }`; dev only.

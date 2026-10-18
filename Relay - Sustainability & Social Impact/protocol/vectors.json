@@ -358,7 +358,8 @@
     "need2_payload": 118,
     "ack1_payload": 131,
     "need_v2_max_payload": 121,
-    "loc_hint_payload": 31
+    "loc_hint_payload": 31,
+    "broadcast_payload": 25
   },
   "answer_bank": [
     {
@@ -535,5 +536,93 @@
     "2": 25,
     "3": 50,
     "4": 100
-  }
+  },
+  "broadcast_vectors": [
+    {
+      "name": "broadcast_flood_whole_area",
+      "kind": "BROADCAST",
+      "fields": {
+        "bcast_id": "a1a2a3a4a5a6a7a8",
+        "kind": "disaster",
+        "disaster": "flood",
+        "issued_at": 1790000000,
+        "lat": 0.0,
+        "lon": 0.0,
+        "radius_km": 0,
+        "lat_e5": 0,
+        "lon_e5": 0,
+        "expires_at": 1790086400
+      },
+      "frame": {
+        "type": 117,
+        "ttl": 7,
+        "timestamp_ms": 1790000000193,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "01a1a2a3a4a5a6a7a801006ab13b8000000000000000000000",
+      "frame_hex": "017507000001a0c4506cc1000019d4d4d4d4d4d4d4d401a1a2a3a4a5a6a7a801006ab13b8000000000000000000000"
+    },
+    {
+      "name": "broadcast_earthquake_with_area",
+      "kind": "BROADCAST",
+      "fields": {
+        "bcast_id": "0102030405060708",
+        "kind": "disaster",
+        "disaster": "earthquake",
+        "issued_at": 1790003600,
+        "lat": 20.29612,
+        "lon": 85.82451,
+        "radius_km": 40,
+        "lat_e5": 2029612,
+        "lon_e5": 8582451,
+        "expires_at": 1790090000
+      },
+      "frame": {
+        "type": 117,
+        "ttl": 5,
+        "timestamp_ms": 1790000000203,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "01010203040506070801026ab14990001ef82c0082f5330028",
+      "frame_hex": "017505000001a0c4506ccb000019b2b2b2b2b2b2b2b201010203040506070801026ab14990001ef82c0082f5330028"
+    },
+    {
+      "name": "broadcast_cleared_southwest",
+      "kind": "BROADCAST",
+      "fields": {
+        "bcast_id": "ffffffffffffff00",
+        "kind": "cleared",
+        "disaster": "landslide",
+        "issued_at": 4294967295,
+        "lat": -12.000005,
+        "lon": -77.123455,
+        "radius_km": 65535,
+        "lat_e5": -1200001,
+        "lon_e5": -7712346,
+        "expires_at": 4295053695
+      },
+      "frame": {
+        "type": 117,
+        "ttl": 7,
+        "timestamp_ms": 1790000000213,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "01ffffffffffffff000203ffffffffffedb07fff8a51a6ffff",
+      "frame_hex": "017507000001a0c4506cd5000019a1a1a1a1a1a1a1a101ffffffffffffff000203ffffffffffedb07fff8a51a6ffff"
+    }
+  ],
+  "must_reject_broadcast_payloads": {
+    "version_2": "02a1a2a3a4a5a6a7a801006ab13b8000000000000000000000",
+    "too_short": "01a1a2a3a4a5a6a7a801006ab13b80000000000000000000",
+    "trailing_byte": "01a1a2a3a4a5a6a7a801006ab13b800000000000000000000000",
+    "kind_zero": "01a1a2a3a4a5a6a7a800006ab13b8000000000000000000000",
+    "kind_three": "01a1a2a3a4a5a6a7a803006ab13b8000000000000000000000",
+    "disaster_four": "01a1a2a3a4a5a6a7a801046ab13b8000000000000000000000",
+    "lat_out_of_range": "01a1a2a3a4a5a6a7a801006ab13b8000895441000000000000",
+    "lon_out_of_range": "01a1a2a3a4a5a6a7a801006ab13b8000000000feed577f0000"
+  },
+  "broadcast_ttl_s": 86400
 }

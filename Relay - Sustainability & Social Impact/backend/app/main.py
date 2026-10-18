@@ -36,12 +36,15 @@ from .codec import (
     INITIAL_TTL,
     LANG_CODES,
     RSSI_UNKNOWN,
+    BROADCAST_TTL_S,
+    DISASTER_CODES,
     STATUS_DISPATCHED,
     STATUS_ON_THE_WAY,
     STATUS_RESOLVED,
     TYPE_LOC_HINT,
     TYPE_NEED,
     VULN_NAMES,
+    Broadcast,
     CodecError,
     LocHint,
     Need,
@@ -49,6 +52,7 @@ from .codec import (
     decode_frame,
     decode_loc_hint,
     decode_need,
+    encode_broadcast,
     encode_frame,
     encode_loc_hint,
     encode_need,
@@ -89,6 +93,30 @@ class SyncRequest(BaseModel):
     gateway_node: str = Field(pattern=HEX16)
     frames: list[str] = Field(default_factory=list, max_length=MAX_FRAMES_PER_SYNC)
     ack_cursor: int = Field(default=0, ge=0)
+
+
+class BroadcastRequest(BaseModel):
+    """The control room declares a disaster (every phone in reach then asks the right questions for 24 h) or clears it."""
+
+    kind: str = "disaster"
+    disaster: str
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    radius_km: int = Field(default=0, ge=0, le=65535)  # 0 = the whole control-room area
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, v: str) -> str:
+        if v not in ("disaster", "cleared"):
+            raise ValueError("kind must be 'disaster' or 'cleared'")
+        return v
+
+    @field_validator("disaster")
+    @classmethod
+    def _disaster(cls, v: str) -> str:
+        if v not in DISASTER_CODES.values():
+            raise ValueError(f"disaster must be one of {sorted(DISASTER_CODES.values())}")
+        return v
 
 
 class MeshHintJson(BaseModel):
@@ -304,6 +332,16 @@ def _ticket_json(
     for key in ("proposal", "dispatch"):  # optional: absent until proposed / approved
         if record and record.get(key):
             out[key] = record[key]
+    return out
+
+
+def _broadcast_json(b: Broadcast) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": b.bcast_id.hex(), "kind": b.kind, "disaster": b.disaster, "issued_at": b.issued_at,
+        "expires_at": b.issued_at + BROADCAST_TTL_S,
+    }
+    if b.radius_km:
+        out["area"] = {"lat": b.lat_e5 / 100000, "lon": b.lon_e5 / 100000, "radius_km": b.radius_km}
     return out
 
 
@@ -552,6 +590,7 @@ def create_app(
         hint_res = pipeline.process_hints(gateway, hints) if hints else None
 
         cursor = store.clamp_ack_cursor(req.ack_cursor)  # beyond the newest ack = store was reset
+        live_broadcasts = store.live_broadcasts(int(clock()) - BROADCAST_TTL_S)
         acks = store.acks_after(cursor, MAX_ACKS_PER_SYNC)
         out = {
             "accepted": accepted,
@@ -560,6 +599,8 @@ def create_app(
             "acks": [base64.b64encode(a["payload"]).decode("ascii") for a in acks],
             "ack_cursor": acks[-1]["id"] if acks else cursor,
         }
+        if live_broadcasts:  # every sync returns every live broadcast, so every gateway puts it into the mesh (SPEC 5.6)
+            out["broadcasts"] = [base64.b64encode(p).decode("ascii") for p in live_broadcasts]
         if hint_res is not None or hints_bad:  # only when the upload held hints: older gateways see no change
             out["hints"] = {
                 "accepted": hint_res.accepted if hint_res else 0,
@@ -741,21 +782,27 @@ def create_app(
         return team_views()
 
     @app.post("/v1/dispatch/propose", dependencies=operator)
-    def propose() -> dict[str, Any]:
-        """Draft a team, ETA and order for every open ticket. Stored on the tickets as pending
-        proposals (replacing earlier ones); nothing is sent to the mesh until an operator approves."""
+    def propose(ticket_no: int) -> dict[str, Any]:
+        """Draft a team, ETA and order for one OPEN ticket (``?ticket_no=N``, required: the dashboard asks when
+        an operator opens a ticket). Stored on the ticket as a pending proposal, replacing the earlier one;
+        nothing is sent to the mesh until an operator approves. The allocation runs over every open ticket, so
+        team room and priority count as they would for the whole queue, but no other ticket's proposal is
+        written or cleared and only this ticket's order text is drafted. 404 unknown, 409 not open."""
         views = team_views()
         records = store.dispatch_records()
         tickets = [_ticket_json(r, links, records.get(r["ticket_no"])) for r, links in store.list_tickets_with_links()]
-        open_tickets = [t for t in tickets if t["status"] == "OPEN"]
-        assignments = dispatching.allocate(open_tickets, views)
-        proposals = dispatching.build_proposals(assignments, open_tickets, textgen, int(clock()), teams=views)
-        update: dict[int, dict[str, Any] | None] = {
-            t["ticket_no"]: None for t in open_tickets if t.get("proposal")  # stale: no team has room now
-        }
-        update.update({p["ticket_no"]: {k: v for k, v in p.items() if k != "ticket_no"} for p in proposals})
-        if update:
-            store.set_proposals(update)
+        target = next((t for t in tickets if t["ticket_no"] == ticket_no), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="unknown ticket")
+        if target["status"] != "OPEN":
+            raise HTTPException(status_code=409, detail="ticket is not open")
+        assignments = dispatching.allocate([t for t in tickets if t["status"] == "OPEN"], views)
+        assignments = [a for a in assignments if a.ticket_no == ticket_no]
+        proposals = dispatching.build_proposals(assignments, [target], textgen, int(clock()), teams=views)
+        if proposals:
+            store.set_proposals({ticket_no: {k: v for k, v in proposals[0].items() if k != "ticket_no"}})
+        elif target.get("proposal"):
+            store.set_proposals({ticket_no: None})  # stale: no team has room now
         return {"proposals": proposals}
 
     # ------------------------------------------------------------------ sitreps
@@ -1063,6 +1110,28 @@ def create_app(
             "teams_free": sum(1 for t in views if t["status"] == "free"),
             "teams_total": len(views),
         }
+
+    # ------------------------------------------------------------------ control-room broadcasts (SPEC 5.6)
+    @app.post("/v1/broadcasts", dependencies=operator)
+    def declare(body: BroadcastRequest) -> dict[str, Any]:
+        has_area = body.radius_km > 0
+        if has_area and (body.lat is None or body.lon is None):
+            raise HTTPException(status_code=422, detail="radius_km needs lat and lon")
+        now = int(clock())
+        b = Broadcast(
+            bcast_id=os.urandom(8), kind=body.kind, disaster=body.disaster, issued_at=now,
+            lat_e5=to_e5(body.lat) if has_area and body.lat is not None else 0,
+            lon_e5=to_e5(body.lon) if has_area and body.lon is not None else 0,
+            radius_km=body.radius_km if has_area else 0,
+        )
+        store.add_broadcast(b.bcast_id.hex(), b.issued_at, encode_broadcast(b))
+        return _broadcast_json(b)
+
+    @app.get("/v1/broadcasts", dependencies=operator)
+    def live() -> dict[str, Any]:
+        from .codec import decode_broadcast
+
+        return {"broadcasts": [_broadcast_json(decode_broadcast(p)) for p in store.live_broadcasts(int(clock()) - BROADCAST_TTL_S)]}
 
     # ------------------------------------------------------------------ dev only
     if env != "prod":

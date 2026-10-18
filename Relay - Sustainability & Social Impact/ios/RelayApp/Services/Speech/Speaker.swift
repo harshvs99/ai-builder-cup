@@ -21,11 +21,16 @@ final class Speaker {
     @ObservationIgnored private var delegate: SpeakerDelegate?
     /// The utterance in flight; end callbacks of an earlier (stopped) utterance arrive late and must be ignored.
     @ObservationIgnored private var current: ObjectIdentifier?
+    /// Called when the last utterance of the current `speakAll` finishes on its own (not when it is stopped or replaced).
+    @ObservationIgnored private var whenDone: (@MainActor () -> Void)?
 
     init() {
-        let d = SpeakerDelegate { [weak self] id in
+        let d = SpeakerDelegate { [weak self] id, completed in
             guard let self, self.current == id else { return }
+            let done = completed ? self.whenDone : nil
+            self.whenDone = nil
             self.finished()
+            done?()
         }
         delegate = d
         synthesizer.delegate = d
@@ -89,8 +94,38 @@ final class Speaker {
         return true
     }
 
+    /// Speaks `lines` one after another in `lang`, replacing anything being spoken, and calls `onDone` after the last one
+    /// finishes. Returns false (and never calls `onDone`) when there is no voice for `lang`; the caller then carries on
+    /// without speech.
+    @discardableResult
+    func speakAll(_ lines: [String], lang: Lang, speed: VoiceSpeed? = nil, onDone: (@MainActor () -> Void)? = nil) -> Bool {
+        let spoken = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !spoken.isEmpty, let voice = Speaker.voice(for: lang) else { return false }
+        stop()
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+        } catch {
+            // Speak anyway: the default session usually works.
+        }
+        let utterances = spoken.map { line -> AVSpeechUtterance in
+            let u = AVSpeechUtterance(string: line)
+            u.voice = voice
+            u.rate = AVSpeechUtteranceDefaultSpeechRate * (speed ?? self.speed).rate
+            return u
+        }
+        isSpeaking = true
+        // Only the last utterance is "current": earlier ones ending is not the end of the speech.
+        current = ObjectIdentifier(utterances[utterances.count - 1])
+        whenDone = onDone
+        for u in utterances { synthesizer.speak(u) }
+        return true
+    }
+
     func stop() {
         current = nil
+        whenDone = nil
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
         finished()
     }
@@ -114,19 +149,20 @@ extension VoiceSpeed {
 
 /// `AVSpeechSynthesizerDelegate` shim: reports the end (finish or cancel) of an utterance on the main actor.
 private final class SpeakerDelegate: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
-    private let onEnd: @MainActor (ObjectIdentifier) -> Void
+    private let onEnd: @MainActor (ObjectIdentifier, Bool) -> Void
 
-    init(onEnd: @escaping @MainActor (ObjectIdentifier) -> Void) { self.onEnd = onEnd }
+    /// `onEnd(id, completed)`: `completed` is true when the utterance finished by itself, false when it was cancelled.
+    init(onEnd: @escaping @MainActor (ObjectIdentifier, Bool) -> Void) { self.onEnd = onEnd }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         let f = onEnd
         let id = ObjectIdentifier(utterance)
-        Task { @MainActor in f(id) }
+        Task { @MainActor in f(id, true) }
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         let f = onEnd
         let id = ObjectIdentifier(utterance)
-        Task { @MainActor in f(id) }
+        Task { @MainActor in f(id, false) }
     }
 }

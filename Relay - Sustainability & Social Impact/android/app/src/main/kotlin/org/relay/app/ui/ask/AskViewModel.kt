@@ -14,6 +14,7 @@ import org.relay.core.payload.Geo
 import org.relay.core.payload.Lang
 import org.relay.core.payload.Need
 import org.relay.core.payload.VulnFlag
+import org.relay.core.triage.TriageResult
 
 data class AskState(
     val draft: AskDraft = AskDraft(),
@@ -46,6 +47,9 @@ class AskViewModel(private val engine: IntakeEngine = RuleIntake) : ViewModel() 
             s.copy(transcript = text, draft = AskLogic.applyIntake(s.draft, intake))
         }
     }
+
+    /** The triage conversation finished: its findings join the draft (see [AskLogic.applyTriage]). */
+    fun applyTriage(r: TriageResult) = _state.update { it.copy(draft = AskLogic.applyTriage(it.draft, r)) }
 
     fun setTyping(typing: Boolean) = _state.update { it.copy(typing = typing) }
 
@@ -83,6 +87,7 @@ class AskViewModel(private val engine: IntakeEngine = RuleIntake) : ViewModel() 
     fun setCategory(c: Category) = edit { AskLogic.setCategory(it, c) }
     fun setItem(text: String) = edit { AskLogic.setItem(it, text) }
     fun setPeople(n: Int) = edit { AskLogic.setPeople(it, n) }
+    fun toggleTransport() = edit { AskLogic.toggleTransport(it) }
     fun toggleFlag(f: VulnFlag) = edit { AskLogic.toggleFlag(it, f) }
     fun setLandmark(text: String) = edit { AskLogic.setLandmark(it, text) }
     fun setSummary(text: String) = edit { AskLogic.setSummary(it, text) }

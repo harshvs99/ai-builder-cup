@@ -9,7 +9,7 @@ import json
 import math
 import struct
 
-NEED, ACK, HELLO, INVENTORY, LOC_HINT = 0x70, 0x71, 0x72, 0x73, 0x74
+NEED, ACK, HELLO, INVENTORY, LOC_HINT, BROADCAST = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
 F_HAS_RECIPIENT, F_HAS_SIGNATURE = 0x01, 0x02
 
 
@@ -116,6 +116,18 @@ def loc_hint_payload(h):
 def loc_hint_key(ref_msg_id, relay_node):
     """Dedupe key (SPEC 5.5): first 8 bytes of SHA-256(type || ref_msg_id || relay_node)."""
     return hashlib.sha256(bytes([LOC_HINT]) + ref_msg_id + relay_node).digest()[:8]
+
+
+BROADCAST_KINDS = {"disaster": 1, "cleared": 2}
+DISASTERS = {"flood": 0, "cyclone": 1, "earthquake": 2, "landslide": 3}
+BROADCAST_TTL_S = 24 * 3600  # a BROADCAST lives 24 h from issued_at (SPEC 5.6)
+
+
+def broadcast_payload(b):
+    return struct.pack(
+        ">B8sBBIiiH", 1, b["bcast_id"], BROADCAST_KINDS[b["kind"]], DISASTERS[b["disaster"]], b["issued_at"],
+        e5(b["lat"]), e5(b["lon"]), b["radius_km"],
+    )
 
 
 def opaque_key(type_, sender, ts_ms, payload):
@@ -282,6 +294,45 @@ hint2 = dict(
 )
 hint_vector("loc_hint_unknown_rssi_southwest", hint2, 4, TS + 60)
 
+# BROADCAST (SPEC 5.6): the control room speaks to every phone. Kept in its own list so decoders that predate it,
+# and test code that walks `vectors`, are unaffected.
+broadcast_vectors = []
+
+
+def broadcast_vector(name, b, ttl, ts, sender):
+    pl = broadcast_payload(b)
+    broadcast_vectors.append({
+        "name": name, "kind": "BROADCAST",
+        "fields": {**{k: (H(v) if isinstance(v, bytes) else v) for k, v in b.items()},
+                   "lat_e5": e5(b["lat"]), "lon_e5": e5(b["lon"]), "expires_at": b["issued_at"] + BROADCAST_TTL_S},
+        "frame": {"type": BROADCAST, "ttl": ttl, "timestamp_ms": ts, "sender_id": H(sender), "recipient_id": None},
+        "payload_hex": H(pl), "frame_hex": H(frame(BROADCAST, ttl, ts, sender, pl)),
+    })
+    return pl
+
+
+pb1 = broadcast_vector("broadcast_flood_whole_area", dict(
+    bcast_id=bytes.fromhex("a1a2a3a4a5a6a7a8"), kind="disaster", disaster="flood", issued_at=1_790_000_000,
+    lat=0.0, lon=0.0, radius_km=0), 7, TS + 70, D)
+broadcast_vector("broadcast_earthquake_with_area", dict(
+    bcast_id=bytes.fromhex("0102030405060708"), kind="disaster", disaster="earthquake", issued_at=1_790_003_600,
+    lat=20.29612, lon=85.82451, radius_km=40), 5, TS + 80, B)
+broadcast_vector("broadcast_cleared_southwest", dict(
+    bcast_id=bytes.fromhex("ffffffffffffff00"), kind="cleared", disaster="landslide", issued_at=0xFFFFFFFF,
+    lat=-12.000005, lon=-77.123455, radius_km=65535), 7, TS + 90, A)
+
+# BROADCAST payloads every decoder must reject.
+bad_broadcast = {
+    "version_2": bytes([2]) + pb1[1:],
+    "too_short": pb1[:-1],
+    "trailing_byte": pb1 + b"\x00",
+    "kind_zero": pb1[:9] + bytes([0]) + pb1[10:],
+    "kind_three": pb1[:9] + bytes([3]) + pb1[10:],
+    "disaster_four": pb1[:10] + bytes([4]) + pb1[11:],
+    "lat_out_of_range": pb1[:15] + struct.pack(">i", 9_000_001) + pb1[19:],
+    "lon_out_of_range": pb1[:19] + struct.pack(">i", -18_000_001) + pb1[23:],
+}
+
 # Frames every decoder must reject.
 good = frame(NEED, 7, TS, A, p)
 bad = {
@@ -323,7 +374,7 @@ print(json.dumps({
     "vectors": vectors,
     "must_reject_frames": {k: H(v) for k, v in bad.items()},
     "sizes": {"need1_payload": len(p), "need2_payload": len(p2), "ack1_payload": len(pa),
-              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1)},
+              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1), "broadcast_payload": len(pb1)},
     "answer_bank": [
         {"id": qid, "key": key, "options": [{"value": v, "key": k} for k, v in opts.items()]}
         for qid, (key, opts) in BANK.items()
@@ -331,4 +382,7 @@ print(json.dumps({
     "must_reject_need_payloads": {k: H(v) for k, v in bad_need.items()},
     "must_reject_loc_hint_payloads": {k: H(v) for k, v in bad_hint.items()},
     "loc_hint_acc_max_m": {str(k): v for k, v in HINT_ACC_MAX_M.items()},
+    "broadcast_vectors": broadcast_vectors,
+    "must_reject_broadcast_payloads": {k: H(v) for k, v in bad_broadcast.items()},
+    "broadcast_ttl_s": BROADCAST_TTL_S,
 }, indent=2, ensure_ascii=False))

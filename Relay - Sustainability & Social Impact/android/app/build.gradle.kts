@@ -79,6 +79,11 @@ android {
         warningsAsErrors = false
     }
 
+    packaging {
+        // LiteRT-LM loads its native libraries from the extracted lib dir.
+        jniLibs { useLegacyPackaging = true }
+    }
+
     testOptions {
         unitTests.all { it.useJUnit() }
     }
@@ -101,6 +106,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // On-device Gemma (LiteRT-LM). Needs API 31+; the manifest overrides minSdk for it and GemmaRunner guards at runtime.
+    implementation(libs.litertlm.android)
 
     testImplementation(libs.junit)
     // The android.jar used for JVM unit tests only has stubs for org.json; use the real one.

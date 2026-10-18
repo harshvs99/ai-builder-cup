@@ -234,4 +234,33 @@ class VectorsTest {
         val badUtf8 = good.copyOf().also { it[36] = 0xC0.toByte() } // 'i' of insulin -> invalid lead byte
         assertNull("invalid utf8", NeedCodec.decode(badUtf8))
     }
+
+    // ---- BROADCAST (SPEC 5.6): its own vector list, so nothing that walks `vectors` is affected
+    @Test fun broadcastVectorsMatchByteForByte() {
+        val list = root["broadcast_vectors"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(list.size >= 3)
+        for (v in list) {
+            val name = v.s("name")
+            val fl = v["fields"]!!.jsonObject
+            val kind = if (fl.s("kind") == "disaster") org.relay.core.payload.BroadcastKind.DISASTER else org.relay.core.payload.BroadcastKind.DISASTER_CLEARED
+            val b = org.relay.core.payload.Broadcast(
+                h(fl.s("bcast_id")), kind, org.relay.core.triage.DisasterType.fromKey(fl.s("disaster"))!!, fl.l("issued_at"),
+                fl.i("lat_e5"), fl.i("lon_e5"), fl.i("radius_km"),
+            )
+            val payload = org.relay.core.payload.BroadcastCodec.encode(b)
+            assertEquals("$name payload", v.s("payload_hex"), Hex.encode(payload))
+            assertEquals("$name decode", b, org.relay.core.payload.BroadcastCodec.decode(h(v.s("payload_hex"))))
+            assertEquals("$name frame", v.s("frame_hex"), Hex.encode(FrameCodec.encode(frameOf(v, payload))))
+            assertEquals("$name key", fl.s("bcast_id"), b.keyHex)
+            assertEquals("$name expiry", fl.l("expires_at"), b.issuedAt + org.relay.core.payload.BroadcastCodec.TTL_SEC)
+        }
+        assertEquals(org.relay.core.payload.BroadcastCodec.SIZE, root["sizes"]!!.jsonObject.i("broadcast_payload"))
+        assertEquals(org.relay.core.payload.BroadcastCodec.TTL_SEC, root["broadcast_ttl_s"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun broadcastPayloadsEveryDecoderMustReject() {
+        val bad = root["must_reject_broadcast_payloads"]!!.jsonObject
+        assertTrue(bad.size >= 8)
+        for ((name, hex) in bad) assertNull(name, org.relay.core.payload.BroadcastCodec.decode(h(hex.jsonPrimitive.content)))
+    }
 }

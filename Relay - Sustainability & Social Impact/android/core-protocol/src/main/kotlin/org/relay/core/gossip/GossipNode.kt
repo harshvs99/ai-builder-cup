@@ -6,6 +6,8 @@ import org.relay.core.frame.FrameTypes
 import org.relay.core.ids.Hex
 import org.relay.core.payload.Ack
 import org.relay.core.payload.AckCodec
+import org.relay.core.payload.Broadcast
+import org.relay.core.payload.BroadcastCodec
 import org.relay.core.payload.Hello
 import org.relay.core.payload.HelloCodec
 import org.relay.core.payload.Inventory
@@ -41,6 +43,8 @@ class GossipNode(
     companion object {
         const val SEEN_CAPACITY = 10_000
         const val EXPIRY_MS = 72L * 3600 * 1000
+        /** A BROADCAST lives 24 h from issue (SPEC 5.6), not the 72 h of the other types. */
+        const val BROADCAST_TTL_MS = BroadcastCodec.TTL_SEC * 1000
         const val FUTURE_LIMIT_MS = 24L * 3600 * 1000
         const val JITTER_MIN_MS = 10
         const val JITTER_MAX_MS = 220
@@ -128,6 +132,16 @@ class GossipNode(
         }
     }
 
+    /** Control-room broadcasts still inside their 24 h life, as stored (carried) by this node. */
+    fun storedBroadcasts(): List<Pair<Broadcast, Frame>> = synchronized(lock) {
+        val nowSec = clock.nowMs() / 1000
+        store.all().filter { it.type == FrameTypes.BROADCAST }.mapNotNull { p ->
+            val f = FrameCodec.decode(p.raw) ?: return@mapNotNull null
+            val b = BroadcastCodec.decode(f.payload) ?: return@mapNotNull null
+            if (b.isLive(nowSec)) b to f else null
+        }
+    }
+
     fun storedAcks(): List<Pair<Ack, Frame>> = synchronized(lock) {
         store.all().filter { it.type == FrameTypes.ACK }.mapNotNull { p ->
             val f = FrameCodec.decode(p.raw) ?: return@mapNotNull null
@@ -167,7 +181,7 @@ class GossipNode(
         }
     }
 
-    /** Drop NEED/ACK/LOC_HINT frames older than 72 h from the store. Seen-set keys stay until LRU eviction. */
+    /** Drop NEED/ACK/LOC_HINT frames older than 72 h and BROADCAST frames older than 24 h from the store. Seen-set keys stay until LRU eviction. */
     fun expire() = locked { out -> expireLocked(out) }
 
     fun originateNeed(need: Need): Frame {
@@ -212,6 +226,26 @@ class GossipNode(
         locked { out ->
             fresh = !isKnown(hint.keyHex)
             acceptLocHint(out, hint, frame, raw, fromLink = null)
+        }
+        return if (fresh) frame else null
+    }
+
+    /**
+     * Originate a BROADCAST (SPEC 5.6) into the mesh: a gateway does this for every broadcast the backend returns, so every
+     * gateway puts the control room's word into the phones around it. Returns null when this node already holds it (the id is
+     * in the seen-set) or it is outside its 24 h life, so calling it with the same list every sync is free.
+     */
+    fun originateBroadcast(b: Broadcast): Frame? {
+        if (!b.isLive(clock.nowMs() / 1000)) return null
+        val frame = Frame(
+            type = FrameTypes.BROADCAST, ttl = INITIAL_TTL, timestampMs = clock.nowMs(),
+            senderId = nodeId, payload = BroadcastCodec.encode(b),
+        )
+        val raw = FrameCodec.encode(frame)
+        var fresh = false
+        locked { out ->
+            fresh = !isKnown(b.keyHex)
+            acceptBroadcast(out, b, frame, raw, fromLink = null)
         }
         return if (fresh) frame else null
     }
@@ -262,6 +296,14 @@ class GossipNode(
                 // like HELLO: the relay named in the payload must be the node that sent the frame
                 if (hint == null || !hint.relayNode.contentEquals(frame.senderId)) { reject(); return@locked }
                 acceptLocHint(out, hint, frame, bytes, linkId)
+            }
+            FrameTypes.BROADCAST -> {
+                if (!knownVersion) return@locked acceptOpaque(out, frame, bytes, linkId)
+                val b = BroadcastCodec.decode(frame.payload)
+                if (b == null) { reject(); return@locked }
+                // Outside its life: neither stored nor relayed, so a stale declaration cannot circulate for ever.
+                if (!b.isLive(now / 1000)) { out.log("dropped expired broadcast ${b.idHex}"); return@locked }
+                acceptBroadcast(out, b, frame, bytes, linkId)
             }
             FrameTypes.HELLO -> {
                 val hello = HelloCodec.decode(frame.payload)
@@ -317,6 +359,18 @@ class GossipNode(
         store.put(StoredPacket(key, FrameTypes.LOC_HINT, raw, clock.nowMs()))
         stats = stats.copy(locHintsDelivered = stats.locHintsDelivered + 1)
         out.actions += { listener.onLocHint(hint, frame, fromLink) }
+        scheduleFlood(out, frame, raw, key, fromLink)
+    }
+
+    private fun acceptBroadcast(out: Out, b: Broadcast, frame: Frame, raw: ByteArray, fromLink: String?) {
+        val key = b.keyHex
+        fromLink?.let { links[it]?.peerKeys?.add(key) }
+        if (isKnown(key)) { stats = stats.copy(duplicates = stats.duplicates + 1); return }
+        markSeen(key)
+        // The shared 72 h expiry (`basis + EXPIRY_MS`) lands exactly 24 h after issue when the basis is issued_at minus 48 h.
+        store.put(StoredPacket(key, FrameTypes.BROADCAST, raw, b.issuedAt * 1000L - (EXPIRY_MS - BROADCAST_TTL_MS)))
+        stats = stats.copy(broadcastsDelivered = stats.broadcastsDelivered + 1)
+        out.actions += { listener.onBroadcast(b, frame, fromLink) }
         scheduleFlood(out, frame, raw, key, fromLink)
     }
 
@@ -381,13 +435,13 @@ class GossipNode(
     }
 
     /**
-     * Push the next capped batch of what the peer lacks (ACKs, then NEEDs newest first, then LOC_HINTs). Pushed keys are
+     * Push the next capped batch of what the peer lacks (ACKs for the peer, broadcasts, other ACKs, NEEDs newest first, then LOC_HINTs). Pushed keys are
      * recorded in [LinkState.peerKeys] so flooding does not repeat them. A remainder is continued after
      * [pushContinueMs] on the same link, without waiting for the next 30 s inventory exchange.
      */
     private fun pushBatch(out: Out, linkId: String, st: LinkState) {
         val candidates = store.all().filter {
-            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK || it.type == FrameTypes.LOC_HINT) &&
+            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK || it.type == FrameTypes.LOC_HINT || it.type == FrameTypes.BROADCAST) &&
                 !st.peerKeys.contains(it.key)
         }
         if (candidates.isEmpty()) return

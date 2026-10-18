@@ -22,6 +22,11 @@ data class NeedDraft(
     /** English summary, <= 40 bytes */
     val summary: String,
     val lang: Lang,
+    /**
+     * Other categories the text also asks for ("insulin, medical supplies and food" -> [FOOD]), most urgent first,
+     * never [category] itself or OTHER. Only things asked for count, not conditions or context.
+     */
+    val extraCategories: List<Category> = emptyList(),
 ) {
     val vulnMask: Int get() = VulnFlag.toMask(vulnFlags)
 
@@ -113,10 +118,12 @@ object RuleExtractor {
             ?: top.item ?: Lexicons.defaultItem(category)
 
         val summary = buildSummary(ordered, subject?.first, people, flags)
+        val extras = primary.filter { it.request && it.category != category && it.category != Category.OTHER }
+            .map { it.category }.distinct()
         return NeedDraft(
             category = category, urgency = urgency, people = people, vulnFlags = flags,
             item = Utf8.truncate(item, 16), landmark = Utf8.truncate(landmark, 24),
-            summary = summary, lang = lang,
+            summary = summary, lang = lang, extraCategories = extras,
         )
     }
 
