@@ -1,8 +1,8 @@
 """Situation report, one per district: counts from the tickets, prose from a template or Gemini.
 
 The numbers are never model-written. They are computed here from the district's tickets and handed
-to the model, which writes sentences around them in English and the district's language (Puri:
-Odia, Delhi: Hindi). Its text is accepted only if every number in it is one of the numbers it was
+to the model, which writes sentences around them in English and the district's local language
+(``District.local_lang``: Delhi Hindi; Puri Odia only if Odia is enabled, else Hindi). Its text is accepted only if every number in it is one of the numbers it was
 handed (and the open count is stated); otherwise the deterministic template is used. So a sitrep
 can be wrong in tone, never in figures.
 
@@ -20,7 +20,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from .codec import CATEGORY_NAMES
-from .districts import DEFAULT_DISTRICT, LANG_NAMES, District, ticket_in
+from . import languages
+from .districts import DEFAULT_DISTRICT, District, ticket_in
 from .store import Store
 from .textgen import TextGen, call_json
 
@@ -106,7 +107,7 @@ def template_en(counts: dict[str, Any], district_name: str | None = None) -> str
     return " ".join(parts)
 
 
-# NOTE: the Odia and Hindi templates are first drafts pending native-speaker review.
+# PENDING COMMUNITY REVIEW: first draft, only consulted when Odia is enabled (RELAY_LANGS).
 def template_or(counts: dict[str, Any]) -> str:
     parts = [
         f"ପରିସ୍ଥିତି ରିପୋର୍ଟ: {counts['open']}ଟି ଖୋଲା ଅନୁରୋଧ, ସେଥିରୁ {counts['p1_open']}ଟି ସର୍ବାଧିକ ପ୍ରାଥମିକତା।",
@@ -129,7 +130,14 @@ def template_hi(counts: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-LOCAL_TEMPLATES = {"or": template_or, "hi": template_hi}
+LOCAL_TEMPLATES = {"hi": template_hi}
+CONTRIB_TEMPLATES = {"or": template_or}  # pending community review
+
+
+def template_local(counts: dict[str, Any], lang: str) -> str:
+    """The local-language template for ``lang``; a language without an enabled template gets Hindi."""
+    fn = CONTRIB_TEMPLATES.get(lang) if languages.is_enabled(lang) else None
+    return (fn or LOCAL_TEMPLATES.get(lang) or template_hi)(counts)
 
 
 # --------------------------------------------------------------------------------------
@@ -195,12 +203,12 @@ def write_text(
     counts: dict[str, Any], ticket_nos: list[int], textgen: TextGen | None, district: District = DEFAULT_DISTRICT
 ) -> tuple[str, str]:
     """(english, local): model prose if it passes validation, else the templates. Never raises."""
-    en, local = template_en(counts, district.name), LOCAL_TEMPLATES[district.local_lang](counts)
+    en, local = template_en(counts, district.name), template_local(counts, district.local_lang)
     if textgen is None:
         return en, local
     figures = json.dumps({**counts, "oldest_open_age_min": _age_min(counts), "ticket_nos": ticket_nos})
     prompt = _PROMPT.format(
-        figures=figures, district=district.name, local_lang_name=LANG_NAMES[district.local_lang]
+        figures=figures, district=district.name, local_lang_name=languages.name(district.local_lang)
     )
     try:
         data = call_json(textgen, prompt, SitrepText, timeout_s=MODEL_TIMEOUT_S)

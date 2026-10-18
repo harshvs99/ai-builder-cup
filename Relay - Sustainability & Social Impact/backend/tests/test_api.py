@@ -206,7 +206,7 @@ def test_ticket_json_shape_and_detail(client):
     assert set(lst["dispatch_draft"]) == {"en", "local"}
     assert lst["dispatch_draft"]["en"].startswith(f"[{lst['priority_tier']}] MEDICAL — insulin for 1 person (elderly). "
                                                   "Location: 20.29612, 85.82451 near school. Reports: 1.")
-    assert lst["dispatch_draft"]["local"] == "[EN] " + lst["dispatch_draft"]["en"]
+    assert lst["dispatch_draft"]["local"] == lst["dispatch_draft"]["en"]  # Odia requester, Odia not enabled: English
     det = client.get("/v1/tickets/101").json()
     assert det["packets"] == [{"msg_id": need.msg_id.hex(), "origin_node": need.origin_node.hex(),
                                "gateway_node": GATEWAY, "hops": 2, "loc_acc": 1, "received_at": T0 + 60,

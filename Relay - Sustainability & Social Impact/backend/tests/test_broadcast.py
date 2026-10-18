@@ -1,4 +1,7 @@
-"""Broadcast: five-language translation checked against the source, human approval, device fetch."""
+"""Broadcast: translation checked against the source, human approval, device fetch.
+
+The module runs with every language switched on (the dormant ones still work); the tests at the
+end cover the default, English + Hindi only."""
 
 import json
 
@@ -7,6 +10,8 @@ import pytest
 from app import broadcast
 
 from conftest import KEY
+
+pytestmark = pytest.mark.usefixtures("all_langs")
 
 OP = {"X-Operator-Key": "s3cret"}
 SRC = "Cyclone shelter at Puri Zilla School is open. Drinking water at the bus stand from 14:00."
@@ -280,3 +285,39 @@ def test_no_model_configured_still_drafts_the_source(make_client, monkeypatch):
     b = create(c)
     assert b["translations"]["en"]["status"] == "ok" and b["translations"]["hi"]["status"] == "missing"
     assert c.post(f"/v1/broadcasts/{b['id']}/approve", json={}).json()["approved_langs"] == ["en"]
+
+
+# ------------------------------------------------------------------ default: English and Hindi only
+
+@pytest.fixture
+def only_en_hi(all_langs, monkeypatch):
+    monkeypatch.delenv("RELAY_LANGS", raising=False)
+
+
+@pytest.mark.usefixtures("only_en_hi")
+def test_default_translates_only_into_enabled_languages():
+    t, c = gen(), gen()
+    res = broadcast.draft(SRC_N, "en", "puri", t, c)
+    assert list(res) == ["en", "hi"] and res["hi"]["status"] == "ok"
+    assert '"or"' not in t.prompts[0][1] and "Odia" not in t.prompts[0][1]
+    with pytest.raises(ValueError):
+        broadcast.draft(SRC_N, "or", "puri", t, c)
+
+
+@pytest.mark.usefixtures("only_en_hi")
+def test_default_api_flow_and_odia_rejected(make_client):
+    c, _ = make(make_client)
+    assert c.post("/v1/broadcasts", json={"text": SRC_N, "source_lang": "or", "district": "puri"},
+                  headers=OP).status_code == 422
+    assert c.get("/v1/languages").json()[2] == {
+        "code": "or", "english_name": "Odia", "native_name": "ଓଡ଼ିଆ", "enabled": False, "reviewed": False}
+
+
+@pytest.mark.usefixtures("only_en_hi")
+def test_stored_broadcast_with_disabled_language_still_approves_and_serves_enabled_only(make_client):
+    c, _ = make(make_client)
+    b = create(c)
+    assert set(b["translations"]) == {"en", "hi"}
+    assert c.post(f"/v1/broadcasts/{b['id']}/approve", json={"langs": ["or"]}).status_code == 422
+    r = c.post(f"/v1/broadcasts/{b['id']}/approve", json={"langs": ["en"]})
+    assert r.status_code == 200 and r.json()["approved_langs"] == ["en"]

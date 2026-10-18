@@ -16,6 +16,16 @@ describe('api client', () => {
     expect(f.mock.calls[0]?.[0]).toBe('http://x:1/v1/tickets');
   });
 
+  it('reads the language registry and tolerates a bad body', async () => {
+    const f = vi.fn().mockResolvedValueOnce(json([{ code: 'en', english_name: 'English', native_name: 'English', enabled: true }]))
+      .mockResolvedValueOnce(json({ nope: 1 }));
+    vi.stubGlobal('fetch', f);
+    const c = createClient('http://x');
+    expect((await c.listLanguages())?.[0]?.code).toBe('en');
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/languages');
+    expect(await c.listLanguages()).toBeNull();
+  });
+
   it('POSTs approve', async () => {
     const f = vi.fn().mockResolvedValue(json(mkTicket({ status: 'DISPATCHED' })));
     vi.stubGlobal('fetch', f);

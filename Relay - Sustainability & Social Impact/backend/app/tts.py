@@ -24,6 +24,8 @@ import struct
 import threading
 from typing import Any, Protocol
 
+from . import languages
+
 log = logging.getLogger("relay.tts")
 
 PCM_RATE = 24_000
@@ -31,7 +33,7 @@ PCM_CHANNELS = 1
 PCM_WIDTH = 2  # bytes per sample (16-bit)
 DEFAULT_VOICE = "Kore"
 TTS_TIMEOUT_S = 40.0
-TTS_LANGS = frozenset({"en", "hi", "or", "tl"})  # Waray (war) and Cebuano (ceb): device TTS only
+TTS_LANGS = frozenset({"en", "hi", "or", "tl"})  # what the model can speak; Waray (war), Cebuano (ceb): device TTS only. Served = TTS_LANGS and enabled.
 MAX_TEXT_CHARS = 2000
 _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="tts")
 
@@ -77,7 +79,7 @@ class GenaiSpeech:
         self._lock = threading.Lock()
 
     def supports(self, lang: str) -> bool:
-        return lang in TTS_LANGS
+        return lang in TTS_LANGS and languages.is_enabled(lang)
 
     def _get(self):
         if self._client is None:

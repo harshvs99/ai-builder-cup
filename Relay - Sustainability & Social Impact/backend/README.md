@@ -43,6 +43,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
 | `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, `POST /v1/broadcasts`, `GET /v1/broadcasts`, `POST /v1/broadcasts/{id}/approve\|withdraw`, `GET\|POST /v1/ready/warnings*`, `GET /v1/ready/shelters` and `POST /v1/ready/plan/preview` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_LANGS` | `en,hi` | comma list of enabled languages (must include `en`; codes from `en,hi,or,tl,war,ceb`). Only enabled languages get templates, model output and broadcast translations; anything else falls back to English. A typo fails at start. See [Languages](#languages) |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -73,13 +74,14 @@ app/store/sqlite.py     SqliteStore (local dev, tests)
 app/store/firestore.py  FirestoreStore (packets, tickets, acks, gateways, counters; transactions)
 app/priority.py         deterministic score, tier bands, reason text
 app/cluster.py          near-duplicate matching + merge rules
-app/templates.py        ACK texts (6 languages; non-English pending native-speaker review)
+app/languages.py        language registry: which languages are enabled (RELAY_LANGS), names, GET /v1/languages
+app/templates.py        ACK texts (en, hi reviewed; other languages in CONTRIB_TEMPLATES, used only when enabled)
 app/agent.py            triage pipeline; DeterministicAgent and GeminiAgent (API key, or Vertex)
 app/pubsub.py           publish side of /v1/sync, push envelope parsing, OIDC verifier
 app/teams.py            dispatch teams: seed file (data/teams_puri.json), derived load and status
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
 app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
-app/broadcast.py        five-language broadcast: translate, deterministic + model check, human approval
+app/broadcast.py        broadcast in the enabled languages: translate, deterministic + model check, human approval
 app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
 app/ready.py            Ready mode: shelters, warnings + CAP parser, offline pack, validated household plan
 app/tts.py              optional Gemini text-to-speech (PCM to WAV), off unless RELAY_TTS_MODEL is set
@@ -148,7 +150,7 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
   (RESCUE/MISSING_PERSON boat, MEDICAL medical, the rest supply; any free team as fallback); never
   exceeds capacity (existing load plus this run). ETA = straight-line km from the team base to the
   ticket (GPS fix, else `geo`, else a flat 45 min) at 15 km/h (boat) or 25 km/h, plus 10 min prep,
-  rounded up to 5. Gemini may write `order_en` / `order_local` (Hindi or Odia by ticket language);
+  rounded up to 5. Gemini may write `order_en` / `order_local` (the district's local language, Hindi unless Odia is enabled);
   text that lacks the ticket number or the team name is replaced by a template. Proposals are stored
   on the tickets as `proposal` and nothing is sent to the mesh.
 - `POST /v1/tickets/{no}/approve` takes an optional `{team_id?, eta_min?, order_en?}`; missing parts
@@ -166,7 +168,7 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
   DISPATCHED + ON_THE_WAY). SQLite databases made before these statuses are migrated on first open
   (the `tickets` table is rebuilt to widen its status CHECK).
 - `POST /v1/sitreps/run?district=puri|delhi`, `GET /v1/sitreps/latest?district=…`: one report per
-  district (`app/districts.py`: Puri writes English + Odia, Delhi English + Hindi). Counts come from
+  district (`app/districts.py`: English + the district's `local_lang`: its native language if enabled, else Hindi, so by default Puri and Delhi both write English + Hindi; `RELAY_LANGS=en,hi,or` brings Odia back for Puri). Counts come from
   that district's tickets (an unlocated ticket counts in every district); Gemini Pro writes prose
   around them, and the text is used only if every number in it is one it was handed. Without
   `district`, `run` writes every district's report and returns `{"sitreps": [...]}`. Hourly via the
@@ -205,7 +207,39 @@ Phones still have signal before landfall, so this is a plain HTTPS fetch that ph
   unsupported (no `audio_url`, device TTS).
 - **The shelter lists are placeholders.** `app/data/shelters_puri.json` and `shelters_delhi.json` are invented, every entry has
   `"demo": true`. Replace them with the official lists (OSDMA multipurpose cyclone shelter list for Puri, DDMA for Delhi) before a pilot.
-  The Hindi and Odia plan and checklist texts are first drafts pending native-speaker review.
+  The Odia plan and checklist texts are pending community review (`CONTRIB_T`, `CONTRIB_CHECKLIST`) and are served only when Odia is enabled; a request in a language that is not enabled gets English steps with `steps_lang: "en"`.
+
+## Languages
+
+The team can read and review English and Hindi only, so only those two are enabled by default
+(`RELAY_LANGS=en,hi`). The other wire languages (Odia `or`, Filipino `tl`, Waray `war`, Cebuano `ceb`)
+stay registered in `app/languages.py` so they can be switched on as community support grows, but they
+are off, and everything that writes text goes through `languages.effective(code)`: a language that is
+not enabled gets English.
+
+| Area | Enabled language | Not enabled |
+|---|---|---|
+| ACK text (`templates.py`) | reviewed template (`TEMPLATES`) or, if enabled, a draft in `CONTRIB_TEMPLATES` | English text (always within the 112-byte limit) |
+| Dispatch order and sitrep (`dispatch.py`, `sitrep.py`) | English + the district's `local_lang` | `local_lang` is Hindi when the district's native language (Puri: Odia) is off |
+| Triage dispatch draft (`agent.py`) | model translation into the requester's language | English, no model translation |
+| Broadcast (`broadcast.py`) | translated, checked and approved per enabled language | not translated; `source_lang` must be enabled |
+| Ready plan and pack (`ready.py`) | template or model steps in the language | English, `steps_lang: "en"` |
+| Server speech (`tts.py`) | `TTS_LANGS` intersected with enabled | no `audio_url` |
+
+`GET /v1/languages` (no auth) lists `{code, english_name, native_name, enabled, reviewed}` for every
+registered language; the dashboard and apps show only the enabled ones.
+
+Strings for languages that are not reviewed live in clearly marked "pending community review"
+structures (`CONTRIB_TEMPLATES`, `CONTRIB_ORDER_LOCAL`, `CONTRIB_TEMPLATES` in `sitrep.py`,
+`CONTRIB_T` and `CONTRIB_CHECKLIST` in `ready.py`) and are consulted only when the language is enabled.
+
+**Enabling a language (community reviewer).** 1) Have a native speaker review every string in the
+`CONTRIB_*` structures for that language and fix them; move them into the main (reviewed) tables.
+2) Set `reviewed` to true in `app/languages.py` and add the code to `DEFAULT_ENABLED` (or, to try
+it first, set `RELAY_LANGS=en,hi,<code>`). 3) Add tests: update the "default" expectations in
+`tests/test_templates_priority.py`, `test_dispatch.py`, `test_sitrep.py`, `test_ready.py` and
+`test_broadcast.py`, and keep a test that the language is off when it is not listed. 4) Mirror the
+change in `dashboard/src/lib/languages.ts`.
 
 ## Deploy
 

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
+import { enabledCodes, nameList } from '../lib/languages';
+import { useLanguages } from '../useLanguages';
 import { ALL_DISTRICTS, districtName } from '../lib/districts';
 import {
-  approveBody, BROADCAST_LANG_NAMES, BROADCAST_LANGS, draftRows, STATUS_LABEL, type DraftRow,
+  approveBody, BROADCAST_LANG_NAMES, draftRows, STATUS_LABEL, type DraftRow,
 } from '../lib/broadcast';
 import { formatRelative } from '../lib/time';
 import type { Broadcast, BroadcastLangStatus } from '../types';
@@ -18,6 +20,8 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const all = district === ALL_DISTRICTS;
+  const languages = useLanguages();
+  const enabled = enabledCodes(languages);
 
   const reload = useCallback(() => {
     api.listBroadcasts().then(setRecent).catch((e) => setError(errText(e)));
@@ -40,7 +44,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
     run(async () => {
       const b = await api.createBroadcast({ district, text: text.trim() });
       setDraft(b);
-      setRows(draftRows(b));
+      setRows(draftRows(b, enabled));
       reload();
     });
 
@@ -69,7 +73,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
       <div className="page-head">
         <h1>Broadcast</h1>
         <p className="muted">
-          One public message to everyone in a district, in English, Hindi, Odia, Filipino and Waray. A model translates it,
+          One public message to everyone in a district, in {nameList(languages)}. A model translates it,
           a second model call checks each translation against your text, and nothing is published until you approve.
         </p>
       </div>
@@ -106,10 +110,9 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
               <tr><th>Send</th><th>Language</th><th>Text</th><th>Back-translation</th><th>Status</th></tr>
             </thead>
             <tbody>
-              {BROADCAST_LANGS.map((lang) => {
+              {rows.map((row) => {
+                const lang = row.lang;
                 const t = draft.translations[lang];
-                const row = rows.find((r) => r.lang === lang);
-                if (!row) return null;
                 const isSource = lang === draft.source_lang;
                 return (
                   <tr key={lang}>

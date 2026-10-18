@@ -121,7 +121,7 @@ def test_resolve_acks_per_reporter_in_their_language(client, path):
 
 def test_templates_exist_for_every_supported_language():
     for kind in ("ON_THE_WAY", "ON_THE_WAY_NO_ETA", "RESOLVED"):
-        assert set(templates.TEMPLATES[kind]) == set(codec.LANG_CODES)
+        assert set(templates.TEMPLATES[kind]) | set(templates.CONTRIB_TEMPLATES[kind]) == set(codec.LANG_CODES)
     assert templates.status_text_and_eta(STATUS_ON_THE_WAY, "en", 7) == ("Help is on the way for request #7.", codec.ETA_UNKNOWN)
     assert templates.status_text_and_eta(STATUS_RESOLVED, "en", 7) == ("Request #7 is resolved. Stay safe.", codec.ETA_UNKNOWN)
 

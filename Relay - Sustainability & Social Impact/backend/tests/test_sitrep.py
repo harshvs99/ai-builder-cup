@@ -54,7 +54,7 @@ def test_counts_come_from_the_store(client, clock):
     assert set(s) == {"id", "period_start", "period_end", "generated_at", "district", "counts", "text_en",
                       "text_local", "local_lang", "ticket_nos"}
     assert s["district"] == "puri"
-    assert s["local_lang"] == "or" and s["generated_at"] == int(clock.t) == s["period_end"]
+    assert s["local_lang"] == "hi" and s["generated_at"] == int(clock.t) == s["period_end"]
     assert 101 in s["ticket_nos"] and set(s["ticket_nos"]) <= {101, 103}
 
 
@@ -127,7 +127,7 @@ def test_mismatched_number_triggers_the_template_fallback(make_client, clock):
     client = make_client(sitrep_textgen=FakeTextGen(lambda p: bad))
     seed(client, clock)
     s = client.post("/v1/sitreps/run?district=puri").json()
-    assert s["text_en"] == sitrep.template_en(s["counts"], "Puri") and s["text_local"] == sitrep.template_or(s["counts"])
+    assert s["text_en"] == sitrep.template_en(s["counts"], "Puri") and s["text_local"] == sitrep.template_hi(s["counts"])
     assert "99" not in s["text_en"]
 
 
@@ -135,14 +135,14 @@ def test_one_bad_language_rejects_both():
     c = COUNTS
     fake = FakeTextGen(lambda p: {"english": "4 open, 2 top priority.", "local": "50 ଖୋଲା"})
     en, local = sitrep.write_text(c, NOS, fake)
-    assert (en, local) == (sitrep.template_en(c, "Puri"), sitrep.template_or(c))
+    assert (en, local) == (sitrep.template_en(c, "Puri"), sitrep.template_hi(c))
 
 
 def test_model_failures_fall_back():
     for broken in ("not json", "[]", RuntimeError("quota"), TimeoutError(), {"english": 3}):
         fake = FakeTextGen(lambda p, b=broken: b)
-        assert sitrep.write_text(COUNTS, NOS, fake) == (sitrep.template_en(COUNTS, "Puri"), sitrep.template_or(COUNTS))
-    assert sitrep.write_text(COUNTS, NOS, None) == (sitrep.template_en(COUNTS, "Puri"), sitrep.template_or(COUNTS))
+        assert sitrep.write_text(COUNTS, NOS, fake) == (sitrep.template_en(COUNTS, "Puri"), sitrep.template_hi(COUNTS))
+    assert sitrep.write_text(COUNTS, NOS, None) == (sitrep.template_en(COUNTS, "Puri"), sitrep.template_hi(COUNTS))
 
 
 # ------------------------------------------------------------------ districts and models
@@ -160,7 +160,7 @@ def test_each_district_counts_its_own_tickets_in_its_own_language(client, clock)
     puri = client.post("/v1/sitreps/run?district=puri").json()
     delhi = client.post("/v1/sitreps/run?district=delhi").json()
     assert (puri["counts"]["open"], delhi["counts"]["open"]) == (2, 3)
-    assert (puri["local_lang"], delhi["local_lang"]) == ("or", "hi")
+    assert (puri["local_lang"], delhi["local_lang"]) == ("hi", "hi")  # Odia is not enabled: Puri falls back to the control room's Hindi
     assert delhi["text_local"] == sitrep.template_hi(delhi["counts"]) and "स्थिति रिपोर्ट" in delhi["text_local"]
     assert delhi["text_en"].startswith("Situation report, Delhi: 3 open requests")
     assert client.get("/v1/sitreps/latest?district=puri").json()["id"] == puri["id"]
@@ -205,3 +205,14 @@ def test_sitrep_uses_pro_and_falls_back_to_flash(monkeypatch):
     one = textgen.sitrep_textgen_from_env({"GEMINI_API_KEY": "k", "SITREP_GEMINI_MODEL": "m", "GEMINI_MODEL": "m"})
     assert made == ["m"] and isinstance(one, FakeClient)
     assert textgen.sitrep_textgen_from_env({}) is None                             # no Gemini configured
+
+
+def test_odia_is_dormant_but_restored_by_relay_langs(client, clock, monkeypatch):
+    monkeypatch.setenv("RELAY_LANGS", "en,hi,or")
+    seed(client, clock)
+    s = client.post("/v1/sitreps/run?district=puri").json()
+    assert s["local_lang"] == "or"
+    assert s["text_local"] == sitrep.template_or(s["counts"]) and "ପରିସ୍ଥିତି ରିପୋର୍ଟ" in s["text_local"]
+    monkeypatch.delenv("RELAY_LANGS")
+    s = client.post("/v1/sitreps/run?district=puri").json()
+    assert s["local_lang"] == "hi" and s["text_local"] == sitrep.template_hi(s["counts"])

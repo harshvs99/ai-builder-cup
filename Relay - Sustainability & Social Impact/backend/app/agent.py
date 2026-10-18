@@ -39,7 +39,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from . import cluster, embed, priority, reclass, templates
+from . import cluster, embed, languages, priority, reclass, templates
 from .codec import (
     CATEGORY_NAMES,
     INITIAL_TTL,
@@ -135,7 +135,7 @@ def with_location_note(reason: str, f: TicketFacts) -> str:
 
 def local_draft_fallback(en: str, lang: str) -> str:
     """No dispatch-draft translation templates exist: reuse English, marked as untranslated."""
-    return en if lang == "en" else f"[EN] {en}"
+    return en if languages.effective(lang) == "en" else f"[EN] {en}"
 
 
 # --------------------------------------------------------------------------------------
@@ -225,7 +225,6 @@ class GenaiClient:
         return resp.text or ""
 
 
-_LANG_NAMES = {"en": "English", "hi": "Hindi", "or": "Odia", "tl": "Tagalog", "war": "Waray", "ceb": "Cebuano"}
 _TIER_PREFIX = re.compile(r"^\s*\[P[1-4]\]\s*")
 _ANY_TIER_TAG = re.compile(r"\[P[1-4]\]")  # also finds the tag behind a "[EN] " marker
 
@@ -319,7 +318,7 @@ class GeminiAgent:
                 en_body = None
         dispatch_en = f"[{tier}] {en_body}" if en_body else build_dispatch(facts, tier)
 
-        if facts.lang == "en":
+        if languages.effective(facts.lang) == "en":  # requester language not enabled: English, no translation
             dispatch_local = dispatch_en
         else:
             local_body = _clean_text(data.get("dispatch_local"), 800)
@@ -354,7 +353,7 @@ class GeminiAgent:
                 'this ticket has NO GPS fix: write "Location: unknown (no GPS fix)" verbatim, add the landmark '
                 "if any, and give no coordinates,"
             ),
-            lang_name=_LANG_NAMES.get(facts.lang, "English"),
+            lang_name=languages.name(languages.effective(facts.lang)),
             category=facts.category,
             categories=", ".join(CATEGORY_NAMES),
         )

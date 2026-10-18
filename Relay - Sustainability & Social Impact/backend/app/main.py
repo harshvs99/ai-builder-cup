@@ -23,7 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import broadcast as broadcasts
 from . import dispatch as dispatching
-from . import districts
+from . import districts, languages
 from . import ready as readiness
 from . import sitrep as sitreps
 from . import teams as team_data
@@ -181,15 +181,15 @@ class BroadcastCreate(BaseModel):
     @field_validator("source_lang")
     @classmethod
     def _lang(cls, v: str) -> str:
-        if v not in broadcasts.LANGS:
-            raise ValueError(f"source_lang must be one of {', '.join(broadcasts.LANGS)}")
+        if v not in broadcasts.active_langs():
+            raise ValueError(f"source_lang must be one of {', '.join(broadcasts.active_langs())}")
         return v
 
 
 class BroadcastApprove(BaseModel):
     """``langs`` omitted = every language whose status is ok. ``edits`` = operator-corrected texts."""
 
-    langs: list[str] | None = Field(default=None, max_length=len(broadcasts.LANGS))
+    langs: list[str] | None = Field(default=None, max_length=len(broadcasts.ALL_LANGS))
     edits: dict[str, str] | None = None
 class WarningRequest(BaseModel):
     """``POST /v1/ready/warnings``: an authority's warning, relayed by the duty officer."""
@@ -442,6 +442,7 @@ def create_app(
         yield
         store.close()
 
+    languages.validate()  # a bad RELAY_LANGS fails at start, not on the first request
     app = FastAPI(title="Relay backend", version="0.1.0", lifespan=lifespan)
     app.state.store = store
     app.state.pipeline = pipeline
@@ -502,6 +503,11 @@ def create_app(
     @app.get("/v1/health")
     def healthz() -> dict[str, bool]:
         return {"ok": True}  # deliberately touches nothing: no store, no Pub/Sub
+
+    @app.get("/v1/languages")
+    def get_languages() -> list[dict[str, Any]]:
+        """No auth: the registry, so apps and the dashboard show only enabled languages."""
+        return languages.listing()
 
     # ------------------------------------------------------------------ gateway sync
     @app.post("/v1/sync", dependencies=[Depends(require_key)])
@@ -815,7 +821,7 @@ def create_app(
             {
                 "id": b["id"], "district": b["district"], "source_lang": b["source_lang"],
                 "created_at": b["created_at"], "approved_at": b["approved_at"],
-                "texts": {lang: b["translations"][lang]["text"] for lang in b["approved_langs"]},
+                "texts": {lang: b["translations"][lang]["text"] for lang in b["approved_langs"] if languages.is_enabled(lang)},
             }
             for b in store.list_broadcasts(district, "approved")
         ]}

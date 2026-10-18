@@ -211,7 +211,7 @@ export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, sc
               </p>
             </>
           ) : (
-            <p className="muted">No report yet. Generate one to get a summary in English and Odia from the current figures.</p>
+            <p className="muted">No report yet. Generate one to get a summary in English and the district's language from the current figures.</p>
           )}
         </div>
 

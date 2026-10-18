@@ -19,8 +19,9 @@ export function defaultInclude(t: Pick<BroadcastTranslation, 'status' | 'text'>)
   return t.status === 'ok' && t.text.trim() !== '';
 }
 
-export function draftRows(b: Broadcast): DraftRow[] {
-  return BROADCAST_LANGS.map((lang) => {
+/** Rows for the languages the draft holds, limited to the enabled ones when given. */
+export function draftRows(b: Broadcast, enabled?: readonly string[]): DraftRow[] {
+  return BROADCAST_LANGS.filter((lang) => b.translations[lang] && (!enabled || enabled.includes(lang))).map((lang) => {
     const t = b.translations[lang];
     return { lang, text: t.text, include: defaultInclude(t) };
   });

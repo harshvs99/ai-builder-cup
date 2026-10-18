@@ -1,3 +1,4 @@
+import { parseLanguages, type Language } from './lib/languages';
 import { loadOperatorKey } from './lib/operatorKey';
 import type {
   Broadcast, CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, Sitrep, Stats, Team, Ticket,
@@ -96,6 +97,10 @@ export function createClient(base: string, operatorKey?: string | null) {
     },
     runSitrep(district: string): Promise<Sitrep> {
       return request<Sitrep>(`/v1/sitreps/run?district=${encodeURIComponent(district)}`, { method: 'POST' });
+    },
+    /** The language registry (no auth); null if the body does not look right. */
+    async listLanguages(signal?: AbortSignal): Promise<Language[] | null> {
+      return parseLanguages(await request<unknown>('/v1/languages', { signal }));
     },
     createBroadcast(body: { district: string; text: string; source_lang?: string }): Promise<Broadcast> {
       return request<Broadcast>('/v1/broadcasts', post(body));

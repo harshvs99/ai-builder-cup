@@ -20,6 +20,11 @@ describe('broadcast helpers', () => {
     expect(defaultInclude(tr('ok', ' '))).toBe(false);
   });
 
+  it('shows only the enabled languages', () => {
+    expect(draftRows(bc, ['en', 'hi']).map((r) => r.lang)).toEqual(['en', 'hi']);
+    expect(draftRows({ ...bc, translations: { en: bc.translations.en, hi: bc.translations.hi } as Broadcast['translations'] }).map((r) => r.lang)).toEqual(['en', 'hi']);
+  });
+
   it('sends langs plus edits only for changed, ticked rows', () => {
     const rows = draftRows(bc).map((r) => (r.lang === 'or' ? { ...r, text: 'or 14:00', include: true } : r));
     expect(approveBody(bc, rows)).toEqual({ langs: ['en', 'hi', 'or', 'war'], edits: { or: 'or 14:00' } });
