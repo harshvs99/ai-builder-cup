@@ -13,7 +13,8 @@ ios/
     Sources/RelayKit    platform-free app logic (stores, gateway sync, i18n, screen logic)
   Relay.xcodeproj     app project, scheme "Relay" (also runs the RelayCore and RelayKit package tests)
   RelayApp/           the app target; a synchronized folder, so just add .swift files here, no project edits
-    RelayApp.swift      @main and the placeholder RootView
+    RelayApp.swift      @main
+    Screens/            SwiftUI screens (see below)
     DesignSystem/       pure SwiftUI components (theme tokens, glass styles, chips, timeline, rows, ...)
     Assets.xcassets     AccentColor, AppIcon, named colour tokens with dark variants
     Info.plist          (excluded from the synchronized group; referenced by INFOPLIST_FILE)
@@ -47,3 +48,34 @@ messages best with Relay open.
 
 Non-English strings (including the Info.plist usage strings) are drafts marked `needs native review`.
 Odia has no on-device speech model, so voice input falls back to typing.
+
+## Screens
+
+`RelayApp/Screens/` is layout and wiring only; every rule and string comes from RelayKit (`UILogic` display models,
+`Strings`) and `AppModel`.
+
+- `RootView` (first-run `LanguageScreen`, then four tabs), `Navigation` (one `NavigationStack` path per tab via
+  `TabNavigator`, the ask flow in `AskFlowController`, `RouteDestination`), `StringsEnvironment` (`\.strings`,
+  `NowClock`, larger-text modifier), `DesignMapping` (RelayKit values to DesignSystem parameters).
+- Tabs: `HomeScreen`, `RequestsScreen`, `NetworkScreen`, `SettingsScreen`. Pushed: `NewRequestScreen` (1 of 3),
+  `CheckScreen` + `CheckEditors` (2 of 3), `RequestDetailScreen`, `DeveloperScreen` (Settings last row and the Network
+  "< >" button; English-only on purpose).
+- Language comes from `Settings.language` into `EnvironmentValues.strings`; Appearance maps to `preferredColorScheme`;
+  Larger text adds two Dynamic Type steps on top of the system size.
+
+## Status
+
+- Verified on Linux: RelayCore and RelayKit tests (including every display model the screens use), and `swiftc -parse`
+  of every screen file. The screens themselves have not been type-checked or run: there is no iOS SDK here.
+- Needs Xcode: first compile of `Screens/`, light/dark and Dynamic Type passes, VoiceOver pass, the Liquid Glass look on
+  iOS 26 and the material fallback on iOS 17 to 25.
+
+## Device-test checklist
+
+1. iPhone locked and Android: Android may not discover a locked iPhone because iOS moves the service UUID to the
+   overflow area. Test iPhone-locked with Android first; it decides how the demo is staged.
+2. iOS ATT MTU is at least 185 with Android: confirm the negotiated MTU and that a full NEED frame goes through.
+3. CCCD / HELLO ordering when the iPhone is the peripheral: HELLO must not be sent before the central has subscribed.
+4. Speech permission and error mapping: deny microphone, deny speech recognition, Odia (typed path), airplane mode with
+   no on-device model, "didn't catch that".
+5. A non-default backend: attach `ios/Config/Relay.xcconfig` (copy `Relay.xcconfig.example`) to the project.
