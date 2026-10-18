@@ -14,7 +14,7 @@ final class AnnouncementCenter {
 
     @ObservationIgnored let store: AnnouncementStore
     /// The ANNOUNCEMENT frames in the gossip store (set by `AppModel`).
-    @ObservationIgnored var heldProvider: (@Sendable () -> [HeldFrame])?
+    @ObservationIgnored var heldProvider: (@MainActor () -> [HeldFrame])?
     /// District, UI language, backend and connectivity at the moment of a fetch or notification (set by `AppModel`).
     @ObservationIgnored var context: (@MainActor () -> (district: String?, lang: Lang, backend: String, key: String, connected: Bool))?
 

@@ -366,8 +366,9 @@ against the payload).
 **Dedupe key:** the first 8 bytes of `SHA-256(announcement_id ‖ lang ‖ status)` (`lang` and `status` one byte each; no
 type byte). It is derived, so a `WITHDRAWN` frame is a new frame that supersedes the `ACTIVE` one of the same language.
 
-**Life:** stored, listed in `INVENTORY`, flooded and expired like an `ACK` (§6): 72 h from first storage, and sooner
-at `expires_at` when that is not 0. A node never uploads it.
+**Life:** stored, listed in `INVENTORY`, flooded and expired like an `ACK` (§6): 72 h from first storage. A node drops a
+frame whose `approved_at` is more than 72 h old, or whose `expires_at` (when not 0) has passed, without storing or
+relaying it, and never shows one past `expires_at`. A node never uploads it.
 
 **Delivery, end to end.**
 

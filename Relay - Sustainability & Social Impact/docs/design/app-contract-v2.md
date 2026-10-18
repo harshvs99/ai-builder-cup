@@ -1,6 +1,6 @@
 # Relay apps, contract v2: languages, Ready mode, shelters, announcements
 
-Status: **ready to build**. Audience: the engineer (or agent) who implements this in `android/` and `ios/`.
+Status: **built on `apps/contract-v2`, device acceptance (section 7) pending**. Audience: the engineer (or agent) who implements this in `android/` and `ios/`.
 The backend side is done on branch `claude/inspiring-johnson-ljk8c1` unless a section says otherwise.
 The existing specs still hold: [android-redesign.md](android-redesign.md) (screens, copy, visual system),
 [ios-build-plan.md](ios-build-plan.md) (iOS differences), [protocol/SPEC.md](../../protocol/SPEC.md) (wire format).
