@@ -338,7 +338,7 @@ final class ReadyTests: TempDirTestCase {
         XCTAssertNotNil(ReadyJson.parsePlan(try api.plan(lang: "en", lat: nil, lon: nil, district: "delhi", household: Household())))
         XCTAssertEqual([5, 6], try api.audio("/v1/ready/plan/plan1/audio"))
         XCTAssertNil(try api.audio("/v1/ready/plan/none/audio")) // 404: on-device speech
-        XCTAssertThrowsError(try api.audio("/v1/ready/other")) // 503 on the audio route of an unknown plan is "no audio", other statuses are not asked here
+        XCTAssertNil(try api.audio("/v1/ready/plan/broken/audio")) // 503: synthesis failed, also "use on-device speech"
         XCTAssertEqual("GET", t.log[0].method); XCTAssertEqual("k1", t.log[0].headers["X-Relay-Key"])
         XCTAssertEqual("lat=19.8&lon=85.8&lang=hi", t.log[0].url.query)
         XCTAssertEqual("district=puri&lang=en", t.log[1].url.query)
