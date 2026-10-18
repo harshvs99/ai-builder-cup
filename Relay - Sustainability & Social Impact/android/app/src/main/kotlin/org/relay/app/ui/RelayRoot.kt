@@ -13,8 +13,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -40,12 +43,15 @@ import org.relay.app.ui.ask.TriageScreen
 import org.relay.app.ui.home.HomeScreen
 import org.relay.app.ui.home.LanguageScreen
 import org.relay.app.ui.home.RequestsScreen
+import org.relay.app.ui.i18n.AppLanguages
 import org.relay.app.ui.i18n.LocalStrings
 import org.relay.app.ui.network.ConsoleScreen
 import org.relay.app.ui.network.DeveloperScreen
 import org.relay.app.ui.network.NetworkScreen
 import org.relay.app.ui.network.SettingsScreen
 import org.relay.app.ui.request.RequestDetailScreen
+import org.relay.core.lang.LanguageCatalog
+import org.relay.core.payload.Lang
 
 /** Permission / Bluetooth setup actions used by the developer screens (built from [Permissions]). */
 class SetupActions(
@@ -90,6 +96,17 @@ fun RelayRoot() {
     }
 
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    // The stored language was switched off (backend or build): say so once, then keep showing English.
+    val resolution = settings.languageResolution
+    val englishStrings = LocalStrings.current
+    LaunchedEffect(resolution.unavailable, settings.languageNoticeFor) {
+        if (LanguageCatalog.shouldAnnounce(resolution, Lang.fromTag(settings.languageNoticeFor))) {
+            val gone = resolution.unavailable ?: return@LaunchedEffect
+            MeshRepository.settings.update { it.copy(languageNoticeFor = gone.tag) }
+            snackbar.showSnackbar(englishStrings.home.languageUnavailable(AppLanguages.of(gone).englishName))
+        }
+    }
     val startRoute = remember { if (settings.languageConfirmed) Routes.HOME else Routes.LANGUAGE }
 
     val backStack by navController.currentBackStackEntryAsState()
@@ -105,6 +122,7 @@ fun RelayRoot() {
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (!Routes.hidesBottomBar(route)) {
                 NavigationBar {

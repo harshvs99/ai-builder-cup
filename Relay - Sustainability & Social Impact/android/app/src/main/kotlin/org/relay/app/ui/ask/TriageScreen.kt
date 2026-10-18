@@ -74,7 +74,7 @@ fun TriageScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val ask by askVm.state.collectAsStateWithLifecycle()
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
-    val lang = settings.language
+    val lang = settings.effectiveLanguage
     val speaker = LocalSpeaker.current
     val perms = rememberPermissions()
 

@@ -38,6 +38,12 @@ android {
         // builds; village builds pass -Prelay.helpLocateDefault=false so position sharing is strictly opt-in.
         val helpLocate = providers.gradleProperty("relay.helpLocateDefault").orElse("true").get().trim().lowercase() != "false"
         buildConfigField("boolean", "HELP_LOCATE_DEFAULT", helpLocate.toString())
+
+        // Languages this build can offer (contract v2 section 1). The picker shows a language only when it is also enabled in the
+        // backend's GET /v1/languages. English and Hindi by default; Odia, Filipino and Waray keep their strings but stay hidden
+        // until a community reviewer signs them off (then: -Prelay.enabledLangs=en,hi,or and the backend's RELAY_LANGS).
+        val enabledLangs = providers.gradleProperty("relay.enabledLangs").orElse("en,hi").get().filter { it.isLetter() || it == ',' }
+        buildConfigField("String", "ENABLED_LANGS", "\"$enabledLangs\"")
     }
 
     // Release uses a real keystore when relay.signing.storeFile is set; otherwise the debug key, so a

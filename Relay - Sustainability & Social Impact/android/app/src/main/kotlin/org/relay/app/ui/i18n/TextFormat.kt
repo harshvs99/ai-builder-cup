@@ -13,6 +13,12 @@ fun tr(lang: Lang, en: String, hi: String, or: String, tl: String, war: String):
     Lang.EN, Lang.CEB -> en
 }
 
+/**
+ * Text for a string added after the language freeze: English and Hindi only. Hindi is a draft for native review; Odia,
+ * Filipino and Waray (hidden, pending review) show the English text rather than an invented translation.
+ */
+fun trEnHi(lang: Lang, en: String, hi: String): String = if (lang == Lang.HI) hi else en
+
 /** Plural rule of the app languages, for "1 person" / "N people". Pure. */
 object Plural {
     /** True when [n] takes the singular form. Hindi treats 0 as singular too; the rest are n == 1. */

@@ -94,9 +94,6 @@ internal fun rememberNow(): State<Long> = produceState(System.currentTimeMillis(
 // ---------------------------------------------------------------------------------------------------------------
 // 1. Choose your language
 
-/** Languages every first run starts with; any other language is added by the user. */
-private val DEFAULT_LANGS = setOf(Lang.EN, Lang.HI)
-
 /** First run: pick the app language (the app switches at once), then Continue goes to Home. */
 @Composable
 fun LanguageScreen(nav: RelayNav) {
@@ -105,8 +102,8 @@ fun LanguageScreen(nav: RelayNav) {
     var voiceMessage by remember { mutableStateOf<String?>(null) }
     val s = LocalStrings.current
     LanguageContent(
-        selected = settings.language,
-        added = settings.extraLanguages,
+        selected = settings.effectiveLanguage,
+        offered = settings.offeredLanguages,
         voiceMessage = voiceMessage,
         onSelect = { l -> MeshRepository.settings.update { it.withLanguage(l) } },
         onSpeak = { l ->
@@ -124,17 +121,15 @@ fun LanguageScreen(nav: RelayNav) {
 @Composable
 private fun LanguageContent(
     selected: Lang,
-    added: List<Lang>,
+    offered: List<Lang>,
     voiceMessage: String?,
     onSelect: (Lang) -> Unit,
     onSpeak: (Lang) -> Unit,
     onContinue: () -> Unit,
 ) {
     val s = LocalStrings.current
-    var showAddable by remember { mutableStateOf(false) }
-    // English and Hindi always, plus languages the user added and the selected one; the rest sit under "Add a language".
-    val shown = AppLanguages.all.filter { it.lang in DEFAULT_LANGS || it.lang in added || it.lang == selected }
-    val addable = AppLanguages.all.filter { e -> shown.none { it.lang == e.lang } }
+    // Only languages the build and the backend both switch on (English and Hindi by default).
+    val shown = AppLanguages.offered(offered)
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp),
@@ -145,13 +140,13 @@ private fun LanguageContent(
             Text(s.home.chooseSubtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             SectionCard(contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp, horizontal = 8.dp)) {
-                (shown + if (showAddable) addable else emptyList()).forEach { e ->
+                shown.forEach { e ->
                     Row(
                         Modifier.fillMaxWidth()
                             .clip(MaterialTheme.shapes.small)
                             .selectable(
                                 selected = e.lang == selected, role = Role.RadioButton,
-                                onClick = { showAddable = false; onSelect(e.lang) },
+                                onClick = { onSelect(e.lang) },
                             )
                             .padding(start = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -163,13 +158,6 @@ private fun LanguageContent(
                             Text(e.englishName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         SpeakIconButton(s.home.speakLanguage(e.englishName), { onSpeak(e.lang) })
-                    }
-                }
-                if (!showAddable && addable.isNotEmpty()) {
-                    TextButton(onClick = { showAddable = true }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(s.home.addLanguage, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -435,8 +423,8 @@ private fun RequestsEmptyPreview() = RelayPreview { RequestsContent(emptyList(),
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun LanguagePreview() = RelayPreview { LanguageContent(Lang.HI, emptyList(), "No Waray voice is installed on this phone.", {}, {}, {}) }
+private fun LanguagePreview() = RelayPreview { LanguageContent(Lang.HI, listOf(Lang.EN, Lang.HI), "No Hindi voice is installed on this phone.", {}, {}, {}) }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun LanguageDarkPreview() = RelayPreview(dark = true) { LanguageContent(Lang.EN, listOf(Lang.OR), null, {}, {}, {}) }
+private fun LanguageDarkPreview() = RelayPreview(dark = true) { LanguageContent(Lang.EN, listOf(Lang.EN, Lang.HI), null, {}, {}, {}) }

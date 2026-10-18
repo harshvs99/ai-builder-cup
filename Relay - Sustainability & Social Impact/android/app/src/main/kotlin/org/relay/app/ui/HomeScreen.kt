@@ -103,7 +103,7 @@ fun LegacyHomeScreen(actions: SetupActions) {
     var sendPhase by remember { mutableStateOf(SendPhase.IDLE) }
     var sendJob by remember { mutableStateOf<Job?>(null) }
     val skipWait = remember { MutableStateFlow(false) }
-    val lang = settings.language
+    val lang = settings.effectiveLanguage
     val nowMs by rememberNowMs()
 
     // ---- location: re-checked on every resume; warm-up while this screen is visible / the user is composing

@@ -8,6 +8,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import org.relay.app.ready.LanguageSync
 import org.relay.app.ui.RelayRoot
 import org.relay.app.ui.network.CarryPolicy
 import org.relay.app.ui.i18n.LocalStrings
@@ -27,11 +31,17 @@ class MainActivity : ComponentActivity() {
             speaker.speed = settings.voiceSpeed
             RelayTheme(mode = settings.themeMode, largerText = settings.largerText) {
                 CompositionLocalProvider(
-                    LocalStrings provides stringsFor(settings.language),
+                    LocalStrings provides stringsFor(settings.effectiveLanguage),
                     LocalSpeaker provides speaker,
                 ) { RelayRoot() }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Which languages the backend offers; best effort, the cached copy (or the build default) is used offline.
+        lifecycleScope.launch(Dispatchers.IO) { LanguageSync.refresh(MeshRepository.settings.current.backendUrl) }
     }
 
     override fun onStop() {

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import org.relay.app.ble.RecentPeers
+import org.relay.core.lang.LanguageCatalog
+import org.relay.core.lang.LanguageResolution
 import org.relay.core.payload.Lang
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,15 +51,32 @@ data class Settings(
      * demo builds, off in village builds (`relay.helpLocateDefault`).
      */
     val helpLocateNeighbours: Boolean = BuildConfig.HELP_LOCATE_DEFAULT,
+    /** Last good `GET /v1/languages` body, cached so the picker is right offline; empty until one arrived. */
+    val serverLanguagesJson: String = "",
+    /** The disabled language the "not available yet" line was already shown for (language tag), or empty. */
+    val languageNoticeFor: String = "",
 ) {
+    /** Languages the picker offers: enabled in this build AND in the cached server list (build default until one arrived). */
+    val offeredLanguages: List<Lang>
+        get() = LanguageCatalog.offered(
+            LanguageCatalog.parseBuildLanguages(BuildConfig.ENABLED_LANGS), LanguageCatalog.parseServer(serverLanguagesJson),
+        )
+
+    val languageResolution: LanguageResolution get() = LanguageCatalog.resolve(language, offeredLanguages)
+
+    /** The language every string is shown in: [language], or English when it is no longer offered. */
+    val effectiveLanguage: Lang get() = languageResolution.effective
+
     /** The old "Pretend offline" behaviour: never act as a gateway. */
     val pretendOffline: Boolean get() = gatewayMode == GatewayMode.NEVER
 
     /**
      * The languages speech input should expect: English, Hindi, then the user's added languages. The app language
-     * counts too, so installs from before this setting existed still include theirs. Order is stable, no duplicates.
+     * counts too, so installs from before this setting existed still include theirs. Only languages the picker offers
+     * are kept (speech is en-IN and hi-IN unless a reviewed language is switched on). Order is stable, no duplicates.
      */
-    val preferredLanguages: List<Lang> get() = ALWAYS_PREFERRED + normalizedExtras(extraLanguages + language)
+    val preferredLanguages: List<Lang>
+        get() = (ALWAYS_PREFERRED + normalizedExtras(extraLanguages + language)).filter { it in offeredLanguages }
 
     /** Switches the app language; a language beyond English and Hindi is also remembered as a preferred one. */
     fun withLanguage(lang: Lang): Settings = copy(language = lang, extraLanguages = normalizedExtras(extraLanguages + lang))
@@ -119,6 +138,8 @@ class AppSettings(ctx: Context) {
             ?: if (prefs.getBoolean("offline", false)) GatewayMode.NEVER else GatewayMode.AUTOMATIC,
         carryInBackground = prefs.getBoolean("carry_bg", true),
         helpLocateNeighbours = prefs.getBoolean("help_locate", BuildConfig.HELP_LOCATE_DEFAULT),
+        serverLanguagesJson = prefs.getString("server_langs", "") ?: "",
+        languageNoticeFor = prefs.getString("lang_notice_for", "") ?: "",
     )
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
@@ -146,6 +167,8 @@ class AppSettings(ctx: Context) {
             .putString("gateway_mode", next.gatewayMode.name)
             .putBoolean("carry_bg", next.carryInBackground)
             .putBoolean("help_locate", next.helpLocateNeighbours)
+            .putString("server_langs", next.serverLanguagesJson)
+            .putString("lang_notice_for", next.languageNoticeFor)
             .apply()
         _flow.value = next
         for (l in listeners) try { l(next) } catch (_: Exception) {}
