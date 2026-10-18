@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         MeshRepository.init(applicationContext)
         ReadyRepository.init(applicationContext)
+        org.relay.app.announce.AnnouncementRepository.init(applicationContext)
         ReadyWorker.schedule(applicationContext)
         openReady = intent?.getBooleanExtra(ReadyRepository.EXTRA_OPEN_READY, false) == true
         speaker = Speaker(this)

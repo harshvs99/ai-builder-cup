@@ -33,6 +33,10 @@ interface ReadyApi {
     /** `GET /v1/public/shelters?district=` (no key) → the body, or null when nothing is published yet (404). */
     @Throws(ReadyApiException::class)
     fun publicShelters(district: String): String? = null
+
+    /** `GET /v1/announcements/active?district=` (device key) → the body. Phones with signal poll it with the Ready refresh (contract section 5.1). */
+    @Throws(ReadyApiException::class)
+    fun activeAnnouncements(district: String): String? = null
 }
 
 /** [ReadyApi] over `HttpURLConnection` (the same stack as the gateway sync). Blocking; call from a worker thread. */
@@ -68,6 +72,9 @@ class HttpReadyApi(
         val r = request("GET", "/v1/public/shelters?district=" + URLEncoder.encode(district, "UTF-8"), null, okStatuses = setOf(404), sendKey = false)
         return if (r.status == 404) null else r.text()
     }
+
+    override fun activeAnnouncements(district: String): String =
+        request("GET", "/v1/announcements/active?district=" + URLEncoder.encode(district, "UTF-8"), null).text()
 
     private class Response(val status: Int, val body: ByteArray) { fun text() = body.toString(Charsets.UTF_8) }
 

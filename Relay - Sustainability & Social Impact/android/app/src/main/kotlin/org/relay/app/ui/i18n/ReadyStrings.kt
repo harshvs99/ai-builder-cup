@@ -90,6 +90,13 @@ class ReadyStrings(private val lang: Lang) {
     val settingsHouseholdHelp get() = t("Tell Relay who is at home so your evacuation plan fits.", "Relay को बताएँ कि घर में कौन है, ताकि निकलने की योजना सही बने।")
     val settingsReady get() = t("Get ready", "तैयारी करें")
 
+    // ---- announcements ("Message from the control room")
+    val announcementTitle get() = t("Message from the control room", "कंट्रोल रूम का संदेश")
+    val announcementChannel get() = t("Control room messages", "कंट्रोल रूम के संदेश")
+    val dismissAnnouncement get() = t("Dismiss message", "संदेश हटाएँ")
+    val hearAnnouncement get() = t("Hear this message", "यह संदेश सुनें")
+    val announcementShortened get() = t("Short version. Open Relay with signal for the full message.", "संक्षिप्त रूप। पूरा संदेश देखने के लिए सिग्नल में Relay खोलें।")
+
     // ---- shelters
     val sheltersTitle get() = t("Shelters", "आश्रय")
     val sheltersRow get() = t("Shelters", "आश्रय")

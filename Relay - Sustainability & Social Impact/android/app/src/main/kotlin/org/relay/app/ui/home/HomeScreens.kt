@@ -60,7 +60,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import org.relay.app.MeshRepository
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Close
 import org.relay.app.LocalSpeaker
+import org.relay.app.announce.AnnouncementRepository
+import org.relay.core.announce.AnnouncementCard
 import org.relay.app.ready.ReadyRepository
 import org.relay.core.ready.ReadyView
 import org.relay.core.ready.ReadyWarning
@@ -177,6 +181,29 @@ private fun LanguageContent(
 // ---------------------------------------------------------------------------------------------------------------
 // 2. Home
 
+/** "Message from the control room": the text already in the person's language, a speaker button and a dismiss button. */
+@Composable
+private fun AnnouncementCardView(c: AnnouncementCard, onDismiss: (String) -> Unit, onSpeak: (AnnouncementCard) -> Unit) {
+    val r = LocalStrings.current.ready
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.secondaryContainer).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(r.announcementTitle, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.weight(1f).semantics { heading() })
+            IconButton(onClick = { onDismiss(c.announcementId) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = r.dismissAnnouncement, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+        Text(c.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(end = 12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onSpeak(c) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = r.hearAnnouncement, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+    }
+}
+
 /** The Home banner of an active warning: severity colour, headline, "Landfall in about N h" and a "Get ready" button. */
 @Composable
 private fun ReadyBanner(w: ReadyWarning, onGetReady: () -> Unit) {
@@ -233,7 +260,24 @@ fun HomeScreen(nav: RelayNav) {
     }
 
     val ready by ReadyRepository.snapshot.collectAsStateWithLifecycle()
+    val held by AnnouncementRepository.held.collectAsStateWithLifecycle()
+    val http by AnnouncementRepository.http.collectAsStateWithLifecycle()
+    val dismissed by AnnouncementRepository.dismissed.collectAsStateWithLifecycle()
+    // recomputed every 30 s with `now`: the 10-minute English fallback and the 72 h end need no event to fire
+    val announcements = remember(held, http, dismissed, now, ready.district, settings.effectiveLanguage) { AnnouncementRepository.cards(System.currentTimeMillis()) }
+    val speaker = LocalSpeaker.current
+    val spokenIds = remember { mutableSetOf<String>() }
+    LaunchedEffect(announcements.map { it.announcementId }) {
+        // "Speak new messages from the control room aloud" (Settings → read aloud): once per message
+        if (settings.readAloud) announcements.firstOrNull { it.announcementId !in spokenIds }?.let { c ->
+            spokenIds += c.announcementId
+            speaker?.speak(c.text, c.lang)
+        }
+    }
     HomeContent(
+        announcements = announcements,
+        onDismissAnnouncement = { AnnouncementRepository.dismiss(it) },
+        onSpeakAnnouncement = { c -> speaker?.speak(c.text, c.lang) },
         banner = ReadyView.activeWarning(ready.pack, System.currentTimeMillis() / 1000),
         onGetReady = { nav.openReady() },
         onShelters = { nav.openShelters() },
@@ -254,6 +298,9 @@ fun HomeScreen(nav: RelayNav) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeContent(
+    announcements: List<AnnouncementCard>,
+    onDismissAnnouncement: (String) -> Unit,
+    onSpeakAnnouncement: (AnnouncementCard) -> Unit,
     banner: ReadyWarning?,
     onGetReady: () -> Unit,
     onShelters: () -> Unit,
@@ -293,6 +340,9 @@ private fun HomeContent(
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, contentDescription = s.home.helpLabel, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+
+        // Messages from the control room (newest first, at most 3, dismissible)
+        announcements.forEach { c -> key(c.announcementId) { AnnouncementCardView(c, onDismissAnnouncement, onSpeakAnnouncement) } }
 
         // Cyclone warning banner (only while the stored pack has an active warning)
         if (banner != null) ReadyBanner(banner, onGetReady)
@@ -443,7 +493,7 @@ private val demoStatus = VillagerStatus(VillagerStatus.Kind.REACHABLE, VillagerS
 
 @Composable
 private fun HomeDemo() = HomeContent(
-    banner = null, onGetReady = {}, onShelters = {},
+    announcements = emptyList(), onDismissAnnouncement = {}, onSpeakAnnouncement = {}, banner = null, onGetReady = {}, onShelters = {},
     area = "Ward 4, Puri district", villager = demoStatus, now = System.currentTimeMillis(), recent = demoNeeds.take(2),
     onStatusClick = {}, onTurnOnBluetooth = {}, onMic = {}, onType = {}, onSeeAll = {}, onOpenRequest = {}, onDeleteRequest = {},
 )

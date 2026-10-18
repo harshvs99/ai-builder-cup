@@ -12,10 +12,18 @@ import java.io.File
 class GatewayState(private val file: File?, private val maxRemembered: Int = 10_000) {
     private val uploaded = LinkedHashSet<String>()
     private var cursor: Long = 0
+    private var announcementCursor: Long = 0
 
     init { load() }
 
     @Synchronized fun ackCursor(): Long = cursor
+    /** The backend's `announcement_cursor` (SPEC 5.7): where this gateway's ANNOUNCEMENT feed stands. */
+    @Synchronized fun announcementCursor(): Long = announcementCursor
+    @Synchronized fun setAnnouncementCursor(value: Long) {
+        if (value == announcementCursor) return
+        announcementCursor = value
+        save()
+    }
     @Synchronized fun isUploaded(msgIdHex: String): Boolean = uploaded.contains(msgIdHex)
     @Synchronized fun uploadedCount(): Int = uploaded.size
 
@@ -39,7 +47,7 @@ class GatewayState(private val file: File?, private val maxRemembered: Int = 10_
         try {
             val arr = JSONArray()
             uploaded.forEach { arr.put(it) }
-            val json = JSONObject().put("cursor", cursor).put("uploaded", arr)
+            val json = JSONObject().put("cursor", cursor).put("ann_cursor", announcementCursor).put("uploaded", arr)
             AtomicFiles.write(f, json.toString().toByteArray(Charsets.UTF_8))
         } catch (_: Exception) {
             // retried on next change
@@ -54,9 +62,10 @@ class GatewayState(private val file: File?, private val maxRemembered: Int = 10_
             val arr = o.getJSONArray("uploaded")
             val ids = (0 until arr.length()).map { arr.getString(it) }
             cursor = o.getLong("cursor")
+            announcementCursor = o.optLong("ann_cursor", 0) // files from before ANNOUNCEMENT have none
             uploaded.addAll(ids)
         } catch (_: Exception) {
-            uploaded.clear(); cursor = 0
+            uploaded.clear(); cursor = 0; announcementCursor = 0
         }
     }
 }

@@ -120,6 +120,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         node, store, repo.gatewayState, SyncClient(),
         config = { repo.settings.current.let { SyncConfig(it.backendUrl, it.deviceKey) } },
         log = { repo.log(it) },
+        district = { org.relay.app.ready.ReadyRepository.snapshot.value.district },
     )
 
     private var lastOutcome: SyncOutcome? = null
@@ -305,6 +306,13 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
     override fun onBroadcast(broadcast: Broadcast, frame: Frame, fromLink: String?) {
         repo.log("BROADCAST ${broadcast.idHex} ${broadcast.kind} ${broadcast.disaster.key} issued=${broadcast.issuedAt} from=${fromLink ?: "local"} ttl=${frame.ttl}")
         DisasterStore.get(ctx).apply(broadcast)
+        publish()
+    }
+
+    override fun onAnnouncement(announcement: org.relay.core.payload.Announcement, frame: Frame, fromLink: String?) {
+        repo.log("ANNOUNCEMENT ${announcement.idHex} ${announcement.lang.tag} ${announcement.status} district=${announcement.district} from=${fromLink ?: "local"} ttl=${frame.ttl}")
+        org.relay.app.announce.AnnouncementRepository.reloadHeld()
+        org.relay.app.announce.AnnouncementRepository.notifyNew(ctx)
         publish()
     }
 

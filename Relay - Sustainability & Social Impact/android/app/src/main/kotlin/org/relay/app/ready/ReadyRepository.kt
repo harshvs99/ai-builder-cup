@@ -79,6 +79,9 @@ object ReadyRepository {
             if (refresher.refreshPublicShelters(input)) reload()
         }
         if (!result.skipped) reload()
+        // the control room's announcements for this district (needs the district a pack or the person gave); one notification per new message
+        org.relay.app.announce.AnnouncementRepository.fetch(app, trigger, isOnline(app))
+        org.relay.app.announce.AnnouncementRepository.notifyNew(app)
         result.newWarning?.let { w ->
             val pack = _snapshot.value.pack
             if (ReadyNotifier.post(app, w, pack?.district.orEmpty(), s.effectiveLanguage)) refresher.noteNotified(w.id)
