@@ -1,0 +1,295 @@
+# Relay mesh protocol, v1
+
+This is the single source of truth for every byte Relay puts on the air or sends to the
+backend. The Kotlin codec (`android/core-protocol`), the Python codec (`backend/app/codec.py`)
+and the golden vectors (`protocol/vectors.json`) must all agree with this file. If code and
+this file disagree, this file wins and the code is a bug.
+
+All multi-byte integers are **big-endian** (network order). Strings are UTF-8 with a 1-byte
+length prefix and are truncated on a Unicode code point boundary so the byte length never exceeds the
+stated limit.
+
+---
+
+## 1. Lineage and licence
+
+The outer frame is byte-compatible with the **bitchat v1 packet** (permissionlesstech/bitchat,
+`BinaryProtocol.swift`, public domain under the Unlicense). Relay re-implements it from the
+public-domain sources and this document. **No code may be copied from bitchat-android
+(GPL-3.0).** Protocol facts (field layouts, UUIDs) are not copyrightable; code is.
+
+Relay runs on **its own GATT service UUID**, so Relay phones do not join the bitchat network
+by default. A later "bitchat bridge" mode can additionally host bitchat's service; because the
+frame format is identical, bridging needs no translation.
+
+---
+
+## 2. GATT transport
+
+| Item | Value |
+|---|---|
+| Service UUID | `5b9b5c02-f1b0-4ea1-9e8a-e08da2708c44` |
+| Characteristic UUID | `77175a01-40b4-447c-b66e-0cae864e64d5` |
+| Characteristic properties | `WRITE`, `WRITE_NO_RESPONSE`, `NOTIFY` (with CCCD `00002902-0000-1000-8000-00805f9b34fb`) |
+| Advertisement | Legacy advertising, connectable, containing only the 128-bit service UUID. The scan response carries manufacturer-specific data, company id `0xFFFF`, payload = the advertiser's 8-byte `node_id` (a connection hint, see below) |
+| Requested ATT MTU | 517 |
+| Minimum usable ATT MTU | 185. A link that negotiates less is closed. |
+
+Every node is **both** a peripheral (GATT server, advertising) and a central (scanning with a
+`ScanFilter` on the service UUID, connecting as a GATT client).
+
+- **Central → peripheral:** the central writes frames to the characteristic.
+- **Peripheral → central:** the peripheral sends frames as notifications to subscribed centrals.
+- **One whole frame per write or notification.** Frames are at most `MTU − 3` bytes. Relay
+  never fragments at the link layer in v1; every v1 frame fits in 185 − 3 = 182 bytes except
+  `INVENTORY`, which is chunked (§5.4) to fit.
+- **Node-id hint:** advertising addresses are resolvable private addresses that change when advertising
+  restarts, so a scanner cannot recognise a peer by MAC. Before connecting, a scanner reads the node id from the
+  scan response and skips an advertiser that is itself, that it already has a link to, or that its allowlist
+  rejects. If both nodes would connect, the one with the higher `node_id` waits 3 s so the lower one initiates.
+  A scanner that does not see the hint (older build, scan response dropped) connects as before; the HELLO-based
+  duplicate rule below remains the safety net.
+- **Duplicate links:** two phones may each connect to the other as central. After both
+  `HELLO`s are exchanged, if two links reach the same `node_id`, keep the link where the node
+  with the numerically lower `node_id` (unsigned, big-endian compare) is the **central**, and
+  close the other.
+- **Link cap:** at most 4 central links plus whatever peripheral links arrive (cap total at 7).
+
+---
+
+## 3. Outer frame (bitchat v1 compatible)
+
+```
+offset size field
+0      1    version          = 0x01
+1      1    type             (§4)
+2      1    ttl              hops remaining
+3      8    timestamp_ms     unix epoch milliseconds, u64
+11     1    flags            bit0 HAS_RECIPIENT, bit1 HAS_SIGNATURE, bit2 IS_COMPRESSED,
+                             bit3 HAS_ROUTE, bit4 IS_RSR; other bits 0
+12     2    payload_length   u16
+14     8    sender_id        node_id of the node that ORIGINATED this frame
+22     8    recipient_id     present iff HAS_RECIPIENT
+..     n    payload          payload_length bytes
+..     64   signature        present iff HAS_SIGNATURE (ignored in v1; kept when relaying)
+```
+
+Header is 14 bytes; with sender it is 22. Broadcast frames omit the recipient. A recipient of
+eight `0xFF` bytes also means broadcast.
+
+**Relay encoder rules:** version 1 only, no padding, `IS_COMPRESSED`, `HAS_ROUTE` and `IS_RSR`
+always 0.
+
+**Relay decoder rules:** reject if `version != 1`; reject if `IS_COMPRESSED` or `HAS_ROUTE` is
+set; reject if the byte count does not exactly match the header (no trailing bytes, no
+padding); ignore `IS_RSR`. A rejected frame is dropped silently and never relayed.
+
+**Relaying:** a relay decrements `ttl` and otherwise forwards the frame byte-for-byte
+(timestamp, sender, recipient, payload and signature unchanged). Frames with `ttl <= 1` on
+arrival are stored but not flooded onward.
+
+**Initial TTL:** 7 for `NEED` and `ACK`; 1 for `HELLO` and `INVENTORY` (never relayed).
+
+---
+
+## 4. Packet types
+
+Relay allocates the `0x70–0x7F` block. bitchat allocates its own types upward from `0x01`
+and has used up to `0x2C`; we will ask its maintainers to reserve `0x70–0x7F`.
+
+| Type | Name | Recipient | TTL | Relayed | Dedupe key |
+|---|---|---|---|---|---|
+| `0x70` | `NEED` | none (broadcast) | 7 | yes | `msg_id` |
+| `0x71` | `ACK` | `target_node` | 7 | yes (every node relays directed frames) | `ack_id` |
+| `0x72` | `HELLO` | none | 1 | no | n/a |
+| `0x73` | `INVENTORY` | none | 1 | no | n/a |
+
+Any other type: decoded, not processed, deduplicated by its opaque key (§5), and relayed if
+`ttl > 1` (forward compatibility). Not stored.
+
+---
+
+## 5. Payloads
+
+Every payload starts with a 1-byte `payload_version = 0x01`. A `NEED` or `ACK` with any other
+`payload_version` is treated like an unknown type (§4): relayed if `ttl > 1`, never stored or
+shown.
+
+**Opaque key** (for unknown types and unknown payload versions): the first 8 bytes of
+SHA-256 over `type ‖ sender_id ‖ timestamp_ms (8 bytes BE) ‖ payload`. It goes in the same
+seen-set, so opaque frames are relayed at most once per node.
+
+### 5.1 `NEED` (type `0x70`), ≤ 128 bytes
+
+```
+size field
+1    payload_version   = 0x01
+8    msg_id            random 64-bit, end-to-end identity and dedupe key
+8    origin_node       node_id of the requester (ACKs are addressed here)
+4    created_at        unix seconds, u32
+1    category          0 MEDICAL, 1 RESCUE, 2 WATER, 3 FOOD, 4 SHELTER, 5 MISSING_PERSON, 6 OTHER
+1    urgency           0..3 (3 = life-threatening)
+1    people            1..255 (0 = unknown)
+1    vuln_flags        bit0 ELDERLY, bit1 CHILD, bit2 PREGNANT, bit3 INJURED, bit4 TRAPPED
+4    lat_e5            i32, degrees × 100000, rounded half away from zero
+4    lon_e5            i32, degrees × 100000
+1    loc_acc           0 no fix, 1 <10 m, 2 <50 m, 3 <200 m, 4 <1 km, 5 ≥1 km
+1    lang              0 en, 1 hi, 2 or (Odia), 3 tl (Tagalog), 4 war (Waray), 5 ceb (Cebuano)
+1+n  item              ≤ 16 bytes
+1+n  landmark          ≤ 24 bytes
+1+n  summary           ≤ 40 bytes
+```
+
+Fixed part 35 bytes, plus 3 length bytes, plus at most 80 string bytes: **max 118 bytes**.
+A NEED frame is at most 22 + 118 = 140 bytes.
+
+Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
+within limits, valid UTF-8, no trailing bytes. Invalid → drop.
+
+### 5.2 `ACK` (type `0x71`), ≤ 145 bytes
+
+```
+size field
+1    payload_version   = 0x01
+8    ack_id            random 64-bit, dedupe key
+8    ref_msg_id        the NEED this acknowledges
+8    target_node       = origin_node of that NEED (also the frame recipient_id)
+4    ticket_no         u32
+1    status            0 RECEIVED, 1 DISPATCHED, 2 ON_THE_WAY, 3 RESOLVED
+2    eta_min           u16, 0xFFFF = unknown
+1+n  text              ≤ 112 bytes, already in the requester's language
+```
+
+Max 33 + 112 = 145 bytes; frame max 22 + 8 + 145 = 175 bytes. (112 bytes fits about 37 Odia or Devanagari characters.)
+
+The ACK frame's `sender_id` is the gateway that injected it into the mesh; `recipient_id` is
+`target_node`.
+
+### 5.3 `HELLO` (type `0x72`), 13 bytes
+
+```
+size field
+1    payload_version   = 0x01
+8    node_id           must equal the frame sender_id
+1    caps              bit0 IS_GATEWAY
+1    hops_to_gateway   0 if gateway, 0xFF if unknown, else min(neighbour value)+1 capped at 0xFE
+2    app_version       u16
+```
+
+Sent first on every new link, and again whenever `caps` or `hops_to_gateway` changes.
+
+### 5.4 `INVENTORY` (type `0x73`)
+
+```
+size field
+1    payload_version   = 0x01
+1    chunk_index       0-based
+1    chunk_count       ≥ 1
+1    id_count          0..19
+8×n  ids               msg_id / ack_id values the sender currently stores
+```
+
+At most 19 ids per chunk, so a chunk frame is at most 22 + 4 + 152 = 178 bytes. A node
+holding no packets sends one chunk with `chunk_count = 1, id_count = 0`.
+
+---
+
+## 6. Gossip engine (behaviour every node implements)
+
+State per node: `node_id` (random 8 bytes per install), a **store** of frames keyed by dedupe
+key, a **seen-set** (bounded LRU of 10,000 keys, includes everything ever stored), and a set of
+live links.
+
+1. **Link up:** send `HELLO`, then the full `INVENTORY` (all chunks).
+2. **On `INVENTORY` from link L:** accumulate chunks until all `chunk_count` arrived (a new
+   `chunk_index = 0` restarts accumulation). Then, for every stored NEED/ACK whose key is not
+   in the peer's set, send its stored frame to L only, **with `timestamp_ms` set to now** and
+   TTL unchanged. (Re-stamping keeps bitchat iPhones' 120 s skew guard happy in bridge mode.)
+3. **On `NEED`/`ACK` from link L:**
+   - If its key is in the seen-set: drop.
+   - Else: add to seen-set, store the frame (with TTL as received), deliver it to the app
+     layer, and if `ttl > 1`, forward a copy with `ttl − 1` to every link except L after a
+     random jitter of 10–220 ms.
+4. **Origination:** a locally created NEED or ACK goes through step 3 as if received from no
+   link (stored, delivered, flooded to all links with the initial TTL; no decrement).
+5. **Expiry:** NEED and ACK frames older than 72 h (by `created_at` for NEED, by first-stored
+   time for ACK) are deleted from the store; their keys stay in the seen-set until LRU
+   eviction.
+6. **Periodic resync:** every 30 s each node re-sends its full `INVENTORY` on every live link.
+   Flooding only reaches TTL hops (7); frames stored at `ttl ≤ 1` advance one more hop per
+   resync round, and lost frames are repaired. Without this, delivery stalls at the TTL radius
+   (verified in the simulator: a 10-node chain delivers 0/3 by flooding alone, 3/3 after 4
+   rounds).
+7. **No clock-skew rejection** between Relay nodes. A frame whose `timestamp_ms` is more than
+   24 h in the future is dropped.
+
+ACK delivery: every node stores and relays ACKs; only the node whose `node_id == target_node`
+shows it to the user.
+
+---
+
+## 7. Gateway ↔ backend API
+
+Base URL is configurable. All bodies are JSON. Binary values are standard base64 (with
+padding). Node ids in JSON are 16-char lowercase hex.
+
+### `POST /v1/sync`
+
+Header `X-Relay-Key: <device key>` (dev default `dev-relay-key`).
+
+Request:
+```json
+{ "gateway_node": "a1b2c3d4e5f60718", "frames": ["<base64 NEED frame>", "..."], "ack_cursor": 0 }
+```
+Response:
+```json
+{ "accepted": 3, "duplicates": 1, "rejected": 0, "acks": ["<base64 ACK payload>", "..."], "ack_cursor": 17 }
+```
+- `frames` are full outer frames as received over BLE (so the backend sees TTL and computes
+  `hops = 7 − ttl`). Non-NEED or undecodable frames count as `rejected`.
+- Uploads are idempotent on `msg_id`.
+- `acks` are **ACK payloads** (not frames) with id greater than `ack_cursor`, oldest first,
+  at most 50. The gateway wraps each in a frame (`sender_id` = gateway, `recipient_id` =
+  `target_node`, TTL 7) and originates it into the mesh.
+
+### Dashboard endpoints (no auth in v1)
+- `GET /v1/tickets` → `{ "tickets": [Ticket...] }`, ordered by `priority_score` desc.
+- `GET /v1/tickets/{ticket_no}` → `Ticket` with `packets: [...]`.
+- `POST /v1/tickets/{ticket_no}/approve` → queues a `DISPATCHED` ACK for every linked NEED's
+  origin, returns the updated `Ticket`.
+- `GET /v1/stats` → `{ "open_by_category": {...}, "gateways_online": n, "tickets": n }`
+  (a gateway is online if it synced in the last 60 s).
+- `POST /v1/dev/inject` → body `{ "needs": [NeedJson...] }`; dev only.
+- `GET /healthz` → `{ "ok": true }`.
+
+`Ticket` JSON:
+```json
+{
+  "ticket_no": 142, "category": "MEDICAL", "item": "insulin", "landmark": "school",
+  "summary": "mother needs insulin, diabetic", "lat": 20.29612, "lon": 85.82451,
+  "has_location": true, "loc_acc": 1, "loc_acc_m": "<10 m",
+  "urgency": 3, "people": 1, "vuln_flags": ["ELDERLY"], "lang": "or",
+  "report_count": 1, "priority_score": 8.4, "priority_reason": "...",
+  "status": "OPEN", "dispatch_draft": {"en": "...", "local": "..."},
+  "first_reported_at": 1790000000, "max_hops": 2, "gateways": ["a1b2c3d4e5f60718"],
+  "msg_ids": ["0011223344556677"]
+}
+```
+`status` is `OPEN` or `DISPATCHED`.
+
+Location quality is derived from the ticket's linked NEED packets (§5.1 `loc_acc`):
+`loc_acc` is the best (lowest non-zero) bucket among them, `0` only if no packet had a fix;
+`loc_acc_m` is its label (`"<10 m"`, `"<50 m"`, `"<200 m"`, `"<1 km"`, `"≥1 km"`, or `null` for 0);
+`has_location` is `loc_acc != 0`. When `has_location` is false, `lat` and `lon` are `null` (the
+phone's 0,0 is a placeholder, not a place) and clients must not plot the ticket; the dispatch
+draft then reads "Location: unknown (no GPS fix)". Each entry of the detail view's `packets`
+also carries its own `loc_acc`.
+
+---
+
+## 8. Golden vectors
+
+`protocol/vectors.json` holds hex encodings produced by `protocol/gen_vectors.py` (the
+reference encoder). Both codecs must (a) encode each vector's fields to exactly the given hex
+and (b) decode the hex back to the same fields. Regenerate with
+`python3 protocol/gen_vectors.py > protocol/vectors.json`.

@@ -1,0 +1,162 @@
+{
+  "spec": "protocol/SPEC.md v1",
+  "vectors": [
+    {
+      "name": "need_insulin_odisha",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "0011223344556677",
+        "origin_node": "a1a1a1a1a1a1a1a1",
+        "created_at": 1790000000,
+        "category": 0,
+        "urgency": 3,
+        "people": 1,
+        "vuln_flags": 1,
+        "lat": 20.296123,
+        "lon": 85.824509,
+        "loc_acc": 1,
+        "lang": 2,
+        "item": "insulin",
+        "landmark": "school",
+        "summary": "mother needs insulin, diabetic",
+        "lat_e5": 2029612,
+        "lon_e5": 8582451
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 7,
+        "timestamp_ms": 1790000000123,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c206469616265746963",
+      "frame_hex": "017007000001a0c4506c7b000051a1a1a1a1a1a1a1a1010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c206469616265746963"
+    },
+    {
+      "name": "need_truncation_negative_coords",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "ffeeddccbbaa9988",
+        "origin_node": "b2b2b2b2b2b2b2b2",
+        "created_at": 1790003600,
+        "category": 1,
+        "urgency": 2,
+        "people": 6,
+        "vuln_flags": 22,
+        "lat": -12.000005,
+        "lon": -77.123455,
+        "loc_acc": 0,
+        "lang": 1,
+        "item": "पानी और दवा चाहिए",
+        "landmark": "near the old banyan tree by the river ghat",
+        "summary": "six people trapped on roof, child injured, water rising fast",
+        "lat_e5": -1200001,
+        "lon_e5": -7712346,
+        "item_decoded": "पानी औ",
+        "landmark_decoded": "near the old banyan tree",
+        "summary_decoded": "six people trapped on roof, child injure"
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 3,
+        "timestamp_ms": 1790000000128,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "01ffeeddccbbaa9988b2b2b2b2b2b2b2b26ab1499001020616ffedb07fff8a51a6000110e0a4aae0a4bee0a4a8e0a58020e0a494186e65617220746865206f6c642062616e79616e2074726565287369782070656f706c652074726170706564206f6e20726f6f662c206368696c6420696e6a757265",
+      "frame_hex": "017003000001a0c4506c80000076b2b2b2b2b2b2b2b201ffeeddccbbaa9988b2b2b2b2b2b2b2b26ab1499001020616ffedb07fff8a51a6000110e0a4aae0a4bee0a4a8e0a58020e0a494186e65617220746865206f6c642062616e79616e2074726565287369782070656f706c652074726170706564206f6e20726f6f662c206368696c6420696e6a757265"
+    },
+    {
+      "name": "ack_received_directed",
+      "kind": "ACK",
+      "fields": {
+        "ack_id": "1234567890abcdef",
+        "ref_msg_id": "0011223344556677",
+        "target_node": "a1a1a1a1a1a1a1a1",
+        "ticket_no": 142,
+        "status": 0,
+        "eta_min": 65535,
+        "text": "ଅନୁରୋଧ #142 ନିୟନ୍ତ୍ରଣ କକ୍ଷରେ ପହଞ୍ଚିଛି।",
+        "text_decoded": "ଅନୁରୋଧ #142 ନିୟନ୍ତ୍ରଣ କକ୍ଷରେ ପହଞ୍ଚିଛି।"
+      },
+      "frame": {
+        "type": 113,
+        "ttl": 7,
+        "timestamp_ms": 1790000000132,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": "a1a1a1a1a1a1a1a1"
+      },
+      "payload_hex": "011234567890abcdef0011223344556677a1a1a1a1a1a1a1a10000008e00ffff62e0ac85e0aca8e0ad81e0acb0e0ad8be0aca7202331343220e0aca8e0acbfe0ad9fe0aca8e0ad8de0aca4e0ad8de0acb0e0aca320e0ac95e0ac95e0ad8de0acb7e0acb0e0ad8720e0acaae0acb9e0ac9ee0ad8de0ac9ae0acbfe0ac9be0acbfe0a5a4",
+      "frame_hex": "017107000001a0c4506c84010083d4d4d4d4d4d4d4d4a1a1a1a1a1a1a1a1011234567890abcdef0011223344556677a1a1a1a1a1a1a1a10000008e00ffff62e0ac85e0aca8e0ad81e0acb0e0ad8be0aca7202331343220e0aca8e0acbfe0ad9fe0aca8e0ad8de0aca4e0ad8de0acb0e0aca320e0ac95e0ac95e0ad8de0acb7e0acb0e0ad8720e0acaae0acb9e0ac9ee0ad8de0ac9ae0acbfe0ac9be0acbfe0a5a4"
+    },
+    {
+      "name": "hello_gateway",
+      "kind": "HELLO",
+      "fields": {
+        "node_id": "d4d4d4d4d4d4d4d4",
+        "caps": 1,
+        "hops_to_gateway": 0,
+        "app_version": 1
+      },
+      "frame": {
+        "type": 114,
+        "ttl": 1,
+        "timestamp_ms": 1790000000123,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "01d4d4d4d4d4d4d4d401000001",
+      "frame_hex": "017201000001a0c4506c7b00000dd4d4d4d4d4d4d4d401d4d4d4d4d4d4d4d401000001"
+    },
+    {
+      "name": "inventory_two_ids",
+      "kind": "INVENTORY",
+      "fields": {
+        "chunk_index": 0,
+        "chunk_count": 1,
+        "ids": [
+          "0011223344556677",
+          "1234567890abcdef"
+        ]
+      },
+      "frame": {
+        "type": 115,
+        "ttl": 1,
+        "timestamp_ms": 1790000000123,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "0100010200112233445566771234567890abcdef",
+      "frame_hex": "017301000001a0c4506c7b000014b2b2b2b2b2b2b2b20100010200112233445566771234567890abcdef"
+    },
+    {
+      "name": "unknown_type_with_signature",
+      "kind": "OPAQUE",
+      "fields": {
+        "opaque_key": "53f5b584812fbce1",
+        "signature": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+      },
+      "frame": {
+        "type": 126,
+        "ttl": 5,
+        "timestamp_ms": 1790000000123,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "deadbeef",
+      "frame_hex": "017e05000001a0c4506c7b020004a1a1a1a1a1a1a1a1deadbeef000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    }
+  ],
+  "must_reject_frames": {
+    "version_2": "027007000001a0c4506c7b000051a1a1a1a1a1a1a1a1010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c206469616265746963",
+    "compressed_flag": "017007000001a0c4506c7b040051a1a1a1a1a1a1a1a1010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c206469616265746963",
+    "trailing_byte": "017007000001a0c4506c7b000051a1a1a1a1a1a1a1a1010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c20646961626574696300",
+    "truncated": "017007000001a0c4506c7b000051a1a1a1a1a1a1a1a1010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c2064696162657469",
+    "padded_to_256": "017007000001a0c4506c7b000051a1a1a1a1a1a1a1a1010011223344556677a1a1a1a1a1a1a1a16ab13b8000030101001ef82c0082f533010207696e73756c696e067363686f6f6c1e6d6f74686572206e6565647320696e73756c696e2c206469616265746963999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "sizes": {
+    "need1_payload": 81,
+    "need2_payload": 118,
+    "ack1_payload": 131
+  }
+}

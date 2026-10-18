@@ -1,0 +1,184 @@
+[
+  {
+    "id": "en_01", "lang": "en",
+    "text": "Please send medicine, my grandfather has a heart problem and he cannot breathe properly. We are near the petrol pump.",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["ELDERLY"], "item": "medicine", "landmark": "petrol pump"}
+  },
+  {
+    "id": "en_02", "lang": "en",
+    "text": "Four people are stuck on the roof of our house and the water is coming up fast. Please come and take us out, we are behind the post office.",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 4, "vuln": ["TRAPPED"], "item": "rescue", "landmark": "post office"}
+  },
+  {
+    "id": "en_03", "lang": "en",
+    "text": "There is no clean drinking water in our village since yesterday, about thirty people are here. Please send drinking water.",
+    "expected": {"category": "WATER", "urgency": 1, "people": 30, "vuln": [], "item": "water", "landmark": ""}
+  },
+  {
+    "id": "en_04", "lang": "en",
+    "text": "We are three people including two small children and we have had nothing to eat since morning. Please send food, we are near the bus stand.",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 3, "vuln": ["CHILD"], "item": "food", "landmark": "bus stand"}
+  },
+  {
+    "id": "en_05", "lang": "en",
+    "text": "Our house has fallen in the flood, we are a family of five and we have nowhere to stay tonight. Please arrange shelter for us.",
+    "expected": {"category": "SHELTER", "urgency": 1, "people": 5, "vuln": [], "item": "shelter", "landmark": ""}
+  },
+  {
+    "id": "en_06", "lang": "en",
+    "text": "My small son is missing since the boat overturned, he is eight years old. We were last near the railway station. Please help me find him.",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["CHILD"], "item": "missing person", "landmark": "railway station"}
+  },
+  {
+    "id": "en_07", "lang": "en",
+    "text": "Our phones are dead and we cannot call anyone, please send a power bank. We are seven people at the community hall.",
+    "expected": {"category": "OTHER", "urgency": 1, "people": 7, "vuln": [], "item": "power bank", "landmark": "community hall"}
+  },
+  {
+    "id": "en_08", "lang": "en",
+    "note": "negation: has food, needs water",
+    "text": "We have food but we have no water, please send water. There are six of us near the temple.",
+    "expected": {"category": "WATER", "urgency": 1, "people": 6, "vuln": [], "item": "water", "landmark": "temple"}
+  },
+  {
+    "id": "en_09", "lang": "en",
+    "note": "implicit MEDICAL (no keyword); landmark contains the word 'water' (category trap)",
+    "text": "My father is seventy and he fell from the stairs, there is a lot of blood on his head. Please send a doctor. We are near the water tank.",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["ELDERLY", "INJURED"], "item": "doctor", "landmark": "water tank"}
+  },
+  {
+    "id": "en_10", "lang": "en",
+    "note": "implicit RESCUE (no keyword 'trapped' or 'rescue')",
+    "text": "The water has reached our second floor and the stairs are gone. There are nine of us including a baby, we cannot get out.",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 9, "vuln": ["CHILD", "TRAPPED"], "item": "rescue", "landmark": ""}
+  },
+  {
+    "id": "en_11", "lang": "en",
+    "text": "We are about fifty people at the relief camp and there is no drinking water since last night.",
+    "expected": {"category": "WATER", "urgency": 1, "people": 50, "vuln": [], "item": "water", "landmark": "relief camp"}
+  },
+  {
+    "id": "en_12", "lang": "en",
+    "text": "We are four people including a pregnant lady and nobody has eaten anything for two days. Please send food, we are near the masjid.",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 4, "vuln": ["PREGNANT"], "item": "food", "landmark": "masjid"}
+  },
+  {
+    "id": "en_13", "lang": "en",
+    "text": "My daughter is five years old and has high fever and vomiting for two days, we have no medicine. We are near the dispensary.",
+    "expected": {"category": "MEDICAL", "urgency": 2, "people": 1, "vuln": ["CHILD"], "item": "medicine", "landmark": "dispensary"}
+  },
+  {
+    "id": "en_14", "lang": "en",
+    "text": "It is raining and we are sleeping on the road. We are five people including two children and an old grandmother, we need a place to stay near the railway station.",
+    "expected": {"category": "SHELTER", "urgency": 2, "people": 5, "vuln": ["CHILD", "ELDERLY"], "item": "shelter", "landmark": "railway station"}
+  },
+  {
+    "id": "en_15", "lang": "en",
+    "text": "I am looking for my old mother, she has dementia and wandered away from the relief camp this morning.",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["ELDERLY"], "item": "missing person", "landmark": "relief camp"}
+  },
+  {
+    "id": "hi_01", "lang": "hi",
+    "note": "REAL utterance that fooled the rule extractor (RuleExtractor mislabelled it)",
+    "text": "हम पांच लोग हैं हम में से एक गर्भवती महिला है और एक बूढ़े अंकल हैं हम सबको खाने की जरूरत है कृपया जल्दी भेजें",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 5, "vuln": ["PREGNANT", "ELDERLY"], "item": "food", "landmark": ""}
+  },
+  {
+    "id": "hi_02", "lang": "hi",
+    "text": "मेरे पिताजी को सीने में तेज दर्द हो रहा है, उनकी उम्र सत्तर साल है, कृपया एम्बुलेंस भेजिए, हम पेट्रोल पंप के पास हैं।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["ELDERLY"], "item": "ambulance", "landmark": "petrol pump"}
+  },
+  {
+    "id": "hi_03", "lang": "hi",
+    "note": "implicit RESCUE/TRAPPED (no keyword)",
+    "text": "हमारे घर में पानी भर गया है, हम सात लोग दूसरी मंजिल पर फँस गए हैं, नीचे जाने का रास्ता बंद है, कृपया बचाइए।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 7, "vuln": ["TRAPPED"], "item": "rescue", "landmark": ""}
+  },
+  {
+    "id": "hi_04", "lang": "hi",
+    "text": "तीन दिन से हमारे मोहल्ले में पीने का पानी नहीं आया है, लगभग चालीस लोग हैं, कृपया पानी भेजिए।",
+    "expected": {"category": "WATER", "urgency": 1, "people": 40, "vuln": [], "item": "water", "landmark": ""}
+  },
+  {
+    "id": "hi_05", "lang": "hi",
+    "text": "बच्चे कल से भूखे हैं, हमारे पास राशन खत्म हो गया है, हम चार लोग हैं, बाजार के पास।",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 4, "vuln": ["CHILD"], "item": "food", "landmark": "market"}
+  },
+  {
+    "id": "hi_06", "lang": "hi",
+    "text": "बारिश में हमारा घर गिर गया है, हम छह लोग हैं, आज रात रहने की जगह चाहिए।",
+    "expected": {"category": "SHELTER", "urgency": 1, "people": 6, "vuln": [], "item": "shelter", "landmark": ""}
+  },
+  {
+    "id": "hi_07", "lang": "hi",
+    "text": "मेरी छोटी बेटी भीड़ में खो गई है, वह चार साल की है, आखिरी बार रेलवे स्टेशन के पास दिखी थी, कृपया ढूँढने में मदद कीजिए।",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["CHILD"], "item": "missing person", "landmark": "railway station"}
+  },
+  {
+    "id": "hi_08", "lang": "hi",
+    "text": "हमारे फोन की बैटरी खत्म हो गई है, कृपया पावर बैंक भेज दीजिए, हम पाँच लोग गुरुद्वारे के पास हैं।",
+    "expected": {"category": "OTHER", "urgency": 1, "people": 5, "vuln": [], "item": "power bank", "landmark": "gurudwara"}
+  },
+  {
+    "id": "hi_09", "lang": "hi",
+    "note": "negation: has water, needs food",
+    "text": "हमारे पास पानी है लेकिन खाना नहीं है, हम तीन लोग हैं, कृपया खाना भेजिए।",
+    "expected": {"category": "FOOD", "urgency": 1, "people": 3, "vuln": [], "item": "food", "landmark": ""}
+  },
+  {
+    "id": "hi_10", "lang": "hi",
+    "note": "implicit MEDICAL (labour, no keyword 'medical')",
+    "text": "मेरी बहू को अचानक दर्द शुरू हो गया है, वह नौ महीने की गर्भवती है, कृपया डॉक्टर बुलाइए, हम स्कूल के पास हैं।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["PREGNANT"], "item": "doctor", "landmark": "school"}
+  },
+  {
+    "id": "hi_11", "lang": "hi",
+    "note": "implicit RESCUE ('buried', no keyword); landmark contains 'water' (category trap)",
+    "text": "हमारे मोहल्ले में मकान गिर गया है और दीवार के नीचे दो लोग दबे हैं, कृपया जल्दी आइए, पानी की टंकी के पास।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 2, "vuln": ["TRAPPED"], "item": "rescue", "landmark": "water tank"}
+  },
+  {
+    "id": "hi_12", "lang": "hi",
+    "text": "हमारे पास कल से पानी की एक बूँद नहीं है, हम चार लोग हैं जिसमें दो बूढ़े हैं, कृपया पीने का पानी भेजिए।",
+    "expected": {"category": "WATER", "urgency": 2, "people": 4, "vuln": ["ELDERLY"], "item": "water", "landmark": ""}
+  },
+  {
+    "id": "hi_13", "lang": "hi",
+    "text": "मेरे बेटे को तेज बुखार है, वह तीन साल का है, घर में कोई दवा नहीं है, कृपया बुखार की दवा भेजिए, हम अस्पताल के पीछे हैं।",
+    "expected": {"category": "MEDICAL", "urgency": 2, "people": 1, "vuln": ["CHILD"], "item": "medicine", "landmark": "hospital"}
+  },
+  {
+    "id": "hi_14", "lang": "hi",
+    "text": "हम दस लोग खुले में सो रहे हैं, ठंड बहुत है, रहने के लिए कोई जगह चाहिए, मंदिर के पास।",
+    "expected": {"category": "SHELTER", "urgency": 1, "people": 10, "vuln": [], "item": "shelter", "landmark": "temple"}
+  },
+  {
+    "id": "hi_15", "lang": "hi",
+    "text": "मेरे दादाजी सुबह से घर नहीं लौटे हैं, वे बूढ़े हैं और ठीक से देख नहीं पाते, कृपया उन्हें ढूँढने में मदद कीजिए।",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["ELDERLY"], "item": "missing person", "landmark": ""}
+  },
+  {
+    "id": "hx_01", "lang": "hi",
+    "note": "Hinglish (Latin script), lang=hi",
+    "text": "Hamare paas khana khatam ho gaya hai, hum chaar log hain, please khana bhej do, school ke paas.",
+    "expected": {"category": "FOOD", "urgency": 1, "people": 4, "vuln": [], "item": "food", "landmark": "school"}
+  },
+  {
+    "id": "hx_02", "lang": "hi",
+    "note": "Hinglish (Latin script), lang=hi",
+    "text": "Bhai mere papa ko heart attack jaisa dard ho raha hai, jaldi ambulance bhejo, hum bridge ke paas hain.",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["ELDERLY"], "item": "ambulance", "landmark": "bridge"}
+  },
+  {
+    "id": "hx_03", "lang": "hi",
+    "note": "Hinglish (Latin script), lang=hi",
+    "text": "Paani bhar gaya hai, hum chhe log chhat par fase hue hain aur ek bachcha bhi hai, jaldi nikalo.",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 6, "vuln": ["TRAPPED", "CHILD"], "item": "rescue", "landmark": ""}
+  },
+  {
+    "id": "hx_04", "lang": "hi",
+    "note": "Hinglish (Latin script), lang=hi; negation: has food, needs water",
+    "text": "Khana to hai lekin peene ka paani nahi hai, hum teen log hain jisme ek garbhwati madam hain, market ke paas.",
+    "expected": {"category": "WATER", "urgency": 2, "people": 3, "vuln": ["PREGNANT"], "item": "water", "landmark": "market"}
+  }
+]

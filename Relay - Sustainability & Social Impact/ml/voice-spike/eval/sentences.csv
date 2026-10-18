@@ -1,0 +1,9 @@
+id,lang,voice,text,category,urgency,item,landmark,people,vuln
+en_insulin,en,Rishi,"my mother needs insulin, near the school",MEDICAL,2,insulin,school,1,ELDERLY
+hi_insulin,hi,Lekha,"मेरी माँ को इंसुलिन चाहिए, स्कूल के पास",MEDICAL,2,insulin,school,1,ELDERLY
+en_rescue,en,Tara,"five people are trapped on the first floor and the water is rising, near the bridge",RESCUE,3,rescue,bridge,5,TRAPPED
+hi_rescue,hi,Lekha,"हम छह लोग छत पर फँसे हैं, पानी बढ़ रहा है, पुल के पास",RESCUE,3,rescue,bridge,6,TRAPPED
+en_water,en,Rishi,"we have no drinking water for two days, twenty people, near the temple",WATER,1,water,temple,20,
+hi_food,hi,Lekha,"हमारे पास खाना नहीं है, बच्चे भूखे हैं, अस्पताल के पास",FOOD,1,food,hospital,1,CHILD
+en_labour,en,Tara,"a pregnant woman is in labour and needs an ambulance, near the market",MEDICAL,3,ambulance,market,1,PREGNANT
+en_shelter,en,Rishi,"our house collapsed and we need shelter, family of four, near the church",SHELTER,1,shelter,church,4,
