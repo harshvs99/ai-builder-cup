@@ -261,6 +261,21 @@ class Store(Protocol):
         before districts existed have none and only show up unfiltered)."""
         ...
 
+    # ------------------------------------------------------------------ ready-mode warnings
+    def add_warning(self, warning: dict[str, Any]) -> dict[str, Any]:
+        """Store a warning (without ``id``) and return it with the id assigned (1, 2, ...)."""
+        ...
+
+    def get_warning(self, warning_id: int) -> dict[str, Any] | None: ...
+
+    def list_warnings(self, district: str | None = None) -> list[dict[str, Any]]:
+        """Newest first (at most 200), optionally only one district's. Includes cancelled and expired ones."""
+        ...
+
+    def cancel_warning(self, warning_id: int, now: int) -> dict[str, Any] | None:
+        """Set ``cancelled_at`` (kept if already set) and return the warning; None when unknown."""
+        ...
+
     # ------------------------------------------------------------------ acks
     def clamp_ack_cursor(self, cursor: int) -> int:
         """A cursor beyond the newest ack sequence means the store was reset: treat as 0."""

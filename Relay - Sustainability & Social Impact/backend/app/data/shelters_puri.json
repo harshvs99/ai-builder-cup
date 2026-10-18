@@ -1,0 +1,11 @@
+[
+  {"id": "puri-mcs-01", "name": "Puri Town Cyclone Shelter", "name_local": "ପୁରୀ ଟାଉନ୍ ସାଇକ୍ଲୋନ୍ ଆଶ୍ରୟସ୍ଥଳ", "kind": "cyclone_shelter", "lat": 19.812, "lon": 85.828, "capacity": 1500, "facilities": ["water", "toilets", "generator", "first_aid"], "block": "Puri Sadar", "demo": true},
+  {"id": "puri-sch-01", "name": "Zilla School, Puri", "name_local": "ଜିଲ୍ଲା ସ୍କୁଲ, ପୁରୀ", "kind": "school", "lat": 19.807, "lon": 85.835, "capacity": 600, "facilities": ["water", "toilets"], "block": "Puri Sadar", "demo": true},
+  {"id": "puri-hos-01", "name": "District Headquarters Hospital, Puri", "name_local": "ଜିଲ୍ଲା ମୁଖ୍ୟାଳୟ ଡାକ୍ତରଖାନା, ପୁରୀ", "kind": "hospital", "lat": 19.818, "lon": 85.824, "capacity": 300, "facilities": ["water", "toilets", "generator", "first_aid", "medical"], "block": "Puri Sadar", "demo": true},
+  {"id": "sat-mcs-01", "name": "Satyabadi Cyclone Shelter", "name_local": "ସତ୍ୟବାଦୀ ସାଇକ୍ଲୋନ୍ ଆଶ୍ରୟସ୍ଥଳ", "kind": "cyclone_shelter", "lat": 19.923, "lon": 85.842, "capacity": 1200, "facilities": ["water", "toilets", "generator"], "block": "Satyabadi", "demo": true},
+  {"id": "bra-mcs-01", "name": "Brahmagiri Cyclone Shelter", "name_local": "ବ୍ରହ୍ମଗିରି ସାଇକ୍ଲୋନ୍ ଆଶ୍ରୟସ୍ଥଳ", "kind": "cyclone_shelter", "lat": 19.944, "lon": 85.781, "capacity": 1000, "facilities": ["water", "toilets"], "block": "Brahmagiri", "demo": true},
+  {"id": "pip-sch-01", "name": "Pipili High School", "name_local": "ପିପିଲି ଉଚ୍ଚ ବିଦ୍ୟାଳୟ", "kind": "school", "lat": 20.113, "lon": 85.833, "capacity": 500, "facilities": ["water", "toilets"], "block": "Pipili", "demo": true},
+  {"id": "nim-camp-01", "name": "Nimapara Relief Camp", "name_local": "ନିମାପଡ଼ା ରିଲିଫ୍ ଶିବିର", "kind": "relief_camp", "lat": 20.033, "lon": 86.0, "capacity": 800, "facilities": ["water", "toilets", "kitchen"], "block": "Nimapara", "demo": true},
+  {"id": "kak-mcs-01", "name": "Kakatpur Cyclone Shelter", "name_local": "କାକଟପୁର ସାଇକ୍ଲୋନ୍ ଆଶ୍ରୟସ୍ଥଳ", "kind": "cyclone_shelter", "lat": 19.989, "lon": 86.11, "capacity": 1100, "facilities": ["water", "toilets", "generator"], "block": "Kakatpur", "demo": true},
+  {"id": "kan-hos-01", "name": "Kanas Community Health Centre", "name_local": "କଣାସ ସ୍ୱାସ୍ଥ୍ୟ କେନ୍ଦ୍ର", "kind": "hospital", "lat": 20.094, "lon": 85.695, "capacity": 120, "facilities": ["water", "toilets", "first_aid", "medical"], "block": "Kanas", "demo": true}
+]

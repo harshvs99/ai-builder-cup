@@ -1,5 +1,7 @@
 import { loadOperatorKey } from './lib/operatorKey';
-import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type {
+  CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, Sitrep, Stats, Team, Ticket,
+} from './types';
 
 export class ApiError extends Error {
   /** HTTP status, or 0 for network failures. */
@@ -94,6 +96,26 @@ export function createClient(base: string, operatorKey?: string | null) {
     },
     runSitrep(district: string): Promise<Sitrep> {
       return request<Sitrep>(`/v1/sitreps/run?district=${encodeURIComponent(district)}`, { method: 'POST' });
+    },
+    async listWarnings(district: string, signal?: AbortSignal): Promise<ReadyWarning[]> {
+      const body = await request<{ warnings?: ReadyWarning[] }>(`/v1/ready/warnings?district=${encodeURIComponent(district)}`, { signal });
+      return Array.isArray(body?.warnings) ? body.warnings : [];
+    },
+    issueWarning(body: NewWarning): Promise<ReadyWarning> {
+      return request<ReadyWarning>('/v1/ready/warnings', post(body));
+    },
+    cancelWarning(id: number): Promise<ReadyWarning> {
+      return request<ReadyWarning>(`/v1/ready/warnings/${id}/cancel`, { method: 'POST' });
+    },
+    importCap(district: string, capXml: string): Promise<CapImportResult> {
+      return request<CapImportResult>('/v1/ready/warnings/import-cap', post({ district, cap_xml: capXml }));
+    },
+    async listShelters(district: string, signal?: AbortSignal): Promise<ReadyShelter[]> {
+      const body = await request<{ shelters?: ReadyShelter[] }>(`/v1/ready/shelters?district=${encodeURIComponent(district)}`, { signal });
+      return Array.isArray(body?.shelters) ? body.shelters : [];
+    },
+    previewPlan(body: PlanRequest): Promise<ReadyPlan> {
+      return request<ReadyPlan>('/v1/ready/plan/preview', post(body));
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });

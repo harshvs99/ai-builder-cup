@@ -42,7 +42,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
-| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest` and `GET /v1/stats` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, `GET|POST /v1/ready/warnings*` and `POST /v1/ready/plan/preview` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -53,6 +53,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
+| `READY_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the Ready-mode household plan (text validated, else template); no Gemini credentials = templates |
+| `RELAY_TTS_MODEL` | unset | enables server-side speech for Ready plans (e.g. `gemini-2.5-flash-preview-tts`, API key or Vertex). Unset = `audio_url` is null and phones use on-device TTS. `RELAY_TTS_VOICE` (default `Kore`) picks the prebuilt voice |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
 | `PORT` | `8080` | Docker/Cloud Run listen port |
 
@@ -73,7 +75,9 @@ app/teams.py            dispatch teams: seed file (data/teams_puri.json), derive
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
 app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
 app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
-app/data/               teams_puri.json, gazetteer_puri.json (landmarks with Hindi/Odia aliases)
+app/ready.py            Ready mode: shelters, warnings + CAP parser, offline pack, validated household plan
+app/tts.py              optional Gemini text-to-speech (PCM to WAV), off unless RELAY_TTS_MODEL is set
+app/data/               teams_puri.json, gazetteer_puri.json (landmarks with Hindi/Odia aliases), shelters_*.json (DEMO placeholders)
 app/main.py             FastAPI app (SPEC section 7), /internal/triage, static dashboard
 scripts/test-firestore.sh   emulator-backed test run
 scripts/seed_district.py    40 NEEDs over a simulated cyclone night in Puri, posted through /v1/sync
@@ -164,6 +168,31 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
 - Dispatch orders (`POST /v1/dispatch/propose`) are written in English plus the assigned team's
   district language, whatever language the requester used.
 - `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
+
+## Ready mode (before landfall)
+
+Phones still have signal before landfall, so this is a plain HTTPS fetch that phones cache for offline use
+(`app/ready.py` has the design and the phone-side contract; the apps do not implement it yet).
+
+- `POST /v1/ready/warnings` (operator) `{district, source: IMD|PAGASA|NDMA|manual, severity: watch|warning|alert, headline, expected_landfall_at?, expires_at?}`;
+  `GET /v1/ready/warnings?district=&active=` and `GET /v1/ready/shelters?district=&lang=` (operator); `POST /v1/ready/warnings/{id}/cancel` (operator, idempotent);
+  `POST /v1/ready/warnings/import-cap` (operator) `{district, cap_xml}`: paste a CAP 1.2 alert (IMD / NDMA SACHET / PAGASA);
+  its actual, unexpired alerts become warnings (CAP Extreme = alert, Severe = warning, otherwise watch). Parsing only, no polling.
+- `GET /v1/ready/pack?district=|lat=&lon=&lang=` (device key): `{district, generated_at, warning|null, shelters, checklist, version}`;
+  `version` hashes the content, not the time. Shelter `name` is the local-script name when `lang` is the district language.
+- `POST /v1/ready/plan` (device key) `{lang, district?|lat,lon, household{people, elderly, children, infants, pregnant, disability, medical_needs<=100, livestock}}`
+  returns `{plan_id, steps, nearest_shelters[{id,name,distance_km}], source: gemini|template, steps_lang, audio_url}`.
+  Nearest two non-hospital shelters by haversine. The model may name a shelter only through `[S1]`/`[S2]` tokens that the
+  server replaces; steps are rejected (template used) on a wrong count (3 to 10), a step over 200 characters, an unknown
+  token, a number other than 2 or 3, or a literal place name. Languages without a template (tl, war) get English steps
+  (`steps_lang: "en"`). Plans are cached in memory by (district, lang, household bucket, shelters, warning).
+  `POST /v1/ready/plan/preview` is the same with the operator key, for the dashboard.
+- `GET /v1/ready/plan/{plan_id}/audio` (device key): `audio/wav` (16-bit mono 24 kHz) when `RELAY_TTS_MODEL` is set; otherwise 404
+  and phones read the plan with on-device TextToSpeech. Odia and Filipino are preview languages in Gemini TTS and Waray is likely
+  unsupported (no `audio_url`, device TTS).
+- **The shelter lists are placeholders.** `app/data/shelters_puri.json` and `shelters_delhi.json` are invented, every entry has
+  `"demo": true`. Replace them with the official lists (OSDMA multipurpose cyclone shelter list for Puri, DDMA for Delhi) before a pilot.
+  The Hindi and Odia plan and checklist texts are first drafts pending native-speaker review.
 
 ## Deploy
 
