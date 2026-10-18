@@ -90,6 +90,46 @@ class AskStrings(private val lang: Lang) {
         "ଲୋକେସନ ବନ୍ଦ ଅଛି — ଉଦ୍ଧାରକାରୀ ଚିହ୍ନ ସ୍ଥାନ ଉପରେ ନିର୍ଭର କରିବେ", "Naka-off ang lokasyon — aasa ang mga tagapagligtas sa palatandaan",
         "Patay an lokasyon — an mga manluluwas magsarig ha landmark",
     ) // needs native review
+    // ---- no-location warning (Where row) and the dialog shown on Send without a fix
+    val whereReasonPermissionOff get() = tr(
+        lang, "Location permission is off", "लोकेशन की अनुमति बंद है", "ଲୋକେସନ ଅନୁମତି ବନ୍ଦ ଅଛି", "Naka-off ang pahintulot sa lokasyon", "Patay an pagtugot ha lokasyon",
+    ) // needs native review
+    val whereReasonServicesOff get() = tr(
+        lang, "Location is turned off on this phone", "इस फ़ोन में लोकेशन बंद है", "ଏହି ଫୋନରେ ଲୋକେସନ ବନ୍ଦ ଅଛି", "Naka-off ang lokasyon sa teleponong ito", "Patay an lokasyon hini nga telepono",
+    ) // needs native review
+    val whereReasonFinding get() = tr(
+        lang, "Still finding your location…", "आपकी लोकेशन अभी खोज रहे हैं…", "ଆପଣଙ୍କ ଲୋକେସନ ଏବେ ବି ଖୋଜୁଛି…", "Hinahanap pa ang inyong lokasyon…", "Gin-aagi pa an pagpangita han iyo lokasyon…",
+    ) // needs native review
+    val noLocationWarningA11y get() = tr(lang, "Warning", "चेतावनी", "ସତର୍କତା", "Babala", "Pasidaan") // needs native review
+    val noLocationTitle get() = tr(
+        lang, "Rescuers can't see where you are", "बचावकर्ता नहीं देख सकते कि आप कहाँ हैं", "ଉଦ୍ଧାରକାରୀ ଦେଖି ପାରୁନାହାଁନ୍ତି ଆପଣ କେଉଁଠି ଅଛନ୍ତି",
+        "Hindi nakikita ng mga tagapagligtas kung nasaan kayo", "Diri makita han mga manluluwas kon hain kamo",
+    ) // needs native review
+    fun noLocationBodyWithLandmark(landmark: String) = tr(
+        lang,
+        "They will rely on '$landmark'. Adding your location helps them find you faster.",
+        "वे '$landmark' पर निर्भर रहेंगे। लोकेशन जोड़ने से वे आपको जल्दी ढूँढ पाएँगे।",
+        "ସେମାନେ '$landmark' ଉପରେ ନିର୍ଭର କରିବେ। ଲୋକେସନ ଯୋଡ଼ିଲେ ସେମାନେ ଆପଣଙ୍କୁ ଶୀଘ୍ର ଖୋଜି ପାରିବେ।",
+        "Aasa sila sa '$landmark'. Makakatulong ang pagdagdag ng lokasyon para mas mabilis nila kayong mahanap.",
+        "Magsarig hira ha '$landmark'. An pagdugang han lokasyon makabulig para mas dagmit hira makaagi ha iyo.",
+    ) // needs native review
+    val noLocationBodyNoLandmark get() = tr(
+        lang,
+        "Without your location or a nearby landmark, the control room may not be able to find you.",
+        "आपकी लोकेशन या पास की किसी पहचान की जगह के बिना, कंट्रोल रूम आपको ढूँढ नहीं पाएगा।",
+        "ଆପଣଙ୍କ ଲୋକେସନ କିମ୍ବା ପାଖର ଚିହ୍ନ ସ୍ଥାନ ବିନା, କଣ୍ଟ୍ରୋଲ ରୁମ ଆପଣଙ୍କୁ ଖୋଜି ନପାରିପାରେ।",
+        "Kung walang lokasyon o malapit na palatandaan, maaaring hindi kayo mahanap ng control room.",
+        "Kon waray lokasyon o harapit nga landmark, basin diri kamo makita han control room.",
+    ) // needs native review
+    val turnOnLocation get() = tr(lang, "Turn on location", "लोकेशन चालू करें", "ଲୋକେସନ ଚାଲୁ କରନ୍ତୁ", "I-on ang lokasyon", "Buksi an lokasyon") // needs native review
+    val addLandmark get() = tr(lang, "Add a landmark", "पहचान की जगह जोड़ें", "ଚିହ୍ନ ସ୍ଥାନ ଯୋଡ଼ନ୍ତୁ", "Magdagdag ng palatandaan", "Pagdugang hin landmark") // needs native review
+    val changeLandmark get() = tr(lang, "Change landmark", "पहचान की जगह बदलें", "ଚିହ୍ନ ସ୍ଥାନ ବଦଳାନ୍ତୁ", "Palitan ang palatandaan", "Usba an landmark") // needs native review
+    val sendWithoutLocation get() = tr(lang, "Send without location", "बिना लोकेशन के भेजें", "ଲୋକେସନ ବିନା ପଠାନ୍ତୁ", "Ipadala nang walang lokasyon", "Ipadara nga waray lokasyon") // needs native review
+    val sendAnywayConfirm get() = tr(
+        lang, "Send anyway — the control room may not find you", "फिर भी भेजें — कंट्रोल रूम आपको ढूँढ नहीं पाएगा",
+        "ତଥାପି ପଠାନ୍ତୁ — କଣ୍ଟ୍ରୋଲ ରୁମ ଆପଣଙ୍କୁ ଖୋଜି ନପାରିପାରେ", "Ipadala pa rin — maaaring hindi kayo mahanap ng control room",
+        "Ipadara gihapon — basin diri kamo makita han control room",
+    ) // needs native review
     val quickQuestions get() = tr(lang, "A few quick questions", "कुछ छोटे सवाल", "କିଛି ଛୋଟ ପ୍ରଶ୍ନ", "Ilang mabilis na tanong", "Pira nga dagmit nga pakiana") // needs native review
     fun hearQuestion(question: String) = tr(lang, "Hear the question: $question", "सवाल सुनें: $question", "ପ୍ରଶ୍ନ ଶୁଣନ୍ତୁ: $question", "Pakinggan ang tanong: $question", "Pamatii an pakiana: $question") // needs native review
     val howUrgent get() = tr(lang, "How urgent is it?", "यह कितना ज़रूरी है?", "ଏହା କେତେ ଜରୁରୀ?", "Gaano ito kaapura?", "Hin-o kapagmadali ini?") // needs native review
