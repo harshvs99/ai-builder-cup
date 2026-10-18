@@ -42,6 +42,8 @@ data class Interpretation(
     val patients: Set<Relation> = emptySet(),
     val next: String? = null,
     val done: Boolean = false,
+    /** The model's view of which place advice fits ([PlaceAdvice] keys, most useful first); null = no view. */
+    val advice: List<String>? = null,
 )
 
 /** Yes / no in the app's languages, for answers to a yes-or-no question. Null when the words say neither, or both. */
@@ -110,7 +112,7 @@ object TriageMerge {
         return Interpretation(
             facts = facts, hazards = rules.hazards + model.hazards, people = model.people ?: rules.people,
             landmark = model.landmark ?: rules.landmark, choices = choices, patients = rules.patients + model.patients,
-            next = model.next, done = model.done,
+            next = model.next, done = model.done, advice = model.advice,
         )
     }
 }
@@ -136,6 +138,10 @@ data class TriageState(
     val disasters: Set<DisasterType> = emptySet(),
     /** Every declaration is older than [DisasterGate.FRESH_SEC]: the premise may have changed. */
     val aging: Boolean = false,
+    /** What the offline map says about where the person is; null = no map, or no good enough position. */
+    val map: MapContext? = null,
+    /** The model's latest pick of place advice ([Interpretation.advice]); null = it has given none. */
+    val placeView: List<String>? = null,
 ) {
     val patients: List<Subject> get() = subjects.ifEmpty { listOf(Subject(1)) }
 }
@@ -154,6 +160,8 @@ data class TriageResult(
     val summary: String,
     /** Highest priority first. */
     val advisories: List<TriageBank.Advisory>,
+    /** Places from the offline map worth knowing (shelter, hospital, water to keep away from); after the first aid. */
+    val places: List<PlaceLine>,
     val facts: Map<FactKey, Tri>,
     val choices: Map<Choice, String>,
     val hazards: Set<Hazard>,
@@ -167,7 +175,7 @@ object TriageEngine {
     /** Begin from the first thing the person said (all of it) and the categories already understood. */
     fun start(
         text: String, categories: Collection<Category>, lang: Lang,
-        peopleHint: Int = 1, disasters: DisasterGate.Active = DisasterGate.Active.NONE,
+        peopleHint: Int = 1, disasters: DisasterGate.Active = DisasterGate.Active.NONE, map: MapContext? = null,
     ): TriageState {
         val first = RuleInterpreter.interpret(text, null)
         val medicalByWords = first.hazards.any { it in medicalHazards }
@@ -178,6 +186,7 @@ object TriageEngine {
                 medical = Category.MEDICAL in categories || medicalByWords,
                 rescue = Category.RESCUE in categories || first.hazards.any { it in rescueHazards },
                 subjects = subjects, peopleHint = peopleHint, disasters = disasters.types, aging = disasters.aging,
+                map = map?.takeUnless { it.isEmpty },
             ),
             first,
         )
@@ -245,6 +254,7 @@ object TriageEngine {
             medical = s.medical || hazards.any { it in medicalHazards },
             rescue = s.rescue || hazards.any { it in rescueHazards } || choices[Choice.LOCATION] == "rubble",
             people = heard.people ?: s.people, landmark = heard.landmark?.takeIf { it.isNotBlank() } ?: s.landmark,
+            placeView = heard.advice ?: s.placeView,
         )
     }
 
@@ -301,7 +311,7 @@ object TriageEngine {
 
         return TriageResult(
             categories = categories, urgency = urgency, vuln = vuln, people = s.people, landmark = s.landmark,
-            answers = answers, summary = summary(s), advisories = advisories(s), facts = f, choices = s.choices, hazards = h,
+            answers = answers, summary = summary(s), advisories = advisories(s), places = places(s), facts = f, choices = s.choices, hazards = h,
             subjects = s.subjects,
         )
     }
@@ -354,6 +364,17 @@ object TriageEngine {
             sb.setLength(0); sb.append(next)
         }
         return sb.toString()
+    }
+
+    private fun places(s: TriageState): List<PlaceLine> {
+        val map = s.map ?: return emptyList()
+        return PlaceAdvisor.choose(PlaceAdvisor.allowed(s), s.placeView).mapNotNull { a ->
+            when (a) {
+                PlaceAdvice.GO_SHELTER -> map.shelter
+                PlaceAdvice.HOSPITAL -> map.hospital
+                PlaceAdvice.AWAY_FROM_WATER -> map.water
+            }?.let { PlaceLine(a, it) }
+        }
     }
 
     private fun advisories(s: TriageState): List<TriageBank.Advisory> {

@@ -191,6 +191,7 @@ class AskStrings(private val lang: Lang) {
         "Nakakamatay ini. Ipadadara ini sugad nga dagmitan.",
     ) // needs native review
     val triageAdviceTitle get() = tr(lang, "What to do now", "अभी क्या करें", "ବର୍ତ୍ତମାନ କ'ଣ କରିବେ", "Ano ang gagawin ngayon", "Ano an buhaton yana") // needs native review
+    val triageNearbyTitle get() = tr(lang, "Nearby, from the offline map", "आस-पास, ऑफ़लाइन नक्शे से", "ପାଖରେ, ଅଫଲାଇନ ମ୍ୟାପରୁ", "Malapit, mula sa offline na mapa", "Harani, tikang ha offline nga mapa") // needs native review
     val triageReview get() = tr(lang, "Review and send", "जाँचें और भेजें", "ଯାଞ୍ଚ କରି ପଠାନ୍ତୁ", "Suriin at ipadala", "Usisaa ngan ipadara") // needs native review
     val triageModelReady get() = tr(lang, "Assistant on", "सहायक चालू", "ସହାୟକ ଚାଲୁ", "Naka-on ang katulong", "Nakabukas an katabang") // needs native review
     val triageModelLoading get() = tr(lang, "Assistant starting…", "सहायक शुरू हो रहा है…", "ସହାୟକ ଆରମ୍ଭ ହେଉଛି…", "Sinisimulan ang katulong…", "Gin-uumpisahan an katabang…") // needs native review

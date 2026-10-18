@@ -409,4 +409,53 @@ object TriageBank {
         "आपका अनुरोध पास के फ़ोनों के ज़रिए कंट्रोल रूम को भेजा जा रहा है। इसमें समय लग सकता है। सुरक्षित हो तो वहीं रहें, और फ़ोन चालू रखें।",
         "ଆପଣଙ୍କ ଅନୁରୋଧ ପାଖ ଫୋନ ମାଧ୍ୟମରେ କଣ୍ଟ୍ରୋଲ ରୁମକୁ ପଠାଯାଉଛି। ଏଥିରେ ସମୟ ଲାଗିପାରେ। ସୁରକ୍ଷିତ ଥିଲେ ସେଇଠି ରୁହନ୍ତୁ, ଫୋନ ଚାଲୁ ରଖନ୍ତୁ।",
         "Ipinapadala ang inyong kahilingan sa control room sa pamamagitan ng mga kalapit na telepono. Maaaring magtagal ito. Manatili kung ligtas, at panatilihing bukas ang telepono."), lang)
+
+    // ---------------------------------------------------------------- places from the offline map
+
+    // {place}, {dist} and {dir} are filled by code from the map pack and the phone's position, never by a model.
+    private val placeTemplate: Map<PlaceAdvice, Map<Lang, String>> = mapOf(
+        PlaceAdvice.GO_SHELTER to t(
+            "Nearest shelter on the map: {place}, about {dist} to the {dir}. Go there only if you can move safely and the wind and water allow; otherwise stay where you are and wait for rescuers.",
+            "नक्शे पर सबसे नज़दीकी आश्रय: {place}, लगभग {dist} {dir} की ओर। वहाँ तभी जाएँ जब आप सुरक्षित चल सकें और हवा और पानी इजाज़त दें; नहीं तो जहाँ हैं वहीं रहें और बचाव दल का इंतज़ार करें।",
+            "ମ୍ୟାପରେ ସବୁଠାରୁ ନିକଟ ଆଶ୍ରୟସ୍ଥଳ: {place}, ପ୍ରାୟ {dist} {dir} ଦିଗରେ। ସୁରକ୍ଷିତ ଭାବେ ଯାଇପାରିଲେ ଏବଂ ପବନ ଓ ପାଣି ଅନୁମତି ଦେଲେ ହିଁ ସେଠାକୁ ଯାଆନ୍ତୁ; ନଚେତ୍ ଯେଉଁଠି ଅଛନ୍ତି ସେଠାରେ ରହି ଉଦ୍ଧାରକାରୀଙ୍କୁ ଅପେକ୍ଷା କରନ୍ତୁ।",
+            "Pinakamalapit na silungan sa mapa: {place}, mga {dist} sa {dir}. Pumunta lamang doon kung ligtas kayong makakakilos at pinapayagan ng hangin at tubig; kung hindi, manatili kung nasaan kayo at hintayin ang mga tagasagip."),
+        PlaceAdvice.HOSPITAL to t(
+            "Nearest hospital on the map: {place}, about {dist} to the {dir}. Tell the rescuers. Take the person there yourself only if they can be moved and the way is safe.",
+            "नक्शे पर सबसे नज़दीकी अस्पताल: {place}, लगभग {dist} {dir} की ओर। बचाव दल को बताएँ। मरीज़ को खुद तभी ले जाएँ जब उन्हें हिलाया जा सके और रास्ता सुरक्षित हो।",
+            "ମ୍ୟାପରେ ସବୁଠାରୁ ନିକଟ ହସ୍ପିଟାଲ: {place}, ପ୍ରାୟ {dist} {dir} ଦିଗରେ। ଉଦ୍ଧାରକାରୀଙ୍କୁ କୁହନ୍ତୁ। ରୋଗୀଙ୍କୁ ହଲାଇ ହେଲେ ଏବଂ ରାସ୍ତା ସୁରକ୍ଷିତ ଥିଲେ ହିଁ ନିଜେ ନେଇଯାଆନ୍ତୁ।",
+            "Pinakamalapit na ospital sa mapa: {place}, mga {dist} sa {dir}. Sabihin sa mga tagasagip. Dalhin lamang ninyo mismo ang tao kung maaari siyang ilipat at ligtas ang daan."),
+        PlaceAdvice.AWAY_FROM_WATER to t(
+            "{place} is about {dist} to the {dir}. Move away from it, to higher ground. Do not walk along the bank or through moving water.",
+            "{place} लगभग {dist} {dir} की ओर है। उससे दूर, ऊँची जगह पर जाएँ। किनारे के साथ या बहते पानी में से न चलें।",
+            "{place} ପ୍ରାୟ {dist} {dir} ଦିଗରେ ଅଛି। ସେଠାରୁ ଦୂରକୁ, ଉଚ୍ଚ ସ୍ଥାନକୁ ଯାଆନ୍ତୁ। କୂଳେ କୂଳେ କିମ୍ବା ବୋହୁଥିବା ପାଣି ଦେଇ ଚାଲନ୍ତୁ ନାହିଁ।",
+            "Ang {place} ay mga {dist} sa {dir}. Lumayo rito, pumunta sa mataas na lugar. Huwag maglakad sa pampang o sa umaagos na tubig."),
+    )
+
+    private val compassLabel: Map<Compass, Map<Lang, String>> = mapOf(
+        Compass.N to t("north", "उत्तर", "ଉତ୍ତର", "hilaga"),
+        Compass.NE to t("north-east", "उत्तर-पूर्व", "ଉତ୍ତର-ପୂର୍ବ", "hilagang-silangan"),
+        Compass.E to t("east", "पूर्व", "ପୂର୍ବ", "silangan"),
+        Compass.SE to t("south-east", "दक्षिण-पूर्व", "ଦକ୍ଷିଣ-ପୂର୍ବ", "timog-silangan"),
+        Compass.S to t("south", "दक्षिण", "ଦକ୍ଷିଣ", "timog"),
+        Compass.SW to t("south-west", "दक्षिण-पश्चिम", "ଦକ୍ଷିଣ-ପଶ୍ଚିମ", "timog-kanluran"),
+        Compass.W to t("west", "पश्चिम", "ପଶ୍ଚିମ", "kanluran"),
+        Compass.NW to t("north-west", "उत्तर-पश्चिम", "ଉତ୍ତର-ପଶ୍ଚିମ", "hilagang-kanluran"),
+    )
+    private val metres = t("{n} metres", "{n} मीटर", "{n} ମିଟର", "{n} metro")
+    private val kilometres = t("{n} kilometres", "{n} किलोमीटर", "{n} କିଲୋମିଟର", "{n} kilometro")
+
+    /** "1.5 kilometres", "300 मीटर": units as words, so a voice reads them right. */
+    fun distanceText(m: Int, lang: Lang): String {
+        val km = MapContext.spokenDistance(m)
+        if (m == 1000 && lang == Lang.EN) return "1 kilometre"
+        return if (m < 1000) pick(metres, lang).replace("{n}", m.toString())
+        else pick(kilometres, lang).replace("{n}", km.removeSuffix(" km"))
+    }
+
+    /** The advice naming [ref]'s place, in [lang]. Place names come from the map pack, in the reader's script when it has one. */
+    fun placeText(advice: PlaceAdvice, ref: PlaceRef, lang: Lang): String =
+        pick(placeTemplate.getValue(advice), lang)
+            .replace("{place}", ref.place.nameIn(lang))
+            .replace("{dist}", distanceText(ref.distanceM, lang))
+            .replace("{dir}", pick(compassLabel.getValue(ref.bearing), lang))
 }

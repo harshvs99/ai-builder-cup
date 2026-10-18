@@ -16,6 +16,7 @@ import org.relay.core.triage.Ask
 import org.relay.core.triage.DisasterGate
 import org.relay.core.triage.FactKey
 import org.relay.core.triage.Interpretation
+import org.relay.core.triage.MapContext
 import org.relay.core.triage.Planner
 import org.relay.core.triage.RuleInterpreter
 import org.relay.core.triage.Tri
@@ -79,7 +80,7 @@ class TriageViewModel : ViewModel() {
      */
     fun begin(
         text: String, categories: Collection<Category>, lang: Lang, brain: TriageBrain?,
-        peopleHint: Int = 1, disasters: DisasterGate.Active = DisasterGate.Active.NONE,
+        peopleHint: Int = 1, disasters: DisasterGate.Active = DisasterGate.Active.NONE, map: MapContext? = null,
     ) {
         if (startedWith == text && _ui.value.phase != TriagePhase.IDLE) return
         job?.cancel()
@@ -89,7 +90,7 @@ class TriageViewModel : ViewModel() {
         this.brain = brain
         unclearCount = 0
         lastHeard = null
-        val s0 = TriageEngine.start(text, categories, lang, peopleHint, disasters)
+        val s0 = TriageEngine.start(text, categories, lang, peopleHint, disasters, map)
         engine = s0
         _ui.value = TriageUi(
             lines = if (text.isBlank()) emptyList() else listOf(ChatLine(true, text)),

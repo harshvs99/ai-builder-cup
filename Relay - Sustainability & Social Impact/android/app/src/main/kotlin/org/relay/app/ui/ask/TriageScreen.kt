@@ -45,6 +45,8 @@ import org.relay.app.VoiceState
 import org.relay.app.gemma.GemmaRunner
 import org.relay.app.gemma.GemmaTriageBrain
 import org.relay.app.gemma.TriageBrain
+import org.relay.app.location.LocationProvider
+import org.relay.app.location.MapPack
 import org.relay.app.rememberPermissions
 import org.relay.app.ui.RelayNav
 import org.relay.app.ui.components.PillButton
@@ -52,6 +54,7 @@ import org.relay.app.ui.components.SectionCard
 import org.relay.app.ui.components.SpeakButton
 import org.relay.app.ui.components.StepTopAppBar
 import org.relay.app.ui.i18n.LocalStrings
+import org.relay.core.payload.Geo
 import org.relay.core.payload.Lang
 import org.relay.core.triage.Tri
 import org.relay.core.triage.TriageBank
@@ -90,7 +93,16 @@ fun TriageScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
         perms.ensureMicrophone { ok -> if (ok && phase == TriagePhase.ASKING) voice.start(lang) else if (!ok) voice.fail("microphone permission denied") }
     }
 
-    LaunchedEffect(Unit) { vm.begin(ask.transcript, ask.draft.categories, lang, brain, ask.draft.people, store.active()) }
+    LaunchedEffect(Unit) {
+        // Where the person is (the fix New request took, if any): which area-limited declarations apply, and what the
+        // offline map shows around them. No fix = every declaration counts and there is no map advice.
+        val fix = LocationProvider.fix.value
+        val here = fix?.let { Geo.toE5(it.lat) to Geo.toE5(it.lon) }
+        vm.begin(
+            ask.transcript, ask.draft.categories, lang, brain, ask.draft.people, store.active(here = here),
+            map = MapPack.around(ctx, fix),
+        )
+    }
 
     // Say the question (or the advice), then listen. No voice for this language: listen at once, the text is on screen.
     LaunchedEffect(ui.phase, ui.ask?.id, ui.unclear) {
@@ -127,7 +139,11 @@ fun TriageScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
 
 /** Titles and steps in order, then the note about what happens to the request. */
 internal fun adviceLines(r: TriageResult, lang: Lang): List<String> =
-    r.advisories.take(3).flatMap { a -> listOf(a.title(lang)) + a.lines(lang) } + TriageBank.sentNote(lang)
+    r.advisories.take(3).flatMap { a -> listOf(a.title(lang)) + a.lines(lang) } + r.places.take(MAX_PLACES).map { it.text(lang) } +
+        TriageBank.sentNote(lang)
+
+/** Place advice after the first aid: two at most, so the steps that keep someone alive are not buried. */
+internal const val MAX_PLACES = 2
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -235,12 +251,17 @@ private fun Result(s: org.relay.app.ui.i18n.Strings, r: TriageResult, onHear: ()
             }
         }
     }
-    if (r.advisories.isNotEmpty()) {
+    if (r.advisories.isNotEmpty() || r.places.isNotEmpty()) {
         Text(s.ask.triageAdviceTitle, style = MaterialTheme.typography.titleLarge)
         SpeakButton(s.ask.hearItAgain, onHear)
         r.advisories.take(3).forEach { adv ->
             SectionCard(title = adv.title(lang)) {
                 adv.lines(lang).forEachIndexed { i, line -> Text("${i + 1}. $line", style = MaterialTheme.typography.bodyLarge) }
+            }
+        }
+        if (r.places.isNotEmpty()) {
+            SectionCard(title = s.ask.triageNearbyTitle) {
+                r.places.take(MAX_PLACES).forEach { p -> Text(p.text(lang), style = MaterialTheme.typography.bodyLarge) }
             }
         }
     }

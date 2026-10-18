@@ -12,6 +12,8 @@ import org.relay.core.triage.FactKey
 import org.relay.core.triage.Hazard
 import org.relay.core.triage.Interpretation
 import org.relay.core.triage.Options
+import org.relay.core.triage.PlaceAdvice
+import org.relay.core.triage.PlaceAdvisor
 import org.relay.core.triage.Planner
 import org.relay.core.triage.Relation
 import org.relay.core.triage.Tri
@@ -34,10 +36,11 @@ interface TriageBrain {
 object TriagePrompt {
     /** The decision architecture, as the model sees it. Kept short: a phone-sized model follows a few firm rules, not an essay. */
     val SYSTEM = """
-You are the reading-and-planning brain of an offline emergency triage helper on a phone. A person in a disaster is being asked short questions by voice. You do NOT write questions and you do NOT give advice: fixed texts do that. You do two things and output ONLY one JSON object (no prose, no markdown):
+You are the reading-and-planning brain of an offline emergency triage helper on a phone. A person in a disaster is being asked short questions by voice. You do NOT write questions and you do NOT give advice: fixed texts do that. You do three things and output ONLY one JSON object (no prose, no markdown):
 
 1. READ what the person just said, in any language or code-mix.
 2. CHOOSE which question from the MENU to ask next, or say you are done.
+3. CHOOSE which place advice from the ADVICE MENU fits this person, most useful first.
 
 Output schema (omit a key when unsupported by the words):
 {"answer":"<yes|no|unknown, or an option key when the question was a choice>",
@@ -48,7 +51,8 @@ Output schema (omit a key when unsupported by the words):
  "people":<headcount who need rescue or help, or 0>,
  "landmark":"<bare English place noun or empty>",
  "next":"<an id from the MENU, or empty>",
- "done":<true when nothing on the MENU would change what rescuers do>}
+ "done":<true when nothing on the MENU would change what rescuers do>,
+ "advice":[ids from the ADVICE MENU, most useful first; leave out any that does not fit]}
 
 Reading rules:
 - A fact id is the name from the MENU, with @N for a person (conscious@2 = the second person). Put a fact only when the words support it, even if it was not the question asked ("he is not breathing" -> breathing@1 no).
@@ -63,13 +67,19 @@ Planning rules (how to choose "next"):
 4. Skip a question the person has already answered in passing. Prefer the question whose answer would change what rescuers do.
 5. Ask disaster-specific questions only if they are on the MENU: they are there only because the control room declared that disaster. Without a declaration, never bring up floods, quakes, storms or landslides yourself.
 6. If the person sounds confused or says they cannot talk, set done to true.
+7. MAP is what the phone's offline map shows around the person. Use it to judge what matters: close to a river in a declared flood, ask about the water early. Never name a place yourself.
+
+Advice rules (how to choose "advice"):
+- Only ids on the ADVICE MENU. Its items are already safe for this person to hear; you choose which ones fit and the order.
+- Leave one out when the person's words make it pointless or wrong: they are already at the shelter, they already left the river bank, they say they cannot leave the house, the injured person is being carried to the hospital.
+- Put first the one that changes what they do in the next minutes. With an empty ADVICE MENU output "advice":[].
 
 Example:
 CASE: patients: 1 your mother; 2 your son. Known: none. Disaster: none declared.
 MENU: conscious@1 [MUST] Is your mother awake and answering you? | conscious@2 [MUST] Is your son awake and answering you? | location Where exactly are you?
 Question asked: (first description)
 Person said: "my mother fell and is not moving, my son is fine but crying, we are on the roof"
-Output: {"facts":{"conscious@1":"no"},"choices":{"location":"roof"},"hazards":["UNCONSCIOUS"],"patients":["MOTHER"],"people":2,"landmark":"","next":"breathing@1","done":false}
+Output: {"facts":{"conscious@1":"no"},"choices":{"location":"roof"},"hazards":["UNCONSCIOUS"],"patients":["MOTHER"],"people":2,"landmark":"","next":"breathing@1","done":false,"advice":[]}
 """.trim()
 
     /** The per-turn message: the case so far, the allowed questions, what was asked, what was said. */
@@ -89,12 +99,20 @@ Output: {"facts":{"conscious@1":"no"},"choices":{"location":"roof"},"hazards":["
             val opts = m.ask.choice?.let { c -> " options: " + Planner.options(c, state).joinToString("/") } ?: ""
             "${m.ask.id}${if (m.mandatory) " [MUST]" else ""} $q$opts"
         }.ifEmpty { "(empty: you are done)" }
+        val map = state.map?.promptLine() ?: "no offline map or no position"
+        val advice = PlaceAdvisor.allowed(state).joinToString(" | ") { a ->
+            "${a.key}: " + when (a) {
+                PlaceAdvice.GO_SHELTER -> "tell them where the nearest shelter is, to go if they can move safely"
+                PlaceAdvice.HOSPITAL -> "tell them where the nearest hospital is"
+                PlaceAdvice.AWAY_FROM_WATER -> "tell them to move away from the nearby river or sea, to higher ground"
+            }
+        }.ifEmpty { "(empty)" }
         val q = asked?.let { a ->
             val opts = a.choice?.let { c -> " (options: " + Planner.options(c, state).joinToString(", ") + ")" } ?: ""
             "Question asked: \"${Planner.text(a, state, Lang.EN)}\" (${a.id})$opts"
         } ?: "Question asked: (first description)"
         return "CASE: patients: $patients. Known: $known. Disaster: $disaster. Questions asked so far: ${state.asked.size}.\n" +
-            "MENU: $menu\n$q\nPerson said (language hint: $langHint): \"${utterance.replace('"', '\'')}\"\nOutput:"
+            "MAP: $map\nMENU: $menu\nADVICE MENU: $advice\n$q\nPerson said (language hint: $langHint): \"${utterance.replace('"', '\'')}\"\nOutput:"
     }
 
     /** Parses the reply; null when there is no usable JSON. Unknown keys, ids or option keys are ignored, never trusted. */
@@ -129,8 +147,11 @@ Output: {"facts":{"conscious@1":"no"},"choices":{"location":"roof"},"hazards":["
         val landmark = Utf8.truncate(o.optString("landmark", "").trim(), 24).takeIf { it.isNotBlank() }
         val next = o.optString("next", "").trim().takeIf { it.isNotEmpty() && Ask.parse(it) != null }
         val done = o.optBoolean("done", false)
-        if (facts.isEmpty() && choices.isEmpty() && hazards.isEmpty() && patients.isEmpty() && people == null && landmark == null && next == null && !done) return null
-        return Interpretation(facts, hazards, people, landmark, choices, patients, next, done)
+        // Absent = no view (keep the last one); present, even empty, = the model's current pick. Unknown ids are dropped later.
+        val advice = o.optJSONArray("advice")?.let { a -> (0 until a.length()).map { a.optString(it, "").trim().lowercase() }.filter { it.isNotEmpty() } }
+        if (facts.isEmpty() && choices.isEmpty() && hazards.isEmpty() && patients.isEmpty() && people == null && landmark == null &&
+            next == null && !done && advice == null) return null
+        return Interpretation(facts, hazards, people, landmark, choices, patients, next, done, advice)
     }
 }
 

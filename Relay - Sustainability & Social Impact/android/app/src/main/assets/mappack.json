@@ -1,0 +1,126 @@
+{
+ "version": 1,
+ "source": "backend/app/data/gazetteer_puri.json",
+ "places": [
+  {
+   "name": "swargadwar",
+   "kind": "water",
+   "lat_e5": 1979450,
+   "lon_e5": 8582400,
+   "names": {
+    "hi": "स्वर्गद्वार",
+    "or": "ସ୍ୱର୍ଗଦ୍ୱାର"
+   }
+  },
+  {
+   "name": "district headquarters hospital puri",
+   "kind": "hospital",
+   "lat_e5": 1981200,
+   "lon_e5": 8582800,
+   "names": {
+    "hi": "पुरी जिला अस्पताल",
+    "or": "ପୁରୀ ଜିଲ୍ଲା ମୁଖ୍ୟ ଚିକିତ୍ସାଳୟ"
+   }
+  },
+  {
+   "name": "penthakata cyclone shelter",
+   "kind": "shelter",
+   "lat_e5": 1978400,
+   "lon_e5": 8584600,
+   "names": {
+    "hi": "पेंठाकाटा चक्रवात आश्रय",
+    "or": "ପେଣ୍ଠକଟା ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+   }
+  },
+  {
+   "name": "balighai cyclone shelter",
+   "kind": "shelter",
+   "lat_e5": 1974300,
+   "lon_e5": 8592000,
+   "names": {
+    "hi": "बालीघाई",
+    "or": "ବାଲିଘାଇ ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+   }
+  },
+  {
+   "name": "daya river embankment",
+   "kind": "water",
+   "lat_e5": 1993500,
+   "lon_e5": 8586000,
+   "names": {
+    "hi": "दया नदी तटबंध",
+    "or": "ଦୟା ନଦୀ ବନ୍ଧ"
+   }
+  },
+  {
+   "name": "bhargavi river embankment",
+   "kind": "water",
+   "lat_e5": 2010000,
+   "lon_e5": 8586500,
+   "names": {
+    "hi": "भार्गवी नदी तटबंध",
+    "or": "ଭାର୍ଗବୀ ନଦୀ ବନ୍ଧ"
+   }
+  },
+  {
+   "name": "prachi river embankment",
+   "kind": "water",
+   "lat_e5": 2002000,
+   "lon_e5": 8603000,
+   "names": {
+    "hi": "प्राची नदी तटबंध",
+    "or": "ପ୍ରାଚୀ ନଦୀ ବନ୍ଧ"
+   }
+  },
+  {
+   "name": "nimapara cyclone shelter",
+   "kind": "shelter",
+   "lat_e5": 2004500,
+   "lon_e5": 8601500,
+   "names": {
+    "hi": "निमापाड़ा चक्रवात आश्रय",
+    "or": "ନିମାପଡ଼ା ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+   }
+  },
+  {
+   "name": "gop cyclone shelter",
+   "kind": "shelter",
+   "lat_e5": 2009000,
+   "lon_e5": 8611000,
+   "names": {
+    "hi": "गोप चक्रवात आश्रय",
+    "or": "ଗୋପ ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+   }
+  },
+  {
+   "name": "devi river embankment",
+   "kind": "water",
+   "lat_e5": 2006000,
+   "lon_e5": 8613000,
+   "names": {
+    "hi": "देवी नदी तटबंध",
+    "or": "ଦେବୀ ନଦୀ ବନ୍ଧ"
+   }
+  },
+  {
+   "name": "brahmagiri cyclone shelter",
+   "kind": "shelter",
+   "lat_e5": 1993000,
+   "lon_e5": 8576000,
+   "names": {
+    "hi": "ब्रह्मगिरि चक्रवात आश्रय",
+    "or": "ବ୍ରହ୍ମଗିରି ବାତ୍ୟା ଆଶ୍ରୟସ୍ଥଳ"
+   }
+  },
+  {
+   "name": "kushabhadra river embankment",
+   "kind": "water",
+   "lat_e5": 1988000,
+   "lon_e5": 8603000,
+   "names": {
+    "hi": "कुशभद्रा तटबंध",
+    "or": "କୁଶଭଦ୍ରା ନଦୀ ବନ୍ଧ"
+   }
+  }
+ ]
+}
