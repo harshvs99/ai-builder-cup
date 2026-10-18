@@ -51,8 +51,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_TRIAGE_BUDGET_S` | `50` | wall-clock cap for one push delivery (phase 1 + Gemini); over budget returns 503 and Pub/Sub redelivers |
 | `GEMINI_API_KEY` | unset | enables Gemini with a Google AI Studio key; this is the production path (Cloud Run gets it from Secret Manager). Use a **paid-tier** key: free-tier prompts may be used to improve Google products, not acceptable for disaster victims' data. Unset (and no Vertex) = deterministic agent |
 | `GOOGLE_GENAI_USE_VERTEXAI` | unset | optional alternative: `true` uses Gemini on Vertex AI via ADC (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, default `global`); wins over `GEMINI_API_KEY` if both are set. Not used by the Terraform deploy |
-| `RELAY_GEOCODER` | unset | `gemini_maps` opts in to Maps-grounded landmark geocoding (works with `GEMINI_API_KEY` or Vertex; `GEMINI_GEOCODE_MODEL` overrides the model). **Check the terms first:** Google's Maps-grounding terms reportedly exclude "emergency response use cases"; the owner must read the current Gemini API and Google Maps Platform terms before enabling it in a pilot. The built-in gazetteer stays the default |
-| `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
+| `RELAY_GEOCODER` | unset | `gemini_maps` opts in to Maps-grounded landmark geocoding (works with `GEMINI_API_KEY` or Vertex; `GEMINI_GEOCODE_MODEL` overrides the model). **Do not enable for real use:** Google's Maps-grounding docs bar "high risk activities including emergency response services", on the Gemini API and Vertex AI alike. The built-in gazetteer stays the default |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
 | `BROADCAST_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates broadcasts into the five app languages and, in a separate call, checks each translation against the source |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |

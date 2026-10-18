@@ -72,7 +72,7 @@ The backend must implement exactly this. Terraform provides it; nothing here is 
 | `RELAY_PUBSUB_INVOKER_SA` | `relay-push@<project>.iam.gserviceaccount.com` | expected `email` claim |
 | `GEMINI_API_KEY` | AI Studio key (Secret Manager `gemini-api-key`) | the enable switch for the Gemini agent in prod; `GOOGLE_GENAI_USE_VERTEXAI` is not set |
 | `GOOGLE_CLOUD_PROJECT` | project id | used by the Firestore client |
-| `GEMINI_MODEL` | `gemini-flash-latest` (default) | |
+| `GEMINI_MODEL` | `gemini-3.8-flash` (default) | |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` (default, `sitrep_gemini_model`) | hourly per-district sitrep; Flash fallback |
 
 Firestore and Pub/Sub use Application Default Credentials from the `relay-run` service account (metadata server); no key files. The Gemini key is the one secret you supply.

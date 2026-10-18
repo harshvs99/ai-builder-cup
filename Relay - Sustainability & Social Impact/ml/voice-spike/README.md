@@ -94,7 +94,7 @@ Needs `pip install google-genai` and `GEMINI_API_KEY` (or `GOOGLE_GENAI_USE_VERT
 ```bash
 python3 -I eval/judge.py eval/work/guided_run1/results.jsonl --dry-run                  # print the first prompt, no model call
 python3 -I eval/judge.py eval/work/guided_run1/results.jsonl --out eval/work/judged.jsonl
-python3 -I eval/judge.py results.jsonl --systems gemma_audio,gemma270_text,rules --limit 20 --model gemini-flash-latest
+python3 -I eval/judge.py results.jsonl --systems gemma_audio,gemma270_text,rules --limit 20 --model gemini-3.8-flash
 python3 -I eval/test_judge.py                                                           # tests with a fake judge, no network
 ```
 - **What it measures.** For each extraction the judge sees only the source utterance (the reference transcript, else the

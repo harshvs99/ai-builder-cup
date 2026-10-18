@@ -20,7 +20,7 @@ from .agent import GenaiClient
 
 log = logging.getLogger("relay.textgen")
 
-DEFAULT_MODEL = "gemini-flash-latest"
+DEFAULT_MODEL = "gemini-3.8-flash"
 # The sitrep is the one long, once-an-hour document: worth a Pro-tier model. A Google-maintained
 # alias, so a retired Pro version never strands the deploy; Flash is the fallback (see sitrep_textgen_from_env).
 SITREP_DEFAULT_MODEL = "gemini-pro-latest"

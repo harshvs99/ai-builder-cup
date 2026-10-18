@@ -18,7 +18,7 @@ variable "gemini_api_key" {
 variable "gemini_model" {
   description = "Gemini model name passed to the backend as GEMINI_MODEL."
   type        = string
-  default     = "gemini-flash-latest"
+  default     = "gemini-3.8-flash"
 }
 
 variable "sitrep_gemini_model" {

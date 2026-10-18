@@ -12,9 +12,10 @@ look. Two sources, in order:
      ``PlaceFinder`` with a hard timeout. Off unless ``RELAY_GEOCODER=gemini_maps`` and a model
      credential is configured. Its answer is rejected unless it is inside the district bounding box.
 
-     LEGAL CHECK BEFORE ENABLING: Google's terms for Maps grounding reportedly exclude
-     "emergency response use cases". The owner must read the current Gemini API and Google Maps
-     Platform terms before turning this on in a pilot. The gazetteer path stays the default.
+     DO NOT ENABLE FOR RELAY'S REAL USE: Google's Maps-grounding docs (Gemini API and Firebase AI
+     Logic, which covers both the Gemini Developer API and Vertex AI providers) say it must not be
+     used "for high risk activities including emergency response services". Moving to Vertex AI
+     does not lift this. Kept only for experiments; the gazetteer path stays the default.
 
 The result is stored as ``geo = {lat, lon, source, query}``. It is an estimate and nothing
 else reads it as a fix:
@@ -353,7 +354,7 @@ def geocoder_from_env(env: dict[str, str] | None = None) -> Geocoder:
     """Off by default. On when ``RELAY_GEOCODER=gemini_maps`` and a model credential is configured:
     Vertex AI if ``GOOGLE_GENAI_USE_VERTEXAI`` is true (project/location from ``GOOGLE_CLOUD_PROJECT`` /
     ``GOOGLE_CLOUD_LOCATION``), else ``GEMINI_API_KEY``. Maps grounding is billed, and its terms
-    reportedly exclude emergency-response use (see the module docstring), hence the explicit switch."""
+    exclude emergency-response use (see the module docstring), hence the explicit switch."""
     env = os.environ if env is None else env
     if (env.get("RELAY_GEOCODER") or "").strip().lower() != "gemini_maps":
         return NoGeocoder()
@@ -364,7 +365,7 @@ def geocoder_from_env(env: dict[str, str] | None = None) -> Geocoder:
         return NoGeocoder()
     try:
         finder = GenaiMapsFinder(
-            env.get("GEMINI_GEOCODE_MODEL") or env.get("GEMINI_MODEL") or "gemini-flash-latest",
+            env.get("GEMINI_GEOCODE_MODEL") or env.get("GEMINI_MODEL") or "gemini-3.8-flash",
             env.get("GOOGLE_CLOUD_PROJECT") or None,
             env.get("GOOGLE_CLOUD_LOCATION") or "global",
             timeout_s=6.0,

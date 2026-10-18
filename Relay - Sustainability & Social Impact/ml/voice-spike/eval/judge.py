@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gemini-as-judge for the voice spike's extractions (any language, no gold labels needed).
 
-usage: python3 -I eval/judge.py results.jsonl [--prompts eval/guided_prompts.json] [--model gemini-flash-latest]
+usage: python3 -I eval/judge.py results.jsonl [--prompts eval/guided_prompts.json] [--model gemini-3.8-flash]
                                 [--out judged.jsonl] [--systems gemma_audio,gemma270_text,rules] [--limit N] [--dry-run]
 
 For every extraction record (system in --systems, default: every system present) Gemini sees the SOURCE utterance (the
@@ -252,7 +252,7 @@ def save_cache(path, cache):
 
 def run(argv, judge=None):
     """CLI body. `judge` (prompt -> dict|str) is injectable; default builds the Gemini client."""
-    a = {"--prompts": os.path.join(_here, "guided_prompts.json"), "--model": "gemini-flash-latest", "--out": "judged.jsonl",
+    a = {"--prompts": os.path.join(_here, "guided_prompts.json"), "--model": "gemini-3.8-flash", "--out": "judged.jsonl",
          "--systems": "", "--limit": "0"}
     pos, i = [], 0
     while i < len(argv):

@@ -203,7 +203,7 @@ def test_vertex_defaults_location_global_and_model_flash_latest(monkeypatch):
     seen = _capture_genai(monkeypatch)
     agent_from_env({"GOOGLE_GENAI_USE_VERTEXAI": "TRUE", "GOOGLE_CLOUD_PROJECT": "p"})
     (_, kw), = seen
-    assert kw["location"] == "global" and kw["model"] == "gemini-flash-latest"
+    assert kw["location"] == "global" and kw["model"] == "gemini-3.8-flash"
 
 
 def test_vertex_wins_over_api_key_and_false_switch_is_off(monkeypatch):

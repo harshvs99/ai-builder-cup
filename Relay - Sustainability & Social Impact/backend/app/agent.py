@@ -186,7 +186,7 @@ class GenaiClient:
     """
 
     def __init__(
-        self, api_key: str | None = None, model: str = "gemini-flash-latest", timeout_s: float = 8.0, *,
+        self, api_key: str | None = None, model: str = "gemini-3.8-flash", timeout_s: float = 8.0, *,
         vertexai: bool = False, project: str | None = None, location: str | None = None,
     ):
         from google.genai import types
@@ -375,7 +375,7 @@ def agent_from_env(env: dict[str, str] | None = None) -> Agent:
     location from ``GOOGLE_CLOUD_PROJECT`` / ``GOOGLE_CLOUD_LOCATION``) or ``GEMINI_API_KEY``
     is set. Vertex wins if both are present. Otherwise the deterministic agent."""
     env = os.environ if env is None else env
-    model = env.get("GEMINI_MODEL") or "gemini-flash-latest"
+    model = env.get("GEMINI_MODEL") or "gemini-3.8-flash"
     use_vertex = env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1")
     key = env.get("GEMINI_API_KEY")
     try:

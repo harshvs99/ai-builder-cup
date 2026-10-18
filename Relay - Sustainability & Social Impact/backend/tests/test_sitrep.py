@@ -199,7 +199,7 @@ def test_sitrep_uses_pro_and_falls_back_to_flash(monkeypatch):
 
     monkeypatch.setattr(textgen, "SchemaGenaiClient", FakeClient)
     chain = textgen.sitrep_textgen_from_env({"GEMINI_API_KEY": "k"})
-    assert made == ["gemini-pro-latest", "gemini-flash-latest"]
+    assert made == ["gemini-pro-latest", "gemini-3.8-flash"]
     assert chain.generate_json("p", None) == '{"ok": true}'                     # Pro failed, Flash answered
     made.clear()
     one = textgen.sitrep_textgen_from_env({"GEMINI_API_KEY": "k", "SITREP_GEMINI_MODEL": "m", "GEMINI_MODEL": "m"})
