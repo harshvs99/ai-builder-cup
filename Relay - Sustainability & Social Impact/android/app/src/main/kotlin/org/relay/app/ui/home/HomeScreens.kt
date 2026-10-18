@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -66,7 +67,7 @@ import org.relay.app.ui.RelayNav
 import org.relay.app.ui.components.PillButton
 import org.relay.app.ui.components.PillStyle
 import org.relay.app.ui.components.RelayPreview
-import org.relay.app.ui.components.RequestRow
+import org.relay.app.ui.components.SwipeableRequestRow
 import org.relay.app.ui.components.SectionCard
 import org.relay.app.ui.components.SpeakIconButton
 import org.relay.app.ui.components.StatusLabel
@@ -209,6 +210,7 @@ fun HomeScreen(nav: RelayNav) {
         onType = { nav.startAsk(AskMode.TEXT) },
         onSeeAll = { nav.toRequests() },
         onOpenRequest = { nav.openRequest(it) },
+        onDeleteRequest = { MeshRepository.deleteMyNeed(it) },
     )
 }
 
@@ -225,6 +227,7 @@ private fun HomeContent(
     onType: () -> Unit,
     onSeeAll: () -> Unit,
     onOpenRequest: (String) -> Unit,
+    onDeleteRequest: (String) -> Unit,
 ) {
     val s = LocalStrings.current
     val c = s.common
@@ -297,7 +300,7 @@ private fun HomeContent(
             Text(s.home.noRequestsShort, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             Column {
-                recent.forEach { RequestRow(it, now, { onOpenRequest(it.msgIdHex) }) }
+                recent.forEach { n -> key(n.msgIdHex) { SwipeableRequestRow(n, now, { onOpenRequest(n.msgIdHex) }, { onDeleteRequest(n.msgIdHex) }) } }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -323,11 +326,11 @@ private fun HomeContent(
 fun RequestsScreen(nav: RelayNav) {
     val needs by MeshRepository.myNeeds.collectAsStateWithLifecycle()
     val now by rememberNow()
-    RequestsContent(needs, now) { nav.openRequest(it) }
+    RequestsContent(needs, now, { nav.openRequest(it) }, { MeshRepository.deleteMyNeed(it) })
 }
 
 @Composable
-private fun RequestsContent(needs: List<MyNeed>, now: Long, onOpen: (String) -> Unit) {
+private fun RequestsContent(needs: List<MyNeed>, now: Long, onOpen: (String) -> Unit, onDelete: (String) -> Unit) {
     val s = LocalStrings.current
     val (active, closed) = RequestLists.split(needs)
     Column(
@@ -344,21 +347,21 @@ private fun RequestsContent(needs: List<MyNeed>, now: Long, onOpen: (String) -> 
                 modifier = Modifier.padding(top = 16.dp),
             )
         } else {
-            if (active.isNotEmpty()) RequestSection(s.common.statusActive, active, now, onOpen)
-            if (closed.isNotEmpty()) RequestSection(s.common.statusClosed, closed, now, onOpen)
+            if (active.isNotEmpty()) RequestSection(s.common.statusActive, active, now, onOpen, onDelete)
+            if (closed.isNotEmpty()) RequestSection(s.common.statusClosed, closed, now, onOpen, onDelete)
         }
         Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
-private fun RequestSection(title: String, items: List<MyNeed>, now: Long, onOpen: (String) -> Unit) {
+private fun RequestSection(title: String, items: List<MyNeed>, now: Long, onOpen: (String) -> Unit, onDelete: (String) -> Unit) {
     Text(
         title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp).semantics { heading() },
     )
     Column {
-        items.forEach { n -> RequestRow(n, now, { onOpen(n.msgIdHex) }) }
+        items.forEach { n -> key(n.msgIdHex) { SwipeableRequestRow(n, now, { onOpen(n.msgIdHex) }, { onDelete(n.msgIdHex) }) } }
     }
 }
 
@@ -387,7 +390,7 @@ private val demoStatus = VillagerStatus(VillagerStatus.Kind.REACHABLE, VillagerS
 @Composable
 private fun HomeDemo() = HomeContent(
     area = "Ward 4, Puri district", villager = demoStatus, now = System.currentTimeMillis(), recent = demoNeeds.take(2),
-    onStatusClick = {}, onTurnOnBluetooth = {}, onMic = {}, onType = {}, onSeeAll = {}, onOpenRequest = {},
+    onStatusClick = {}, onTurnOnBluetooth = {}, onMic = {}, onType = {}, onSeeAll = {}, onOpenRequest = {}, onDeleteRequest = {},
 )
 
 @Preview(showBackground = true, heightDp = 900)
@@ -400,15 +403,15 @@ private fun HomeDarkPreview() = RelayPreview(dark = true) { HomeDemo() }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun RequestsPreview() = RelayPreview { RequestsContent(demoNeeds, System.currentTimeMillis()) {} }
+private fun RequestsPreview() = RelayPreview { RequestsContent(demoNeeds, System.currentTimeMillis(), {}, {}) }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun RequestsDarkPreview() = RelayPreview(dark = true) { RequestsContent(demoNeeds, System.currentTimeMillis()) {} }
+private fun RequestsDarkPreview() = RelayPreview(dark = true) { RequestsContent(demoNeeds, System.currentTimeMillis(), {}, {}) }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun RequestsEmptyPreview() = RelayPreview { RequestsContent(emptyList(), System.currentTimeMillis()) {} }
+private fun RequestsEmptyPreview() = RelayPreview { RequestsContent(emptyList(), System.currentTimeMillis(), {}, {}) }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable

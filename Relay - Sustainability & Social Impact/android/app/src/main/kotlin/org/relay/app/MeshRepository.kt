@@ -184,6 +184,15 @@ object MeshRepository {
         return true
     }
 
+    /** Removes a request from this phone's list. An open request is cancelled first so it stops being relayed. */
+    fun deleteMyNeed(msgIdHex: String) {
+        val need = myNeedsStore.list().firstOrNull { it.msgIdHex == msgIdHex } ?: return
+        if (!need.isClosed) cancel(msgIdHex)
+        myNeedsStore.remove(msgIdHex)
+        refreshMyNeeds()
+        log("deleted own NEED $msgIdHex from the list")
+    }
+
     /** Stamp "uploaded" on own NEEDs the gateway state now lists as uploaded (this phone was the gateway). */
     fun noteUploads() {
         var changed = false

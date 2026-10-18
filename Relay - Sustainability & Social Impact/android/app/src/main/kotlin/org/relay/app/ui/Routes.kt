@@ -59,7 +59,7 @@ object Routes {
 class RelayNav(val controller: NavHostController, val setup: SetupActions) {
     fun back() { controller.popBackStack() }
 
-    /** Switch bottom tab (keeps each tab's state). */
+    /** Switch bottom tab; lands on the tab's root screen. */
     fun toTab(route: String) = controller.navigateTab(route)
     fun toHome() = toTab(Routes.HOME)
     fun toRequests() = toTab(Routes.REQUESTS)
@@ -87,10 +87,18 @@ class RelayNav(val controller: NavHostController, val setup: SetupActions) {
     fun askFlowOwner(): ViewModelStoreOwner = controller.getBackStackEntry(Routes.ASK_FLOW)
 }
 
+/**
+ * Bottom-tab switch. Always lands on the tab's root screen: the tab you leave is popped (not saved), so coming back
+ * to Requests shows the list rather than the last opened request, and Home is reached directly instead of through
+ * the leftover stack. Home is the root of the back stack, so popping to it is enough.
+ */
 internal fun NavController.navigateTab(route: String) {
+    if (route == Routes.HOME) {
+        if (!popBackStack(Routes.HOME, inclusive = false)) navigate(Routes.HOME) { launchSingleTop = true }
+        return
+    }
     navigate(route) {
-        popUpTo(Routes.HOME) { saveState = true }
+        popUpTo(Routes.HOME) { inclusive = false }
         launchSingleTop = true
-        restoreState = true
     }
 }

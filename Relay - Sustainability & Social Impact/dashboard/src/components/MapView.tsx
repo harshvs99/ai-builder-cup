@@ -17,6 +17,7 @@ import { PULSE_MS } from '../hooks';
 import {
   estimateBounds, estimatedTickets, hasMeshEstimate, isMappable, plottableBounds, toEstimateAreas, toFeatures,
 } from '../lib/location';
+import type { District } from '../lib/districts';
 import { tierOf } from '../lib/sort';
 import { ticketRef } from '../lib/triage';
 
@@ -38,6 +39,8 @@ interface Props {
   ref?: Ref<MapHandle>;
   tickets: Ticket[];
   teams: Team[];
+  /** Where to open and re-frame the map; null shows the fitted extent of all requests. */
+  district: District | null;
   layers: MapLayers;
   theme: Theme;
   fresh: ReadonlyMap<number, number>;
@@ -90,7 +93,7 @@ function teamFeatures(teams: readonly Team[]): GeoJSON.FeatureCollection {
   };
 }
 
-export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, onSelect }: Props) {
+export function MapView({ ref, tickets, teams, district, layers, theme, fresh, selected, onSelect }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const ready = useRef(false);
@@ -104,6 +107,8 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
   const onSelectRef = useRef(onSelect);
   const raf = useRef<number | null>(null);
   const estMarkers = useRef(new Map<number, { marker: Marker; el: HTMLDivElement }>());
+  const districtRef = useRef(district);
+  districtRef.current = district;
   ticketsRef.current = tickets;
   teamsRef.current = teams;
   layersRef.current = layers;
@@ -239,13 +244,27 @@ export function MapView({ ref, tickets, teams, layers, theme, fresh, selected, o
     if (features.length > 0) raf.current = requestAnimationFrame(pulseFrame);
   };
 
+  // Switching district re-frames the map: fit that district's requests, else open on its centre.
+  const firstDistrict = useRef(true);
+  useEffect(() => {
+    if (firstDistrict.current) {
+      firstDistrict.current = false;
+      return; // the map was created on this district
+    }
+    const map = mapRef.current;
+    if (!map) return;
+    if (plottableBounds(ticketsRef.current)) fitAll();
+    else if (district) map.flyTo({ center: district.center, zoom: district.zoom, duration: 600 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [district?.id]);
+
   // Map lifecycle.
   useEffect(() => {
     if (!box.current) return;
     const map = new MapLibreMap({
       container: box.current,
-      center: [85.83, 19.81],
-      zoom: 11,
+      center: districtRef.current?.center ?? [85.83, 19.81],
+      zoom: districtRef.current?.zoom ?? 11,
       attributionControl: { compact: true },
       style: {
         version: 8,
