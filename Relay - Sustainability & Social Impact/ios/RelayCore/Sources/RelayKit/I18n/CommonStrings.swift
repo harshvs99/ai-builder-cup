@@ -24,6 +24,7 @@ public struct CommonStrings: Equatable, Sendable {
     public var done: String { tr(lang, "Done", "हो गया", "ହୋଇଗଲା", "Tapos na", "Human na") } // needs native review
     public var back: String { tr(lang, "Back", "वापस", "ପଛକୁ", "Bumalik", "Balik") } // needs native review
     public var close: String { tr(lang, "Close", "बंद करें", "ବନ୍ଦ କରନ୍ତୁ", "Isara", "Sirhi") } // needs native review
+    public var delete: String { tr(lang, "Delete", "हटाएं", "ବିଲୋପ କରନ୍ତୁ", "Burahin", "Papason") } // needs native review
     public var seeAll: String { tr(lang, "See all", "सभी देखें", "ସବୁ ଦେଖନ୍ତୁ", "Tingnan lahat", "Kitaa ngatanan") } // needs native review
     public var turnOn: String { tr(lang, "Turn on", "चालू करें", "ଚାଲୁ କରନ୍ତୁ", "I-on", "Buksi") } // needs native review
     public var somethingElse: String { tr(lang, "Something else", "कुछ और", "ଅନ୍ୟ କିଛି", "Iba pa", "Iba pa") } // needs native review

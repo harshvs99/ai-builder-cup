@@ -244,6 +244,9 @@ final class AppModel {
     @discardableResult
     func cancel(_ msgIdHex: String) -> Bool { repository.cancel(msgIdHex) }
 
+    /// Removes request [msgIdHex] from the list; a still-open one is cancelled first so it stops being relayed.
+    func deleteMyNeed(_ msgIdHex: String) { repository.deleteMyNeed(msgIdHex) }
+
     /// Ask the mesh to exchange inventories again right now (and kick the gateway sync).
     func resyncNow() { engine.resyncNow() }
 

@@ -59,6 +59,16 @@ final class StateFilesTests: TempDirTestCase {
         XCTAssertTrue(MyNeedsStore(file: f).list().isEmpty)
     }
 
+    func testRemoveDropsTheNeedAndPersists() {
+        let f = file("n.json")
+        let s = MyNeedsStore(file: f)
+        s.add(mine("m1")); s.add(mine("m2"))
+        XCTAssertTrue(s.remove("m1"))
+        XCTAssertFalse(s.remove("m1"))
+        XCTAssertEqual(["m2"], s.list().map { $0.msgIdHex })
+        XCTAssertEqual(["m2"], MyNeedsStore(file: f).list().map { $0.msgIdHex })
+    }
+
     func testAddingTheSameNeedTwiceKeepsOne() {
         let s = MyNeedsStore(file: file("n.json"))
         s.add(mine("m1")); s.add(mine("m1"))

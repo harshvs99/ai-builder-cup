@@ -62,7 +62,7 @@ struct HomeScreen: View {
 
     private func statusCard(_ home: HomeModel) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Button { router.selected = .network } label: {
+            Button { router.select(.network) } label: {
                 HStack(spacing: Theme.Space.m) {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text(home.statusTitle).font(.headline).foregroundStyle(Color.primary)
@@ -107,29 +107,56 @@ struct HomeScreen: View {
             HStack {
                 Text(home.yourRequests).font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
                 Spacer()
-                Button(home.seeAll) { router.selected = .requests }
+                Button(home.seeAll) { router.select(.requests) }
             }
             if home.recent.isEmpty {
                 Text(home.noRequests).font(.subheadline).foregroundStyle(.secondary)
                     .padding(.vertical, Theme.Space.s)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(home.recent.enumerated()), id: \.element.id) { index, row in
-                        if index > 0 { Divider() }
-                        RequestRowButton(row: row)
-                    }
-                }
-                .padding(.horizontal, Theme.Space.l)
-                .relaySurfaceCard()
+                RecentRequestsList(rows: home.recent)
+                    .relaySurfaceCard()
             }
         }
     }
 }
 
-/// A tappable request row that opens Request detail on the current tab's stack.
+/// Home's latest requests. `swipeActions` only works on `List` rows, so this is a non-scrolling `List` sized to its
+/// rows (each row reports its height) inside Home's `ScrollView`, in place of the plain `VStack` used before.
+private struct RecentRequestsList: View {
+    var rows: [RequestRowModel]
+    @State private var heights: [String: CGFloat] = [:]
+
+    var body: some View {
+        List {
+            ForEach(rows) { row in
+                RequestRowButton(row: row)
+                    .background(GeometryReader { Color.clear.preference(key: RowHeightKey.self, value: [row.id: $0.size.height]) })
+                    .listRowInsets(EdgeInsets(top: 0, leading: Theme.Space.l, bottom: 0, trailing: Theme.Space.l))
+                    .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .scrollDisabled(true)
+        .onPreferenceChange(RowHeightKey.self) { heights = $0 }
+        // One point per row for the separator; a first-layout guess keeps the list from collapsing to zero.
+        .frame(height: rows.reduce(CGFloat(0)) { $0 + (heights[$1.id] ?? 72) + 1 })
+    }
+}
+
+private struct RowHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// A tappable request row that opens Request detail on the current tab's stack. Swiping it left reveals a Delete
+/// button (no full-swipe delete: only tapping the button deletes); it must sit in a `List` for the swipe to work.
 struct RequestRowButton: View {
     @Environment(AppModel.self) private var model
     @Environment(TabNavigator.self) private var nav
+    @Environment(\.strings) private var strings
     var row: RequestRowModel
 
     var body: some View {
@@ -138,6 +165,11 @@ struct RequestRowButton: View {
             RequestRowView(row: row, urgency: urgency)
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) { model.deleteMyNeed(row.msgIdHex) } label: {
+                Label(strings.common.delete, systemImage: "trash")
+            }
+        }
     }
 }
 

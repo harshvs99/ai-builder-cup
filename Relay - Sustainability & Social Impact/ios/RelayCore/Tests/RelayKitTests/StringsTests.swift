@@ -130,7 +130,7 @@ final class StringsTests: XCTestCase {
             let c = UI.strings(lang).common
             var all: [String] = [
                 c.navHome, c.navRequests, c.navNetwork, c.navSettings, c.change, c.continueAction, c.send, c.cancel, c.done, c.back,
-                c.close, c.seeAll, c.turnOn, c.somethingElse, c.statusClosed, c.statusCancelled, c.statusActive, c.liveTag,
+                c.close, c.delete, c.seeAll, c.turnOn, c.somethingElse, c.statusClosed, c.statusCancelled, c.statusActive, c.liveTag,
                 c.runningLate, c.people(1), c.people(4), c.phones(2), c.hops(2), c.expectedBy(now),
                 c.ago(now - 10_000, now), c.ago(now - 120_000, now), c.ago(now - 7_200_000, now), c.ago(at(17, 20), now), c.ago(at(10, 1), now),
             ]

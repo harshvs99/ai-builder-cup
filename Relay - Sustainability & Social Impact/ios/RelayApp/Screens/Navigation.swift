@@ -9,6 +9,12 @@ final class TabNavigator {
     @ObservationIgnored private(set) var flow: AskFlowController?
 
     func push(_ route: Route) { path.append(route) }
+
+    /// Back to the tab's root screen, dropping any ask flow in progress.
+    func popToRoot() {
+        path = []
+        flow = nil
+    }
     func pop() { if !path.isEmpty { path.removeLast() } }
 
     /// New request (voice or text), optionally prefilled from an existing request ("+ Add").
@@ -45,6 +51,13 @@ final class TabNavigator {
 final class AppRouter {
     var selected: AppTab = .home
     let navigators: [AppTab: TabNavigator] = Dictionary(uniqueKeysWithValues: AppTab.allCases.map { ($0, TabNavigator()) })
+
+    /// Switches tab and lands on its root screen (Android `navigateTab`): a tab never reopens on the last pushed
+    /// screen, and choosing the tab you are already on pops it to its root.
+    func select(_ tab: AppTab) {
+        navigator(tab).popToRoot()
+        selected = tab
+    }
 
     func navigator(_ tab: AppTab) -> TabNavigator { navigators[tab] ?? TabNavigator() }
 }

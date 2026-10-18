@@ -199,6 +199,30 @@ final class MeshEngineTests: TempDirTestCase {
         engine.stop()
     }
 
+    func testDeleteCancelsAnOpenRequestThenRemovesIt() throws {
+        let repo = makeRepo("a")
+        let engine = MeshEngine(repository: repo, transport: FakeTransport())
+        engine.start()
+        let need = newNeed(for: repo)
+        try repo.submitNeed(need)
+        XCTAssertTrue(repo.packetStore.contains(need.msgIdHex))
+        repo.deleteMyNeed(need.msgIdHex)
+        XCTAssertFalse(repo.packetStore.contains(need.msgIdHex), "an open request stops being relayed")
+        XCTAssertTrue(repo.myNeeds.isEmpty)
+        XCTAssertTrue(repo.myNeedsStore.list().isEmpty)
+        repo.deleteMyNeed("deadbeef")  // unknown id: no-op
+        engine.stop()
+    }
+
+    func testDeleteOfAClosedRequestJustRemovesIt() throws {
+        let repo = makeRepo("a")
+        let need = newNeed(for: repo)
+        try repo.submitNeed(need)
+        XCTAssertTrue(repo.cancel(need.msgIdHex))
+        repo.deleteMyNeed(need.msgIdHex)
+        XCTAssertTrue(repo.myNeeds.isEmpty)
+    }
+
     func testIdentityIsStableAcrossRestarts() {
         let a = makeRepo("a").nodeId
         XCTAssertEqual(8, a.count)

@@ -50,8 +50,11 @@ private struct MainTabs: View {
     @Environment(\.strings) private var strings
 
     var body: some View {
-        @Bindable var bindableRouter = router
-        TabView(selection: $bindableRouter.selected) {
+        // Every tap on a tab goes through `select`, including the one on the tab already shown (the plain selection
+        // binding would not call its setter for an unchanged value, but this one is always asked), so each tap pops
+        // that tab to its root.
+        let selection = Binding<AppTab>(get: { router.selected }, set: { router.select($0) })
+        TabView(selection: selection) {
             tab(.home) { HomeScreen() }
             tab(.requests) { RequestsScreen() }
             tab(.network) { NetworkScreen() }

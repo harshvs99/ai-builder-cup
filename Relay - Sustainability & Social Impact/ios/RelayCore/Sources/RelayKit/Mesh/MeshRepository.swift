@@ -148,6 +148,15 @@ public final class MeshRepository: @unchecked Sendable {
         return true
     }
 
+    /// Removes a request from this phone's list. An open request is cancelled first so it stops being relayed.
+    public func deleteMyNeed(_ msgIdHex: String) {
+        guard let need = myNeedsStore.list().first(where: { $0.msgIdHex == msgIdHex }) else { return }
+        if !need.isClosed { cancel(msgIdHex) }
+        myNeedsStore.remove(msgIdHex)
+        refreshMyNeeds()
+        log("deleted own NEED \(msgIdHex) from the list")
+    }
+
     /// Stamp "uploaded" on own NEEDs the gateway state now lists as uploaded (this phone was the gateway).
     public func noteUploads() {
         var changed = false

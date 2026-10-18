@@ -250,6 +250,16 @@ public final class MyNeedsStore: @unchecked Sendable {
         return next
     }
 
+    /// Drops the need from the list; false if the id is unknown.
+    @discardableResult
+    public func remove(_ msgIdHex: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard items.contains(where: { $0.msgIdHex == msgIdHex }) else { return false }
+        items = items.filter { $0.msgIdHex != msgIdHex }
+        save()
+        return true
+    }
+
     public func clear() {
         lock.lock(); defer { lock.unlock() }
         items = []
