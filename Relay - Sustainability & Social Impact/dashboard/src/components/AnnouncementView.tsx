@@ -4,19 +4,19 @@ import { enabledCodes, nameList } from '../lib/languages';
 import { useLanguages } from '../useLanguages';
 import { ALL_DISTRICTS, districtName } from '../lib/districts';
 import {
-  approveBody, BROADCAST_LANG_NAMES, draftRows, STATUS_LABEL, type DraftRow,
-} from '../lib/broadcast';
+  approveBody, ANNOUNCEMENT_LANG_NAMES, draftRows, STATUS_LABEL, type DraftRow,
+} from '../lib/announcements';
 import { formatRelative } from '../lib/time';
-import type { Broadcast, BroadcastLangStatus } from '../types';
+import type { Announcement, AnnouncementLangStatus } from '../types';
 
-const BADGE: Record<BroadcastLangStatus, string> = { ok: 'ok', needs_review: 'warn', missing: 'muted' };
+const BADGE: Record<AnnouncementLangStatus, string> = { ok: 'ok', needs_review: 'warn', missing: 'muted' };
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function BroadcastView({ district, nowSec }: { district: string; nowSec: number }) {
+export function AnnouncementView({ district, nowSec }: { district: string; nowSec: number }) {
   const [text, setText] = useState('');
-  const [draft, setDraft] = useState<Broadcast | null>(null);
+  const [draft, setDraft] = useState<Announcement | null>(null);
   const [rows, setRows] = useState<DraftRow[]>([]);
-  const [recent, setRecent] = useState<Broadcast[]>([]);
+  const [recent, setRecent] = useState<Announcement[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const all = district === ALL_DISTRICTS;
@@ -24,7 +24,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
   const enabled = enabledCodes(languages);
 
   const reload = useCallback(() => {
-    api.listBroadcasts().then(setRecent).catch((e) => setError(errText(e)));
+    api.listAnnouncements().then(setRecent).catch((e) => setError(errText(e)));
   }, []);
   useEffect(reload, [reload]);
 
@@ -42,7 +42,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
 
   const makeDraft = () =>
     run(async () => {
-      const b = await api.createBroadcast({ district, text: text.trim() });
+      const b = await api.createAnnouncement({ district, text: text.trim() });
       setDraft(b);
       setRows(draftRows(b, enabled));
       reload();
@@ -51,7 +51,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
   const publish = () =>
     run(async () => {
       if (!draft) return;
-      await api.approveBroadcast(draft.id, approveBody(draft, rows));
+      await api.approveAnnouncement(draft.id, approveBody(draft, rows));
       setDraft(null);
       setRows([]);
       setText('');
@@ -60,7 +60,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
 
   const withdraw = (id: number) =>
     run(async () => {
-      await api.withdrawBroadcast(id);
+      await api.withdrawAnnouncement(id);
       reload();
     });
 
@@ -71,7 +71,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
   return (
     <div className="page">
       <div className="page-head">
-        <h1>Broadcast</h1>
+        <h1>Announcement</h1>
         <p className="muted">
           One public message to everyone in a district, in {nameList(languages)}. A model translates it,
           a second model call checks each translation against your text, and nothing is published until you approve.
@@ -90,7 +90,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
           onChange={(e) => setText(e.target.value)}
           disabled={all}
         />
-        {all && <p className="muted small">Pick one district in the header first: a broadcast goes to a single district.</p>}
+        {all && <p className="muted small">Pick one district in the header first: an announcement goes to a single district.</p>}
         <div className="row-actions">
           <button type="button" className="btn primary" disabled={busy || all || !text.trim()} onClick={makeDraft}>
             {busy && !draft ? 'Translating…' : 'Draft translations'}
@@ -120,11 +120,11 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
                       <input
                         type="checkbox"
                         checked={row.include}
-                        aria-label={`Publish ${BROADCAST_LANG_NAMES[lang]}`}
+                        aria-label={`Publish ${ANNOUNCEMENT_LANG_NAMES[lang]}`}
                         onChange={(e) => setRow(lang, { include: e.target.checked })}
                       />
                     </td>
-                    <td>{BROADCAST_LANG_NAMES[lang]}{isSource && <span className="muted small block">source</span>}</td>
+                    <td>{ANNOUNCEMENT_LANG_NAMES[lang]}{isSource && <span className="muted small block">source</span>}</td>
                     <td>
                       <textarea
                         className="bc-input"
@@ -132,7 +132,7 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
                         lang={lang}
                         value={row.text}
                         readOnly={isSource}
-                        aria-label={`${BROADCAST_LANG_NAMES[lang]} text`}
+                        aria-label={`${ANNOUNCEMENT_LANG_NAMES[lang]} text`}
                         onChange={(e) => setRow(lang, { text: e.target.value })}
                       />
                     </td>
@@ -158,8 +158,8 @@ export function BroadcastView({ district, nowSec }: { district: string; nowSec: 
       )}
 
       <div className="card">
-        <h2>Recent broadcasts</h2>
-        {recent.length === 0 ? <p className="empty">Nothing broadcast yet.</p> : (
+        <h2>Recent announcements</h2>
+        {recent.length === 0 ? <p className="empty">Nothing announcement yet.</p> : (
           <table className="grid">
             <thead><tr><th>Message</th><th>District</th><th>Languages</th><th>Status</th><th /></tr></thead>
             <tbody>

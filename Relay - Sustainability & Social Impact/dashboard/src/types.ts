@@ -153,29 +153,29 @@ export interface Sitrep {
   ticket_nos: number[];
 }
 
-export type BroadcastLang = 'en' | 'hi' | 'or' | 'tl' | 'war';
-export type BroadcastLangStatus = 'ok' | 'needs_review' | 'missing';
+export type AnnouncementLang = 'en' | 'hi' | 'or' | 'tl' | 'war';
+export type AnnouncementLangStatus = 'ok' | 'needs_review' | 'missing';
 
-export interface BroadcastTranslation {
+export interface AnnouncementTranslation {
   text: string;
   back_translation: string;
   faithful: boolean;
   issues: string;
   checks_passed: boolean;
-  status: BroadcastLangStatus;
+  status: AnnouncementLangStatus;
   edited?: boolean;
 }
 
-export interface Broadcast {
+export interface Announcement {
   id: number;
   district: string;
   source_text: string;
-  source_lang: BroadcastLang;
+  source_lang: AnnouncementLang;
   created_at: number;
-  translations: Record<BroadcastLang, BroadcastTranslation>;
+  translations: Record<AnnouncementLang, AnnouncementTranslation>;
   status: 'draft' | 'approved' | 'withdrawn';
   approved_at: number | null;
-  approved_langs: BroadcastLang[];
+  approved_langs: AnnouncementLang[];
 }
 
 export type WarningSource = 'IMD' | 'PAGASA' | 'NDMA' | 'manual';

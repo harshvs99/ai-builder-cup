@@ -158,13 +158,13 @@ CREATE TABLE IF NOT EXISTS sitreps (
     data         TEXT    NOT NULL            -- JSON, includes id
 );
 
-CREATE TABLE IF NOT EXISTS broadcasts (
+CREATE TABLE IF NOT EXISTS announcements (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     district TEXT    NOT NULL,
     status   TEXT    NOT NULL,
     data     TEXT    NOT NULL                -- JSON, includes id
 );
-CREATE INDEX IF NOT EXISTS idx_broadcasts_district ON broadcasts(district, status);
+CREATE INDEX IF NOT EXISTS idx_announcements_district ON announcements(district, status);
 
 CREATE TABLE IF NOT EXISTS ready_warnings (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -651,40 +651,40 @@ class SqliteStore:
             )
         return json.loads(rows[0]["data"]) if rows else None
 
-    # ------------------------------------------------------------------ broadcasts
-    def add_broadcast(self, broadcast: dict[str, Any]) -> dict[str, Any]:
+    # ------------------------------------------------------------------ announcements
+    def add_announcement(self, announcement: dict[str, Any]) -> dict[str, Any]:
         with self.tx() as c:
             cur = c.execute(
-                "INSERT INTO broadcasts(district, status, data) VALUES (?, ?, '{}')",
-                (broadcast["district"], broadcast["status"]),
+                "INSERT INTO announcements(district, status, data) VALUES (?, ?, '{}')",
+                (announcement["district"], announcement["status"]),
             )
-            saved = {"id": int(cur.lastrowid), **{k: v for k, v in broadcast.items() if k != "id"}}
-            c.execute("UPDATE broadcasts SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in announcement.items() if k != "id"}}
+            c.execute("UPDATE announcements SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
             return saved
 
-    def get_broadcast(self, broadcast_id: int) -> dict[str, Any] | None:
-        rows = self._q("SELECT data FROM broadcasts WHERE id = ?", (broadcast_id,))
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM announcements WHERE id = ?", (announcement_id,))
         return json.loads(rows[0]["data"]) if rows else None
 
-    def update_broadcast(self, broadcast_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+    def update_announcement(self, announcement_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
         with self.tx() as c:
-            row = c.execute("SELECT data FROM broadcasts WHERE id = ?", (broadcast_id,)).fetchone()
+            row = c.execute("SELECT data FROM announcements WHERE id = ?", (announcement_id,)).fetchone()
             if row is None:
                 return None
-            saved = {**json.loads(row["data"]), **fields, "id": broadcast_id}
+            saved = {**json.loads(row["data"]), **fields, "id": announcement_id}
             c.execute(
-                "UPDATE broadcasts SET district = ?, status = ?, data = ? WHERE id = ?",
-                (saved["district"], saved["status"], json.dumps(saved), broadcast_id),
+                "UPDATE announcements SET district = ?, status = ?, data = ? WHERE id = ?",
+                (saved["district"], saved["status"], json.dumps(saved), announcement_id),
             )
             return saved
 
-    def list_broadcasts(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+    def list_announcements(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         where, args = [], []
         for col, val in (("district", district), ("status", status)):
             if val is not None:
                 where.append(f"{col} = ?")
                 args.append(val)
-        sql = "SELECT data FROM broadcasts" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC"
+        sql = "SELECT data FROM announcements" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC"
         return [json.loads(r["data"]) for r in self._q(sql, args)]
 
     # ------------------------------------------------------------------ ready-mode warnings

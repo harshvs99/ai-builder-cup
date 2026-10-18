@@ -1,4 +1,4 @@
-# Relay apps, contract v2: languages, Ready mode, shelters, broadcasts
+# Relay apps, contract v2: languages, Ready mode, shelters, announcements
 
 Status: **ready to build**. Audience: the engineer (or agent) who implements this in `android/` and `ios/`.
 The backend side is done on branch `claude/inspiring-johnson-ljk8c1` unless a section says otherwise.
@@ -34,14 +34,14 @@ string tables but are **hidden** until a community reviewer signs them off.
   `translatable` comment / separate file; iOS: a separate `.xcstrings` table) so enabling one is a config change.
 - If a stored user language becomes disabled, fall back to English and say so once ("Odia is not available yet;
   showing English.").
-- Backend text the phone shows (ACK texts, plan steps, broadcasts, checklist) arrives already in an enabled language;
+- Backend text the phone shows (ACK texts, plan steps, announcements, checklist) arrives already in an enabled language;
   the phone never translates.
 - Speech: on-device recognition and TTS for `en-IN` and `hi-IN`.
 
 ## 2. Districts
 
 The phone does not hard-code districts. It learns its district from the Ready pack (`district` field), which the
-backend resolves from `lat`/`lon`. Store the last known district id; use it for broadcasts (§5) and the shelter list
+backend resolves from `lat`/`lon`. Store the last known district id; use it for announcements (§5) and the shelter list
 (§4). With no location ever, ask once on the Ready screen: "Which district are you in?" with the ids the backend
 knows (today `puri`, `delhi`; get the list from the pack's 404 message only as a last resort, or add a static list
 behind a build flag).
@@ -124,22 +124,27 @@ infants, pregnant, disability, livestock, plus "Medicine or care needs" (free te
     `MKMapItem.openInMaps`) — works when the maps app has offline data.
   - "Copy coordinates" and "Speak" (reads name and distance aloud).
 
-## 5. Broadcasts (control room → everyone in a district)
+## 5. Announcements (control room → everyone in a district, in words)
+
+Not to be confused with the **`BROADCAST` frame (`0x75`, SPEC §5.6)** already on `main`: that one is a 25-byte
+*disaster declaration* (flood / cyclone / earthquake / landslide, declared or cleared) which switches the triage
+questions on, and the apps already implement it. An *announcement* is free text a duty officer wrote, translated and
+approved per language. Both travel down from the backend on `/v1/sync`; they are separate frames and separate fields.
 
 ### 5.1 Over HTTP (backend, done)
 
-`GET /v1/broadcasts/active?district=`, device key →
-`{ "broadcasts": [{ "id", "district", "source_lang", "created_at", "approved_at", "texts": { "en": "…", "hi": "…" } }] }`.
+`GET /v1/announcements/active?district=`, device key →
+`{ "announcements": [{ "id", "district", "source_lang", "created_at", "approved_at", "texts": { "en": "…", "hi": "…" } }] }`.
 Only human-approved languages are present. Phones with signal poll this with the Ready refresh (§3.3).
 
-### 5.2 Over the mesh: `BROADCAST` frame, type `0x75` (backend part pending, see §8)
+### 5.2 Over the mesh: `ANNOUNCEMENT` frame, type `0x76` (backend part pending, see §8)
 
 Payload ≤ 160 bytes, so the frame stays within the 182-byte single-write limit of SPEC §2 (22-byte header + payload):
 
 ```
 size field
 1    payload_version   = 0x01
-8    broadcast_id      random 64-bit, assigned by the backend at approval (same for every language)
+8    announcement_id   random 64-bit, assigned by the backend at approval (same for every language)
 1    lang              index in LANG_CODES (en 0, hi 1, or 2, tl 3, war 4, ceb 5)
 1    district          index in the backend district table (puri 0, delhi 1)
 1    status            0 ACTIVE, 1 WITHDRAWN
@@ -149,16 +154,16 @@ size field
                        shortens longer texts with "…" and the full text stays on the HTTP route)
 ```
 
-- Frame: no recipient (broadcast), `sender_id` = injecting gateway, TTL 7, stored, inventoried, flooded and expired
-  like `ACK` (SPEC §6). Dedupe key: first 8 bytes of SHA-256 over `broadcast_id ‖ lang ‖ status`, so a WITHDRAWN
+- Frame: no recipient (a broadcast frame in the SPEC §3 sense), `sender_id` = injecting gateway, TTL 7, stored, inventoried, flooded and expired
+  like `ACK` (SPEC §6). Dedupe key: first 8 bytes of SHA-256 over `announcement_id ‖ lang ‖ status`, so a WITHDRAWN
   frame is a new frame that supersedes the ACTIVE one.
 - **Gateway:** the `/v1/sync` request gains an optional `"district": "puri"` (from the gateway's location / last pack)
-  and `"broadcast_cursor": n`; the response gains `"broadcasts": ["<base64 BROADCAST payload>"]` and
-  `"broadcast_cursor": n`. The gateway wraps each payload in a frame and originates it, like ACKs. Old gateways send
+  and `"announcement_cursor": n`; the response gains `"announcements": ["<base64 ANNOUNCEMENT payload>"]` and
+  `"announcement_cursor": n` (next to the existing `"broadcasts"` disaster declarations). The gateway wraps each payload in a frame and originates it, like ACKs. Old gateways send
   neither field and get neither.
-- **Every phone** relays every BROADCAST regardless of district or language. It **shows** one only when its
+- **Every phone** relays every ANNOUNCEMENT regardless of district or language. It **shows** one only when its
   `district` matches the phone's stored district (or the phone has none) and its `lang` is the UI language — or,
-  when no frame in the UI language exists for that `broadcast_id` after 10 minutes, the `en` one.
+  when no frame in the UI language exists for that `announcement_id` after 10 minutes, the `en` one.
 - **Display:** a "Message from the control room" card at the top of Home (newest first, max 3, dismissible), a
   notification on first receipt, a speaker button (on-device TTS). WITHDRAWN removes the card and shows nothing.
 - `protocol/SPEC.md` gets a §5.6 for this frame and `protocol/vectors.json` gets vectors (backend task, §8).
@@ -171,23 +176,23 @@ screens. Gemma is not part of this contract (rule-based intake stays).
 ## 7. Tests and acceptance
 
 - Core modules: unit tests for `ReadyRefresher` decisions (when to fetch pack / plan / audio), storage atomicity,
-  pack/plan JSON parsing with unknown fields ignored, BROADCAST codec against the golden vectors, show/hide rules
+  pack/plan JSON parsing with unknown fields ignored, ANNOUNCEMENT codec against the golden vectors, show/hide rules
   (district, language fallback, WITHDRAWN), language picker filtering. Same test names on both platforms.
-- Simulator (`android/simulator`): a scenario where a gateway injects a BROADCAST and 5 nodes over 3 hops show it, and
+- Simulator (`android/simulator`): a scenario where a gateway injects an ANNOUNCEMENT and 5 nodes over 3 hops show it, and
   a WITHDRAWN supersedes it.
 - Acceptance on devices (run against the mock backend `dashboard/scripts/mock-server.mjs` or a local backend):
   1. Issue a warning in the dashboard → phone with Wi-Fi shows the Home banner and a notification within one refresh.
   2. Airplane mode → Ready screen still shows warning, plan, shelters, checklist; speaker reads the plan.
   3. Publish a shelter list in the dashboard → pack `version` changes → phone list updates; detail opens Directions.
-  4. Approve an en+hi broadcast → phone A (gateway, signal) and phone B (airplane mode, BLE only) both show it in
+  4. Approve an en+hi announcement in the dashboard (Announce page) → phone A (gateway, signal) and phone B (airplane mode, BLE only) both show it in
      their UI language; withdraw → both remove it.
   5. Switch the app language to Hindi → every new screen and backend text is in Hindi; Odia is not offered.
 - Accessibility: TalkBack / VoiceOver labels on every new control, 48 dp / 44 pt targets, both themes.
 
 ## 8. Backend work this contract still needs
 
-1. BROADCAST mesh delivery: `broadcast_id` and `mesh_text` (≤ 139 bytes) per approved language at approval, the
-   `/v1/sync` `district` / `broadcast_cursor` / `broadcasts` fields, SPEC §5.6, codec and golden vectors.
+1. ANNOUNCEMENT mesh delivery: `announcement_id` and `mesh_text` (≤ 139 bytes) per approved language at approval, the
+   `/v1/sync` `district` / `announcement_cursor` / `announcements` fields, SPEC §5.7, codec and golden vectors.
 2. `GET /v1/languages`, and English + Hindi as the only enabled languages (in progress).
 3. Published shelter lists, `shelters_source` in the pack and `GET /v1/public/shelters` (in progress).
 
@@ -196,8 +201,8 @@ Build the app features against the mock server first; items 2 and 3 land before 
 ## 9. Handoff checklist
 
 - Branch from `claude/inspiring-johnson-ljk8c1` (or `main` once merged) to `apps/contract-v2`.
-- Order: languages (§1) → BROADCAST codec + vectors (§5.2) → Ready refresh + storage (§3.3) → Ready UI (§3.4) →
-  shelters (§4) → broadcast UI (§5.2) → simulator scenario → device acceptance (§7).
+- Order: languages (§1) → ANNOUNCEMENT codec + vectors (§5.2) → Ready refresh + storage (§3.3) → Ready UI (§3.4) →
+  shelters (§4) → announcement UI (§5.2) → simulator scenario → device acceptance (§7).
 - Android must build with `./gradlew relayAllTests assembleDebug`; iOS with the `RelayCore` package tests and the
   Xcode project. A cloud container can run the Android/JVM core tests and the simulator; the device steps in §7 are
   for the owner's local machine.

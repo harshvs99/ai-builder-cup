@@ -264,18 +264,18 @@ class Store(Protocol):
         before districts existed have none and only show up unfiltered)."""
         ...
 
-    # ------------------------------------------------------------------ broadcasts
-    def add_broadcast(self, broadcast: dict[str, Any]) -> dict[str, Any]:
-        """Store a broadcast (without ``id``) and return it with the id assigned (1, 2, ...)."""
+    # ------------------------------------------------------------------ announcements
+    def add_announcement(self, announcement: dict[str, Any]) -> dict[str, Any]:
+        """Store an announcement (without ``id``) and return it with the id assigned (1, 2, ...)."""
         ...
 
-    def get_broadcast(self, broadcast_id: int) -> dict[str, Any] | None: ...
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None: ...
 
-    def update_broadcast(self, broadcast_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
-        """Merge top-level ``fields`` into the broadcast; returns it, or None if it does not exist."""
+    def update_announcement(self, announcement_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge top-level ``fields`` into the announcement; returns it, or None if it does not exist."""
         ...
 
-    def list_broadcasts(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+    def list_announcements(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         """Newest first, optionally only one district and/or status."""
         ...
 

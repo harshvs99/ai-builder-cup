@@ -1,6 +1,6 @@
 """Live smoke test of every Gemini path, through the backend's own factories (no fakes).
 
-    cd backend && uv run python scripts/live_gemini_check.py [--only models,flash,sitrep,orders,broadcast,embed]
+    cd backend && uv run python scripts/live_gemini_check.py [--only models,flash,sitrep,orders,announcement,embed]
 
 Needs GEMINI_API_KEY (or Vertex env). Costs a few cents: about ten short calls. Prints which model
 answered, whether the validated model text was used or the template fallback kicked in, and the
@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pydantic import BaseModel  # noqa: E402
 
-from app import broadcast, dispatch, districts, embed, sitrep, textgen  # noqa: E402
+from app import announcements, dispatch, districts, embed, sitrep, textgen  # noqa: E402
 
-CHECKS = ("models", "flash", "sitrep", "orders", "broadcast", "embed")
+CHECKS = ("models", "flash", "sitrep", "orders", "announcement", "embed")
 COUNTS = {
     "open": 4, "open_by_category": {"MEDICAL": 3, "FOOD": 1}, "p1_open": 2, "dispatched": 5, "resolved": 1,
     "gateways_online": 3, "oldest_open_ticket_no": 101, "oldest_open_age_s": 5400,
@@ -96,13 +96,13 @@ def check_orders() -> None:
         print(f"    EN: {en}\n    {lang.upper()}: {local}")
 
 
-def check_broadcast() -> None:
-    tg = textgen.textgen_from_env("BROADCAST_GEMINI_MODEL")
+def check_announcement() -> None:
+    tg = textgen.textgen_from_env("ANNOUNCEMENT_GEMINI_MODEL")
     src = "Cyclone shelter at Puri Zilla School is open. Drinking water at the bus stand from 14:00 for 300 families."
     t = time.monotonic()
-    out = broadcast.draft(src, "en", "puri", tg, tg)
+    out = announcements.draft(src, "en", "puri", tg, tg)
     ok = [lang for lang, r in out.items() if r["status"] == "ok"]
-    record("broadcast", len(ok) >= 4, f"ok: {ok} in {time.monotonic() - t:.1f}s")
+    record("announcement", len(ok) >= 4, f"ok: {ok} in {time.monotonic() - t:.1f}s")
     for lang, r in out.items():
         print(f"    {lang} [{r['status']}] {r['text']}\n         back: {r.get('back_translation', '')}"
               + (f"\n         issues: {r['issues']}" if r.get("issues") else ""))

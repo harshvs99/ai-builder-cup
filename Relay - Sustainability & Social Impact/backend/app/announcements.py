@@ -1,10 +1,10 @@
-"""Broadcast: one public message from the control room, in the enabled app languages, checked.
+"""Announcement: one public message from the control room, in the enabled app languages, checked.
 
 Flow: the operator writes a message (usually English). ``draft`` asks a model for faithful
 translations (call 1), then asks a SEPARATE model call to back-translate each one into English and
 judge it against the source (call 2). Nothing is published by either call: the operator reviews the
 table, may edit a text, and approves per language (``apply_approval``). Only approved languages are
-served to phones (``GET /v1/broadcasts/active``).
+served to phones (``GET /v1/announcements/active``).
 
 Philosophy (same as sitrep.py): model text is never trusted. Every translation must pass
 deterministic checks against the SOURCE (non-empty, length cap, the multiset of numbers equal, the
@@ -15,10 +15,10 @@ check call fails, every translation is "needs_review" with issues "not checked".
 untrusted data (it is typed by a person): it goes into prompts only as a JSON string. A human edit
 re-runs the deterministic checks and is rejected if they fail.
 
-Next: mesh delivery (NOT implemented, no protocol/codec change here). Proposal: a BROADCAST frame
-(type id TBD) carrying broadcast id (8 bytes), district id, lang code, and the text, at most ~180
+Next: mesh delivery (NOT implemented, no protocol/codec change here). Proposal: a ANNOUNCEMENT frame
+(type id TBD) carrying announcement id (8 bytes), district id, lang code, and the text, at most ~180
 bytes UTF-8 per frame. One frame per approved language; a phone relays all of them but stores and
-shows only the one for its own language. Gateways fetch ``/v1/broadcasts/active`` and inject the
+shows only the one for its own language. Gateways fetch ``/v1/announcements/active`` and inject the
 frames. Devanagari and Odia cost 3 bytes per character, so a long message needs a short form
 (~60 characters) for the mesh, with the full text left to the HTTP route.
 """
@@ -36,13 +36,13 @@ from pydantic import BaseModel, create_model
 from . import districts, languages
 from .textgen import TextGen, call_json
 
-log = logging.getLogger("relay.broadcast")
+log = logging.getLogger("relay.announcement")
 
-ALL_LANGS = ("en", "hi", "or", "tl", "war")  # broadcast-capable wire languages (Cebuano has no phone voice yet)
+ALL_LANGS = ("en", "hi", "or", "tl", "war")  # announcement-capable wire languages (Cebuano has no phone voice yet)
 
 
 def active_langs() -> tuple[str, ...]:
-    """The languages a broadcast is translated into and approved in: ALL_LANGS that are enabled
+    """The languages an announcement is translated into and approved in: ALL_LANGS that are enabled
     (``languages``; en and hi by default). Read on every call so RELAY_LANGS changes apply."""
     return tuple(c for c in ALL_LANGS if languages.is_enabled(c))
 
@@ -163,7 +163,7 @@ def draft(
     checker: TextGen | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-language results ``{lang: {text, back_translation, faithful, issues, checks_passed,
-    status}}`` for every enabled broadcast language. The source language holds the source verbatim (status ok).
+    status}}`` for every enabled announcement language. The source language holds the source verbatim (status ok).
     Raises ValueError only for a bad source; model trouble degrades statuses instead.
     ``district`` is carried for the caller's record; it does not change the prompts."""
     langs = active_langs()
@@ -184,7 +184,7 @@ def draft(
     try:
         data = _translate(source, source_lang, targets, textgen)
     except Exception as e:
-        log.warning("broadcast translate failed: %s: %s", type(e).__name__, e)
+        log.warning("announcement translate failed: %s: %s", type(e).__name__, e)
         return done()
 
     texts: dict[str, str] = {}
@@ -202,7 +202,7 @@ def draft(
     try:
         checks: dict[str, Any] | None = _check(source, source_lang, texts, checker or textgen)
     except Exception as e:
-        log.warning("broadcast check failed: %s: %s", type(e).__name__, e)
+        log.warning("announcement check failed: %s: %s", type(e).__name__, e)
         checks = None
     for lang in texts:
         e = out[lang]
@@ -222,7 +222,7 @@ def draft(
 
 
 def apply_approval(
-    broadcast: dict[str, Any], langs: list[str] | None, edits: dict[str, str] | None
+    announcement: dict[str, Any], langs: list[str] | None, edits: dict[str, str] | None
 ) -> dict[str, Any]:
     """The fields to store when the operator approves. Raises ValueError (-> 422) with the reason.
 
@@ -231,14 +231,14 @@ def apply_approval(
     deterministic checks against the source. An edited text replaces the model's and is marked
     ``edited`` (its back-translation is dropped: it was for the old text)."""
     active = active_langs()
-    trans = {k: dict(v) for k, v in broadcast["translations"].items()}
-    source, src_lang = broadcast["source_text"], broadcast["source_lang"]
+    trans = {k: dict(v) for k, v in announcement["translations"].items()}
+    source, src_lang = announcement["source_text"], announcement["source_lang"]
     edits = edits or {}
     for lang, text in edits.items():
         if lang not in active:
             raise ValueError(f"unknown language {lang}")
         if lang == src_lang:
-            raise ValueError("the source text can not be edited; create a new broadcast")
+            raise ValueError("the source text can not be edited; create a new announcement")
         text = text.strip()
         issues = deterministic_issues(source, text)
         if issues:

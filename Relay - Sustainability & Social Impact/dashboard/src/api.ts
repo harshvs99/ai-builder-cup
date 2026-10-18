@@ -1,7 +1,7 @@
 import { parseLanguages, type Language } from './lib/languages';
 import { loadOperatorKey } from './lib/operatorKey';
 import type {
-  Broadcast, CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, ShelterEntry, ShelterList, ShelterPublishResult, Sitrep, Stats, Team, Ticket,
+  Announcement, CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, ShelterEntry, ShelterList, ShelterPublishResult, Sitrep, Stats, Team, Ticket,
 } from './types';
 
 export class ApiError extends Error {
@@ -102,19 +102,19 @@ export function createClient(base: string, operatorKey?: string | null) {
     async listLanguages(signal?: AbortSignal): Promise<Language[] | null> {
       return parseLanguages(await request<unknown>('/v1/languages', { signal }));
     },
-    createBroadcast(body: { district: string; text: string; source_lang?: string }): Promise<Broadcast> {
-      return request<Broadcast>('/v1/broadcasts', post(body));
+    createAnnouncement(body: { district: string; text: string; source_lang?: string }): Promise<Announcement> {
+      return request<Announcement>('/v1/announcements', post(body));
     },
-    async listBroadcasts(signal?: AbortSignal): Promise<Broadcast[]> {
-      const body = await request<{ broadcasts?: Broadcast[] }>('/v1/broadcasts', { signal });
-      return Array.isArray(body?.broadcasts) ? body.broadcasts : [];
+    async listAnnouncements(signal?: AbortSignal): Promise<Announcement[]> {
+      const body = await request<{ announcements?: Announcement[] }>('/v1/announcements', { signal });
+      return Array.isArray(body?.announcements) ? body.announcements : [];
     },
     /** `langs` omitted = every language whose status is ok; `edits` = operator-corrected texts. */
-    approveBroadcast(id: number, body: { langs?: string[]; edits?: Record<string, string> }): Promise<Broadcast> {
-      return request<Broadcast>(`/v1/broadcasts/${id}/approve`, post(body));
+    approveAnnouncement(id: number, body: { langs?: string[]; edits?: Record<string, string> }): Promise<Announcement> {
+      return request<Announcement>(`/v1/announcements/${id}/approve`, post(body));
     },
-    withdrawBroadcast(id: number): Promise<Broadcast> {
-      return request<Broadcast>(`/v1/broadcasts/${id}/withdraw`, { method: 'POST' });
+    withdrawAnnouncement(id: number): Promise<Announcement> {
+      return request<Announcement>(`/v1/announcements/${id}/withdraw`, { method: 'POST' });
     },
     async listWarnings(district: string, signal?: AbortSignal): Promise<ReadyWarning[]> {
       const body = await request<{ warnings?: ReadyWarning[] }>(`/v1/ready/warnings?district=${encodeURIComponent(district)}`, { signal });

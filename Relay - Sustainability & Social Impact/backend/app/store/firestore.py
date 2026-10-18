@@ -14,7 +14,7 @@ Layout (all top-level collections in the configured database):
   dispatch/{ticket_no}  ``proposal`` / ``dispatch`` maps (or null); ``team_id`` and ``active`` (counts
                         toward the team's load) are set by approve
   sitreps/{id}          generated sitreps; ``id`` comes from counters/sitrep
-  broadcasts/{id}       broadcast drafts and approvals; ``id`` comes from counters/broadcast
+  announcements/{id}       announcement drafts and approvals; ``id`` comes from counters/announcement
   warnings/{id}         ready-mode warnings; ``id`` comes from counters/warning
   shelter_lists/{id}    shelter lists (draft/published/archived); ``id`` comes from counters/shelter_list
   counters/{name}       ``ticket_no`` and ``ack_seq``: ``value`` is the last number handed out
@@ -563,45 +563,45 @@ class FirestoreStore:
         docs = list(self._col("sitreps").order_by("id", direction=firestore.Query.DESCENDING).limit(1).stream())
         return docs[0].to_dict() if docs else None
 
-    # ------------------------------------------------------------------ broadcasts
-    def add_broadcast(self, broadcast: dict[str, Any]) -> dict[str, Any]:
+    # ------------------------------------------------------------------ announcements
+    def add_announcement(self, announcement: dict[str, Any]) -> dict[str, Any]:
         from google.cloud import firestore
 
         @firestore.transactional
         def run(txn) -> dict[str, Any]:
-            ref, bid = self._next(txn, "broadcast")
-            saved = {**{k: v for k, v in broadcast.items() if k != "id"}, "id": bid}
-            txn.set(self._col("broadcasts").document(str(bid)), saved)
+            ref, bid = self._next(txn, "announcement")
+            saved = {**{k: v for k, v in announcement.items() if k != "id"}, "id": bid}
+            txn.set(self._col("announcements").document(str(bid)), saved)
             txn.set(ref, {"value": bid})
             return saved
 
         with self._write_lock:
             return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
-    def get_broadcast(self, broadcast_id: int) -> dict[str, Any] | None:
-        snap = self._col("broadcasts").document(str(broadcast_id)).get()
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None:
+        snap = self._col("announcements").document(str(announcement_id)).get()
         return snap.to_dict() if snap.exists else None
 
-    def update_broadcast(self, broadcast_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+    def update_announcement(self, announcement_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
         from google.cloud import firestore
 
-        ref = self._col("broadcasts").document(str(broadcast_id))
+        ref = self._col("announcements").document(str(announcement_id))
 
         @firestore.transactional
         def run(txn) -> dict[str, Any] | None:
             snap = ref.get(transaction=txn)
             if not snap.exists:
                 return None
-            saved = {**snap.to_dict(), **fields, "id": broadcast_id}
+            saved = {**snap.to_dict(), **fields, "id": announcement_id}
             txn.set(ref, saved)
             return saved
 
         with self._write_lock:
             return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
-    def list_broadcasts(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+    def list_announcements(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         # equality filters only (no composite index); newest-first sort in memory
-        q = self._col("broadcasts")
+        q = self._col("announcements")
         for field, val in (("district", district), ("status", status)):
             if val is not None:
                 q = self._eq(q, field, "==", val)

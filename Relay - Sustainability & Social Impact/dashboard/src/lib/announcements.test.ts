@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import type { Broadcast, BroadcastLang, BroadcastTranslation } from '../types';
-import { approveBody, defaultInclude, draftRows } from './broadcast';
+import type { Announcement, AnnouncementLang, AnnouncementTranslation } from '../types';
+import { approveBody, defaultInclude, draftRows } from './announcements';
 
-const tr = (status: BroadcastTranslation['status'], text: string): BroadcastTranslation => ({
+const tr = (status: AnnouncementTranslation['status'], text: string): AnnouncementTranslation => ({
   text, back_translation: '', faithful: status === 'ok', issues: '', checks_passed: status === 'ok', status,
 });
-const bc: Broadcast = {
+const bc: Announcement = {
   id: 1, district: 'puri', source_text: 'Water at 14:00', source_lang: 'en', created_at: 0, status: 'draft',
   approved_at: null, approved_langs: [],
   translations: {
     en: tr('ok', 'Water at 14:00'), hi: tr('ok', 'hi 14:00'), or: tr('needs_review', 'or 15:00'),
     tl: tr('missing', ''), war: tr('ok', 'war 14:00'),
-  } as Record<BroadcastLang, BroadcastTranslation>,
+  } as Record<AnnouncementLang, AnnouncementTranslation>,
 };
 
-describe('broadcast helpers', () => {
+describe('announcement helpers', () => {
   it('ticks only languages whose status is ok', () => {
     expect(draftRows(bc).filter((r) => r.include).map((r) => r.lang)).toEqual(['en', 'hi', 'war']);
     expect(defaultInclude(tr('ok', ' '))).toBe(false);
@@ -22,7 +22,7 @@ describe('broadcast helpers', () => {
 
   it('shows only the enabled languages', () => {
     expect(draftRows(bc, ['en', 'hi']).map((r) => r.lang)).toEqual(['en', 'hi']);
-    expect(draftRows({ ...bc, translations: { en: bc.translations.en, hi: bc.translations.hi } as Broadcast['translations'] }).map((r) => r.lang)).toEqual(['en', 'hi']);
+    expect(draftRows({ ...bc, translations: { en: bc.translations.en, hi: bc.translations.hi } as Announcement['translations'] }).map((r) => r.lang)).toEqual(['en', 'hi']);
   });
 
   it('sends langs plus edits only for changed, ticked rows', () => {

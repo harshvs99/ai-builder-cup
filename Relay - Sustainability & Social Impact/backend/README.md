@@ -42,8 +42,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
-| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, `POST /v1/broadcasts`, `GET /v1/broadcasts`, `POST /v1/broadcasts/{id}/approve\|withdraw`, `GET\|POST /v1/ready/warnings*`, `GET /v1/ready/shelters` and `POST /v1/ready/plan/preview` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
-| `RELAY_LANGS` | `en,hi` | comma list of enabled languages (must include `en`; codes from `en,hi,or,tl,war,ceb`). Only enabled languages get templates, model output and broadcast translations; anything else falls back to English. A typo fails at start. See [Languages](#languages) |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest`, `GET /v1/stats`, `POST /v1/announcements`, `GET /v1/announcements`, `POST /v1/announcements/{id}/approve\|withdraw`, `GET\|POST /v1/ready/warnings*`, `GET /v1/ready/shelters` and `POST /v1/ready/plan/preview` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_LANGS` | `en,hi` | comma list of enabled languages (must include `en`; codes from `en,hi,or,tl,war,ceb`). Only enabled languages get templates, model output and announcement translations; anything else falls back to English. A typo fails at start. See [Languages](#languages) |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -55,7 +55,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_GEOCODER` | unset | `gemini_maps` opts in to Maps-grounded landmark geocoding (works with `GEMINI_API_KEY` or Vertex; `GEMINI_GEOCODE_MODEL` overrides the model). **Do not enable for real use:** Google's Maps-grounding docs bar "high risk activities including emergency response services", on the Gemini API and Vertex AI alike. The built-in gazetteer stays the default |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
-| `BROADCAST_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates broadcasts into the five app languages and, in a separate call, checks each translation against the source |
+| `ANNOUNCEMENT_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates announcements into the five app languages and, in a separate call, checks each translation against the source |
 | `SHELTER_GEMINI_MODEL` | `gemini-3.8-flash` | model for the Google Search-grounded shelter list discovery (`POST /v1/ready/shelter-lists/discover`, 60 s timeout); no Gemini credentials = 503, enter the list by hand |
 | `READY_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the Ready-mode household plan (text validated, else template); no Gemini credentials = templates |
 | `RELAY_TTS_MODEL` | unset | enables server-side speech for Ready plans (e.g. `gemini-2.5-flash-preview-tts`, API key or Vertex). Unset = `audio_url` is null and phones use on-device TTS. `RELAY_TTS_VOICE` (default `Kore`) picks the prebuilt voice |
@@ -82,7 +82,7 @@ app/pubsub.py           publish side of /v1/sync, push envelope parsing, OIDC ve
 app/teams.py            dispatch teams: seed file (data/teams_puri.json), derived load and status
 app/dispatch.py         allocator (priority, kind match, capacity, ETA), order drafting, ETA-bearing ACK
 app/sitrep.py           counts from store queries, prose around them (template or Gemini, number-validated)
-app/broadcast.py        broadcast in the enabled languages: translate, deterministic + model check, human approval
+app/announcements.py        announcement in the enabled languages: translate, deterministic + model check, human approval
 app/textgen.py          structured-JSON Gemini client for dispatch orders and sitreps
 app/ready.py            Ready mode: shelters, warnings + CAP parser, offline pack, validated household plan
 app/tts.py              optional Gemini text-to-speech (PCM to WAV), off unless RELAY_TTS_MODEL is set
@@ -176,12 +176,12 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
   Cloud Scheduler job in `infra/terraform/sitrep.tf` (not applied).
 - Dispatch orders (`POST /v1/dispatch/propose`) are written in English plus the assigned team's
   district language, whatever language the requester used.
-- Broadcasts (`app/broadcast.py`): `POST /v1/broadcasts {district, text, source_lang?}` drafts the message in
+- Announcements (`app/announcements.py`): `POST /v1/announcements {district, text, source_lang?}` drafts the message in
   en, hi, or, tl, war (one Gemini call translates, a separate one back-translates and judges each against
-  the source; numbers and times must also match the source deterministically). `POST /v1/broadcasts/{id}/approve
+  the source; numbers and times must also match the source deterministically). `POST /v1/announcements/{id}/approve
   {langs?, edits?}` publishes the languages whose status is ok (or the listed/edited ones, re-checked; 422 if
-  they fail); `POST .../withdraw` retracts; `GET /v1/broadcasts?district=&status=` lists. Phones with signal
-  fetch `GET /v1/broadcasts/active?district=` with the **device** key: approved, not withdrawn, approved
+  they fail); `POST .../withdraw` retracts; `GET /v1/announcements?district=&status=` lists. Phones with signal
+  fetch `GET /v1/announcements/active?district=` with the **device** key: approved, not withdrawn, approved
   languages only. Mesh delivery is not built (proposal in the module docstring).
 - `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
 
@@ -238,7 +238,7 @@ not enabled gets English.
 | ACK text (`templates.py`) | reviewed template (`TEMPLATES`) or, if enabled, a draft in `CONTRIB_TEMPLATES` | English text (always within the 112-byte limit) |
 | Dispatch order and sitrep (`dispatch.py`, `sitrep.py`) | English + the district's `local_lang` | `local_lang` is Hindi when the district's native language (Puri: Odia) is off |
 | Triage dispatch draft (`agent.py`) | model translation into the requester's language | English, no model translation |
-| Broadcast (`broadcast.py`) | translated, checked and approved per enabled language | not translated; `source_lang` must be enabled |
+| Announcement (`announcements.py`) | translated, checked and approved per enabled language | not translated; `source_lang` must be enabled |
 | Ready plan and pack (`ready.py`) | template or model steps in the language | English, `steps_lang: "en"` |
 | Server speech (`tts.py`) | `TTS_LANGS` intersected with enabled | no `audio_url` |
 
@@ -254,7 +254,7 @@ structures (`CONTRIB_TEMPLATES`, `CONTRIB_ORDER_LOCAL`, `CONTRIB_TEMPLATES` in `
 2) Set `reviewed` to true in `app/languages.py` and add the code to `DEFAULT_ENABLED` (or, to try
 it first, set `RELAY_LANGS=en,hi,<code>`). 3) Add tests: update the "default" expectations in
 `tests/test_templates_priority.py`, `test_dispatch.py`, `test_sitrep.py`, `test_ready.py` and
-`test_broadcast.py`, and keep a test that the language is off when it is not listed. 4) Mirror the
+`test_announcements.py`, and keep a test that the language is off when it is not listed. 4) Mirror the
 change in `dashboard/src/lib/languages.ts`.
 
 ## Deploy

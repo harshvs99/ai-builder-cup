@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import broadcast as broadcasts
+from . import announcements
 from . import dispatch as dispatching
 from . import districts, languages
 from . import ready as readiness
@@ -169,28 +169,28 @@ class OnTheWayRequest(BaseModel):
     eta_min: int | None = Field(default=None, ge=0, le=dispatching.MAX_ETA_MIN)
 
 
-class BroadcastCreate(BaseModel):
+class AnnouncementCreate(BaseModel):
     district: str
-    text: str = Field(min_length=1, max_length=broadcasts.MAX_TEXT_CHARS)
+    text: str = Field(min_length=1, max_length=announcements.MAX_TEXT_CHARS)
     source_lang: str = "en"
 
     @field_validator("district")
     @classmethod
     def _district(cls, v: str) -> str:
-        return broadcasts.norm_district(v)
+        return announcements.norm_district(v)
 
     @field_validator("source_lang")
     @classmethod
     def _lang(cls, v: str) -> str:
-        if v not in broadcasts.active_langs():
-            raise ValueError(f"source_lang must be one of {', '.join(broadcasts.active_langs())}")
+        if v not in announcements.active_langs():
+            raise ValueError(f"source_lang must be one of {', '.join(announcements.active_langs())}")
         return v
 
 
-class BroadcastApprove(BaseModel):
+class AnnouncementApprove(BaseModel):
     """``langs`` omitted = every language whose status is ok. ``edits`` = operator-corrected texts."""
 
-    langs: list[str] | None = Field(default=None, max_length=len(broadcasts.ALL_LANGS))
+    langs: list[str] | None = Field(default=None, max_length=len(announcements.ALL_LANGS))
     edits: dict[str, str] | None = None
 class WarningRequest(BaseModel):
     """``POST /v1/ready/warnings``: an authority's warning, relayed by the duty officer."""
@@ -411,7 +411,7 @@ def create_app(
     triage_budget_s: float | None = None,
     textgen: TextGen | None = None,
     sitrep_textgen: TextGen | None = None,
-    broadcast_textgen: TextGen | None = None,
+    announcement_textgen: TextGen | None = None,
     embedder: Embedder | None = None,
     ready_textgen: TextGen | None = None,
     speech: Speech | None = None,
@@ -420,7 +420,7 @@ def create_app(
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
     orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default the Pro alias, Flash fallback);
-    ``broadcast_textgen`` translates and checks broadcasts (``BROADCAST_GEMINI_MODEL``); ``ready_textgen`` writes
+    ``announcement_textgen`` translates and checks announcements (``ANNOUNCEMENT_GEMINI_MODEL``); ``ready_textgen`` writes
     the Ready-mode household plan (``READY_GEMINI_MODEL``); all default to Gemini when the environment enables
     it, else to templates. ``speech`` reads plans aloud (``RELAY_TTS_MODEL``, off by default).
     ``shelter_finder`` is the Search-grounded call that drafts a shelter list (``SHELTER_GEMINI_MODEL``)."""
@@ -444,8 +444,8 @@ def create_app(
 
     textgen = textgen if textgen is not None else textgen_from_env("GEMINI_MODEL")
     sitrep_textgen = sitrep_textgen if sitrep_textgen is not None else sitrep_textgen_from_env()
-    broadcast_textgen = (
-        broadcast_textgen if broadcast_textgen is not None else textgen_from_env("BROADCAST_GEMINI_MODEL")
+    announcement_textgen = (
+        announcement_textgen if announcement_textgen is not None else textgen_from_env("ANNOUNCEMENT_GEMINI_MODEL")
     )
     ready_textgen = ready_textgen if ready_textgen is not None else textgen_from_env("READY_GEMINI_MODEL")
     speech = speech if speech is not None else speech_from_env()
@@ -784,69 +784,69 @@ def create_app(
             raise HTTPException(status_code=404, detail="no sitrep yet")
         return latest
 
-    # ------------------------------------------------------------------ broadcasts
-    def broadcast_or_404(broadcast_id: int) -> dict[str, Any]:
-        row = store.get_broadcast(broadcast_id)
+    # ------------------------------------------------------------------ announcements
+    def announcement_or_404(announcement_id: int) -> dict[str, Any]:
+        row = store.get_announcement(announcement_id)
         if row is None:
-            raise HTTPException(status_code=404, detail="broadcast not found")
+            raise HTTPException(status_code=404, detail="announcement not found")
         return row
 
-    @app.post("/v1/broadcasts", dependencies=operator)
-    def create_broadcast(body: BroadcastCreate) -> dict[str, Any]:
+    @app.post("/v1/announcements", dependencies=operator)
+    def create_announcement(body: AnnouncementCreate) -> dict[str, Any]:
         """Draft only: translations are checked but nothing is served until /approve."""
-        translations = broadcasts.draft(
-            body.text, body.source_lang, body.district, broadcast_textgen, broadcast_textgen
+        translations = announcements.draft(
+            body.text, body.source_lang, body.district, announcement_textgen, announcement_textgen
         )
-        return store.add_broadcast({
+        return store.add_announcement({
             "district": body.district, "source_text": body.text.strip(), "source_lang": body.source_lang,
             "created_at": int(clock()), "translations": translations, "status": "draft",
             "approved_at": None, "approved_langs": [],
         })
 
-    @app.get("/v1/broadcasts", dependencies=operator)
-    def list_broadcasts(district: str | None = None, status: str | None = None) -> dict[str, Any]:
+    @app.get("/v1/announcements", dependencies=operator)
+    def list_announcements(district: str | None = None, status: str | None = None) -> dict[str, Any]:
         if status is not None and status not in ("draft", "approved", "withdrawn"):
             raise HTTPException(status_code=422, detail="status must be draft, approved or withdrawn")
         try:
-            district = broadcasts.norm_district(district) if district else None
+            district = announcements.norm_district(district) if district else None
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        return {"broadcasts": store.list_broadcasts(district, status)}
+        return {"announcements": store.list_announcements(district, status)}
 
-    @app.post("/v1/broadcasts/{broadcast_id}/approve", dependencies=operator)
-    def approve_broadcast(broadcast_id: int, body: BroadcastApprove | None = None) -> dict[str, Any]:
-        row = broadcast_or_404(broadcast_id)
+    @app.post("/v1/announcements/{announcement_id}/approve", dependencies=operator)
+    def approve_announcement(announcement_id: int, body: AnnouncementApprove | None = None) -> dict[str, Any]:
+        row = announcement_or_404(announcement_id)
         if row["status"] != "draft":
-            raise HTTPException(status_code=409, detail=f"broadcast is {row['status']}, not a draft")
-        body = body or BroadcastApprove()
+            raise HTTPException(status_code=409, detail=f"announcement is {row['status']}, not a draft")
+        body = body or AnnouncementApprove()
         try:
-            fields = broadcasts.apply_approval(row, body.langs, body.edits)
+            fields = announcements.apply_approval(row, body.langs, body.edits)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        saved = store.update_broadcast(
-            broadcast_id, {**fields, "status": "approved", "approved_at": int(clock())}
+        saved = store.update_announcement(
+            announcement_id, {**fields, "status": "approved", "approved_at": int(clock())}
         )
         return saved or row
 
-    @app.post("/v1/broadcasts/{broadcast_id}/withdraw", dependencies=operator)
-    def withdraw_broadcast(broadcast_id: int) -> dict[str, Any]:
-        broadcast_or_404(broadcast_id)
-        return store.update_broadcast(broadcast_id, {"status": "withdrawn"}) or broadcast_or_404(broadcast_id)
+    @app.post("/v1/announcements/{announcement_id}/withdraw", dependencies=operator)
+    def withdraw_announcement(announcement_id: int) -> dict[str, Any]:
+        announcement_or_404(announcement_id)
+        return store.update_announcement(announcement_id, {"status": "withdrawn"}) or announcement_or_404(announcement_id)
 
-    @app.get("/v1/broadcasts/active", dependencies=[Depends(require_key)])
-    def active_broadcasts(district: str) -> dict[str, Any]:
+    @app.get("/v1/announcements/active", dependencies=[Depends(require_key)])
+    def active_announcements(district: str) -> dict[str, Any]:
         """For phones with signal (device key): approved, not withdrawn, approved languages only."""
         try:
-            district = broadcasts.norm_district(district)
+            district = announcements.norm_district(district)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        return {"broadcasts": [
+        return {"announcements": [
             {
                 "id": b["id"], "district": b["district"], "source_lang": b["source_lang"],
                 "created_at": b["created_at"], "approved_at": b["approved_at"],
                 "texts": {lang: b["translations"][lang]["text"] for lang in b["approved_langs"] if languages.is_enabled(lang)},
             }
-            for b in store.list_broadcasts(district, "approved")
+            for b in store.list_announcements(district, "approved")
         ]}
     # ------------------------------------------------------------------ ready mode (before landfall)
     def resolve_district(district: str | None, lat: float | None, lon: float | None) -> districts.District:
