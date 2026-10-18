@@ -1,11 +1,11 @@
 # Relay infrastructure (Google Cloud)
 
-One Cloud Run service (`relay`) serves the FastAPI API and the built dashboard from the same origin. Firestore holds state, Pub/Sub buffers gateway uploads for Gemini triage (Vertex AI, no API key). Terraform with local state; a project is deployed and destroyed with one script each.
+One Cloud Run service (`relay`) serves the FastAPI API and the built dashboard from the same origin. Firestore holds state, Pub/Sub buffers gateway uploads for Gemini triage (Gemini API with a Google AI Studio key kept in Secret Manager; no Vertex AI). Terraform with local state; a project is deployed and destroyed with one script each.
 
 ```
 phones ──HTTPS──► Cloud Run "relay" ──► Firestore (named DB relay-xxxxxx)
 dashboard ──────►  /v1/*  /healthz  /  (static)      │
-                      │ publish                       │ Vertex AI Gemini
+                      │ publish                       │ Gemini API (key)
                       ▼                               ▼
               Pub/Sub relay-packets ──push (OIDC)──► /internal/triage
                       └─ 5 failed tries ─► relay-packets-dlq (+ 7-day hold subscription)
@@ -45,13 +45,13 @@ Removes everything Terraform created, including the Firestore database (data is 
 | Cloud Run | Scale to zero, 1 vCPU / 512Mi, request-billed; idle cost 0. Demo traffic is inside the free tier |
 | Firestore | Free tier (1 GiB, 50k reads / 20k writes per day) covers a demo |
 | Pub/Sub | Negligible (first 10 GiB/month free) |
-| Vertex AI Gemini | Per token, the only cost that scales with use; a demo is cents |
+| Gemini API (AI Studio key, paid tier) | Per token, the only cost that scales with use; a demo is cents |
 | Artifact Registry | Cleanup keeps 5 images, well under a dollar a month |
 | Cloud Build | Default machine, free minutes cover a handful of builds |
 
 ## Design notes
 - **Pub/Sub auth without a URL cycle.** The push subscription needs the service URL; the service would need that URL as the token audience. Instead the audience is the fixed string `relay-triage` and the app verifies the token. One `terraform apply`, no second pass. The Cloud Run service is public, so the OIDC check in the app is the *only* guard on `/internal/triage`; it must not be skipped. (`relay-push` also holds `run.invoker`, which is redundant while the service is public, but keeps the config valid if you later make it private.)
-- **Least privilege.** `relay-run`: `datastore.user`, `aiplatform.user`, `logging.logWriter` at project level (no practical resource-level alternative); `pubsub.publisher` on the one topic; `secretAccessor` on the one secret. `relay-push`: `run.invoker` on the service only. `relay-build`: AR writer on the repo, objectViewer on the staging bucket, `logging.logWriter`. Builds use this account because new projects no longer grant Cloud Build's default account enough rights.
+- **Least privilege.** `relay-run`: `datastore.user` (conditioned on the one database), `logging.logWriter` at project level (no practical resource-level alternative); `pubsub.publisher` on the one topic; `secretAccessor` on the two secrets (`relay-device-key`, `gemini-api-key`). No Vertex AI role or API. `relay-push`: `run.invoker` on the service only. `relay-build`: AR writer on the repo, objectViewer on the staging bucket, `logging.logWriter`. Builds use this account because new projects no longer grant Cloud Build's default account enough rights.
 - **google-beta provider** is used for one resource only (`google_project_service_identity`, creates the Pub/Sub service agent so IAM grants never race it).
 
 ## Backend contract
@@ -70,13 +70,17 @@ The backend must implement exactly this. Terraform provides it; nothing here is 
 | `RELAY_PUBSUB_TOPIC` | `projects/<project>/topics/relay-packets` | full path; `PublisherClient.publish(RELAY_PUBSUB_TOPIC, ...)` |
 | `RELAY_PUBSUB_AUDIENCE` | `relay-triage` | literal string, not a URL |
 | `RELAY_PUBSUB_INVOKER_SA` | `relay-push@<project>.iam.gserviceaccount.com` | expected `email` claim |
-| `GOOGLE_GENAI_USE_VERTEXAI` | `true` | `google-genai` then uses Vertex + ADC; treat this (not `GEMINI_API_KEY`) as the enable switch for the Gemini agent in prod |
-| `GOOGLE_CLOUD_PROJECT` | project id | |
-| `GOOGLE_CLOUD_LOCATION` | `global` (default) | Vertex location |
+| `GEMINI_API_KEY` | AI Studio key (Secret Manager `gemini-api-key`) | the enable switch for the Gemini agent in prod; `GOOGLE_GENAI_USE_VERTEXAI` is not set |
+| `GOOGLE_CLOUD_PROJECT` | project id | used by the Firestore client |
 | `GEMINI_MODEL` | `gemini-flash-latest` (default) | |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` (default, `sitrep_gemini_model`) | hourly per-district sitrep; Flash fallback |
 
-Credentials are Application Default Credentials from the `relay-run` service account (metadata server); no key files.
+Firestore and Pub/Sub use Application Default Credentials from the `relay-run` service account (metadata server); no key files. The Gemini key is the one secret you supply.
+
+### Gemini API key
+`deploy.sh` reads the key from the `GEMINI_API_KEY` environment variable of whoever deploys (it fails if unset, never prints it) and hands it to Terraform as `TF_VAR_gemini_api_key`; it is stored in Secret Manager (`gemini-api-key`) and injected into Cloud Run from there. It also sits in the Terraform state (the GCS state bucket), so keep that bucket private. `destroy.sh` needs no key.
+
+Use a **paid-tier (billing-enabled) AI Studio key**. On the free tier Google may use prompts to improve its products, which is not acceptable for disaster victims' data.
 
 ### `/v1/sync` publishes to Pub/Sub
 After validating and deduping, publish one message per accepted batch to `RELAY_PUBSUB_TOPIC`:

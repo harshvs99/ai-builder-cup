@@ -7,9 +7,14 @@ look. Two sources, in order:
   1. ``Gazetteer`` (phase 1): a curated list of Puri-district places with aliases in
      English / Hindi / Odia and common transliterations. Deterministic, pure, no network.
      Exact match first, then a conservative fuzzy match.
-  2. ``Geocoder`` (phase 2, optional): Gemini Flash with Google Maps grounding on Vertex AI,
-     behind ``PlaceFinder`` with a hard timeout. Off unless ``RELAY_GEOCODER=gemini_maps`` and
-     Vertex is configured. Its answer is rejected unless it is inside the district bounding box.
+  2. ``Geocoder`` (phase 2, optional): Gemini Flash with Google Maps grounding (Gemini API key
+     ``GEMINI_API_KEY``, or Vertex AI if ``GOOGLE_GENAI_USE_VERTEXAI`` is set), behind
+     ``PlaceFinder`` with a hard timeout. Off unless ``RELAY_GEOCODER=gemini_maps`` and a model
+     credential is configured. Its answer is rejected unless it is inside the district bounding box.
+
+     LEGAL CHECK BEFORE ENABLING: Google's terms for Maps grounding reportedly exclude
+     "emergency response use cases". The owner must read the current Gemini API and Google Maps
+     Platform terms before turning this on in a pilot. The gazetteer path stays the default.
 
 The result is stored as ``geo = {lat, lon, source, query}``. It is an estimate and nothing
 else reads it as a fix:
@@ -288,16 +293,21 @@ Do not guess."""
 
 
 class GenaiMapsFinder:
-    """Gemini Flash with the Google Maps grounding tool on Vertex AI (ADC). Built lazily, so
-    constructing it never needs credentials; a credentials problem is a failed call -> None."""
+    """Gemini Flash with the Google Maps grounding tool, via a Gemini API key (AI Studio) or, when
+    ``api_key`` is None, Vertex AI (ADC). Built lazily, so constructing it never needs credentials;
+    a credentials problem is a failed call -> None."""
 
-    def __init__(self, model: str, project: str | None, location: str | None, timeout_s: float):
+    def __init__(self, model: str, project: str | None, location: str | None, timeout_s: float,
+                 api_key: str | None = None):
         from google.genai import types
 
         self._types = types
         self._model = model
         self._timeout_s = timeout_s
-        self._kwargs = {"vertexai": True, "project": project, "location": location or "global"}
+        self._kwargs = (
+            {"api_key": api_key} if api_key
+            else {"vertexai": True, "project": project, "location": location or "global"}
+        )
         self._client: Any = None
         self._lock = threading.Lock()
 
@@ -340,14 +350,17 @@ class GenaiMapsFinder:
 
 
 def geocoder_from_env(env: dict[str, str] | None = None) -> Geocoder:
-    """Off by default. On when ``RELAY_GEOCODER=gemini_maps`` and Vertex AI is configured
-    (``GOOGLE_GENAI_USE_VERTEXAI`` true; project/location from ``GOOGLE_CLOUD_PROJECT`` /
-    ``GOOGLE_CLOUD_LOCATION``). Maps grounding is a billed feature, hence the explicit switch."""
+    """Off by default. On when ``RELAY_GEOCODER=gemini_maps`` and a model credential is configured:
+    Vertex AI if ``GOOGLE_GENAI_USE_VERTEXAI`` is true (project/location from ``GOOGLE_CLOUD_PROJECT`` /
+    ``GOOGLE_CLOUD_LOCATION``), else ``GEMINI_API_KEY``. Maps grounding is billed, and its terms
+    reportedly exclude emergency-response use (see the module docstring), hence the explicit switch."""
     env = os.environ if env is None else env
     if (env.get("RELAY_GEOCODER") or "").strip().lower() != "gemini_maps":
         return NoGeocoder()
-    if env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() not in ("true", "1"):
-        log.warning("RELAY_GEOCODER=gemini_maps needs Vertex AI (GOOGLE_GENAI_USE_VERTEXAI); geocoder off")
+    use_vertex = env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1")
+    api_key = (env.get("GEMINI_API_KEY") or "").strip() or None
+    if not use_vertex and not api_key:
+        log.warning("RELAY_GEOCODER=gemini_maps needs GEMINI_API_KEY (or GOOGLE_GENAI_USE_VERTEXAI); geocoder off")
         return NoGeocoder()
     try:
         finder = GenaiMapsFinder(
@@ -355,6 +368,7 @@ def geocoder_from_env(env: dict[str, str] | None = None) -> Geocoder:
             env.get("GOOGLE_CLOUD_PROJECT") or None,
             env.get("GOOGLE_CLOUD_LOCATION") or "global",
             timeout_s=6.0,
+            api_key=None if use_vertex else api_key,
         )
     except Exception as e:
         log.error("geocoder init failed (%s); geocoder off", e)
