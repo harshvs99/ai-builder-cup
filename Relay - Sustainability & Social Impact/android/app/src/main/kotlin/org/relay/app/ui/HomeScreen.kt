@@ -91,7 +91,7 @@ import org.relay.core.payload.Utf8
 import org.relay.core.payload.VulnFlag
 
 @Composable
-fun HomeScreen(actions: SetupActions) {
+fun LegacyHomeScreen(actions: SetupActions) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val status by MeshRepository.status.collectAsStateWithLifecycle()
@@ -529,11 +529,9 @@ private fun NeedRow(n: MyNeed, st: NeedStatus, backendFailing: Boolean) {
                     (if (backendFailing) COLOR_BAD else COLOR_WARN)
             NeedStatus.UPLOADED -> "Uploaded — waiting for confirmation" to COLOR_WARN
             NeedStatus.RECEIVED -> "Received by control room ✓" to COLOR_OK
-            NeedStatus.DISPATCHED -> when (n.ackStatus) {
-                2 -> "Help on the way 🚑"
-                3 -> "Resolved ✅"
-                else -> "Help dispatched 🚑"
-            } to Color(0xFF0B57D0)
+            NeedStatus.DISPATCHED -> "Help dispatched 🚑" to Color(0xFF0B57D0)
+            NeedStatus.ON_THE_WAY -> "Help on the way 🚑" to Color(0xFF0B57D0)
+            NeedStatus.RESOLVED -> "Resolved ✅" to COLOR_OK
         }
         Pill(label, color)
         if (n.ticketNo >= 0) Text("Ticket #${n.ticketNo}", style = MaterialTheme.typography.labelMedium)

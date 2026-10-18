@@ -60,7 +60,7 @@ class DebugReceiver : BroadcastReceiver() {
                 // Accept `--es offline true` and `--ez offline true`.
                 val str = intent.getStringExtra("offline")?.trim()?.lowercase()
                 val on = if (str != null) str == "true" || str == "1" || str == "yes" else extras.getBoolean("offline", false)
-                n = n.copy(pretendOffline = on)
+                n = n.copy(gatewayMode = if (on) org.relay.app.GatewayMode.NEVER else org.relay.app.GatewayMode.AUTOMATIC)
             }
             n
         }

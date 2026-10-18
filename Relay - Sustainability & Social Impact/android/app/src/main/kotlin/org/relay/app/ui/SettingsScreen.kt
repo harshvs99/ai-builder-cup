@@ -48,7 +48,7 @@ import org.relay.app.ble.Allowlist
 import org.relay.app.ble.BlePermissions
 
 @Composable
-fun SettingsScreen(actions: SetupActions) {
+fun DeveloperSettingsScreen(actions: SetupActions) {
     val ctx = LocalContext.current
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
     var backend by remember(settings.backendUrl) { mutableStateOf(settings.backendUrl) }
@@ -135,7 +135,7 @@ fun SettingsScreen(actions: SetupActions) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Pretend offline (never act as gateway)", Modifier.weight(1f))
-                Switch(checked = settings.pretendOffline, onCheckedChange = { v -> MeshRepository.settings.update { it.copy(pretendOffline = v) } })
+                Switch(checked = settings.pretendOffline, onCheckedChange = { v -> MeshRepository.settings.update { it.copy(gatewayMode = if (v) org.relay.app.GatewayMode.NEVER else org.relay.app.GatewayMode.AUTOMATIC) } })
             }
         }
         item { SectionTitle("This phone") }

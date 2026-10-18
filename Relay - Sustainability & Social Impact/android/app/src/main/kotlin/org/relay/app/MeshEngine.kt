@@ -117,7 +117,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
             internet = net
             if (outcome != null) {
                 val now = System.currentTimeMillis()
-                if (outcome.ok) { lastSyncOkAt = now; lastSyncError = null } else lastSyncError = outcome.error
+                if (outcome.ok) { lastSyncOkAt = now; lastSyncError = null; repo.noteUploads() } else lastSyncError = outcome.error
                 syncHealth = syncHealth.record(outcome.ok, outcome.error, now, repo.settings.current.backendUrl)
             }
             publish()
@@ -193,7 +193,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         val toSend = ArrayList<Need>()
         for (n in repo.drainOutbox()) toSend += n
         for (m in repo.myNeedsStore.list()) {
-            if (m.stage != org.relay.app.store.MyNeed.Stage.QUEUED) continue
+            if (m.stage != org.relay.app.store.MyNeed.Stage.QUEUED || m.cancelled) continue
             if (System.currentTimeMillis() - m.createdAtMs > 72L * 3600 * 1000) continue
             val need = try {
                 NeedCodec.decode(java.util.Base64.getDecoder().decode(m.needPayloadB64))
@@ -228,7 +228,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         val f = FrameCodec.decode(raw) ?: return
         if (!f.senderId.contentEquals(nodeId)) return
         val need = NeedCodec.decode(f.payload) ?: return
-        val updated = repo.myNeedsStore.update(need.msgIdHex) { if (it.sentToMesh) it else it.copy(sentToMesh = true) }
+        val updated = repo.myNeedsStore.update(need.msgIdHex) { it.markSentToMesh() }
         if (updated != null) repo.refreshMyNeeds()
     }
 

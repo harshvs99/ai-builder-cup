@@ -9,14 +9,42 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** Light / Dark, or follow the system (default). */
+enum class ThemeMode { LIGHT, DARK, AUTO }
+
+/** Text-to-speech rate for "Hear it" buttons and read-aloud. */
+enum class VoiceSpeed { SLOW, NORMAL }
+
+/**
+ * Whether this phone uploads for the mesh when it has internet. NEVER is the old "Pretend offline" switch.
+ * AUTOMATIC and ALWAYS behave the same today (a phone with internet is a gateway); ALWAYS is reserved for
+ * "stay a gateway even when the network looks constrained".
+ */
+enum class GatewayMode { AUTOMATIC, NEVER, ALWAYS }
+
 data class Settings(
     val backendUrl: String = BackendDefaults.EMULATOR_URL,
     val deviceKey: String = DEFAULT_KEY,
     /** Comma-separated node-id hex prefixes; empty = accept every peer. */
     val allowlist: String = "",
-    val pretendOffline: Boolean = false,
     val language: Lang = Lang.EN,
+    val themeMode: ThemeMode = ThemeMode.AUTO,
+    /** Multiplies all text by 1.2. */
+    val largerText: Boolean = false,
+    /** Speak new messages from the control room aloud. */
+    val readAloud: Boolean = false,
+    val voiceSpeed: VoiceSpeed = VoiceSpeed.NORMAL,
+    /** The user has picked a language on the first-run screen (false until then). */
+    val languageConfirmed: Boolean = false,
+    /** Optional "Your area" text shown on Home and in request references; empty = omit. */
+    val areaLabel: String = "",
+    val gatewayMode: GatewayMode = GatewayMode.AUTOMATIC,
+    /** Keep the mesh service running when the app is closed. */
+    val carryInBackground: Boolean = true,
 ) {
+    /** The old "Pretend offline" behaviour: never act as a gateway. */
+    val pretendOffline: Boolean get() = gatewayMode == GatewayMode.NEVER
+
     companion object {
         /** Build-time `relay.deviceKey`; `dev-relay-key` when none was configured. */
         val DEFAULT_KEY: String = BuildConfig.DEFAULT_KEY
@@ -52,9 +80,22 @@ class AppSettings(ctx: Context) {
         deviceKey = if (connectionLocked) Settings.DEFAULT_KEY
             else prefs.getString("key", Settings.DEFAULT_KEY) ?: Settings.DEFAULT_KEY,
         allowlist = prefs.getString("allowlist", "") ?: "",
-        pretendOffline = prefs.getBoolean("offline", false),
         language = Lang.fromTag(prefs.getString("lang", "en") ?: "en") ?: Lang.EN,
+        themeMode = enumOr(prefs.getString("theme", null), ThemeMode.AUTO),
+        largerText = prefs.getBoolean("larger_text", false),
+        readAloud = prefs.getBoolean("read_aloud", false),
+        voiceSpeed = enumOr(prefs.getString("voice_speed", null), VoiceSpeed.NORMAL),
+        // Existing installs have no flag, so they see the language screen once.
+        languageConfirmed = prefs.getBoolean("lang_confirmed", false),
+        areaLabel = prefs.getString("area", "") ?: "",
+        // Older installs stored the "Pretend offline" switch as a boolean.
+        gatewayMode = prefs.getString("gateway_mode", null)?.let { enumOr(it, GatewayMode.AUTOMATIC) }
+            ?: if (prefs.getBoolean("offline", false)) GatewayMode.NEVER else GatewayMode.AUTOMATIC,
+        carryInBackground = prefs.getBoolean("carry_bg", true),
     )
+
+    private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
+        enumValues<E>().firstOrNull { it.name == name } ?: default
 
     @Synchronized fun update(f: (Settings) -> Settings) {
         val next = f(_flow.value).let {
@@ -68,6 +109,14 @@ class AppSettings(ctx: Context) {
             .putString("allowlist", next.allowlist)
             .putBoolean("offline", next.pretendOffline)
             .putString("lang", next.language.tag)
+            .putString("theme", next.themeMode.name)
+            .putBoolean("larger_text", next.largerText)
+            .putBoolean("read_aloud", next.readAloud)
+            .putString("voice_speed", next.voiceSpeed.name)
+            .putBoolean("lang_confirmed", next.languageConfirmed)
+            .putString("area", next.areaLabel)
+            .putString("gateway_mode", next.gatewayMode.name)
+            .putBoolean("carry_bg", next.carryInBackground)
             .apply()
         _flow.value = next
         for (l in listeners) try { l(next) } catch (_: Exception) {}

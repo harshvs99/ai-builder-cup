@@ -150,6 +150,9 @@ object MeshRepository {
             landmark = need.landmark,
             summary = need.summary,
             lang = need.lang,
+            vulnFlags = need.vulnFlags,
+            answers = need.answers.associate { it.questionId to it.value },
+            sentToMeshAtMs = 0,
             needPayloadB64 = Base64.getEncoder().encodeToString(NeedCodec.encode(need)),
         )
         myNeedsStore.add(mine)
@@ -162,6 +165,33 @@ object MeshRepository {
             log("service not running; NEED ${need.msgIdHex} queued until it starts")
             ctx?.let { startService(it) }
         }
+    }
+
+    /**
+     * The user stopped sharing request [msgIdHex]: mark it cancelled and stop relaying its NEED from this phone
+     * (drop it from the packet store and the not-yet-started outbox). There is no cancel frame on the wire, so
+     * neighbours and the control room may still have it. Returns false for an unknown id.
+     */
+    fun cancel(msgIdHex: String): Boolean {
+        val updated = myNeedsStore.update(msgIdHex) { it.cancel() } ?: return false
+        synchronized(outbox) { outbox.removeAll { it.msgIdHex == msgIdHex } }
+        packetStore.remove(msgIdHex)
+        packetStore.flush()
+        refreshMyNeeds()
+        log("cancelled own NEED $msgIdHex (stage=${updated.stage}); no longer relayed from this phone")
+        return true
+    }
+
+    /** Stamp "uploaded" on own NEEDs the gateway state now lists as uploaded (this phone was the gateway). */
+    fun noteUploads() {
+        var changed = false
+        for (m in myNeedsStore.list()) {
+            if (m.uploadedAtMs == 0L && gatewayState.isUploaded(m.msgIdHex)) {
+                myNeedsStore.update(m.msgIdHex) { it.markUploaded() }
+                changed = true
+            }
+        }
+        if (changed) refreshMyNeeds()
     }
 
     fun drainOutbox(): List<Need> = synchronized(outbox) { val l = ArrayList(outbox); outbox.clear(); l }
