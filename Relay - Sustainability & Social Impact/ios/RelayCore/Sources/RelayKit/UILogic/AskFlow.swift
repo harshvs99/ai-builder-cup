@@ -56,6 +56,9 @@ public struct AskFlow: Sendable {
         state.draft = AskLogic.applyIntake(state.draft, intake)
     }
 
+    /// The triage conversation finished: its findings join the draft (see `AskLogic.applyTriage`).
+    public mutating func applyTriage(_ r: TriageResult) { state.draft = AskLogic.applyTriage(state.draft, r) }
+
     public mutating func setTyping(_ typing: Bool) { state.typing = typing }
 
     /// Add to request: start from an existing request's category and landmark. Applies once.
@@ -77,6 +80,9 @@ public struct AskFlow: Sendable {
             state.draft = next
         }
     }
+
+    /// A tap on the "Transport out" chip.
+    public mutating func toggleTransport() { state.draft = AskLogic.toggleTransport(state.draft) }
 
     /// A tap on an exact category in the Need editor (water and food are separate there); a sibling is swapped.
     public mutating func pickCategory(_ c: NeedCategory) {

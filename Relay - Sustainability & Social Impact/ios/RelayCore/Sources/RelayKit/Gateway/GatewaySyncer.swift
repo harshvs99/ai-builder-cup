@@ -9,6 +9,8 @@ public struct SyncOutcome: Equatable, Sendable {
     public var duplicates: Int
     public var rejected: Int
     public var acksOriginated: Int
+    /// Control-room broadcasts this round put into the mesh for the first time (already-held ones are not counted).
+    public var broadcastsOriginated: Int
     public var error: String?
     /// How many of the `uploaded` frames were LOC_HINTs (the rest are NEEDs).
     public var hintsUploaded: Int
@@ -16,9 +18,11 @@ public struct SyncOutcome: Equatable, Sendable {
     public var hintsAccepted: Int?
 
     public init(ok: Bool, uploaded: Int = 0, accepted: Int = 0, duplicates: Int = 0, rejected: Int = 0,
-                acksOriginated: Int = 0, error: String? = nil, hintsUploaded: Int = 0, hintsAccepted: Int? = nil) {
+                acksOriginated: Int = 0, broadcastsOriginated: Int = 0, error: String? = nil, hintsUploaded: Int = 0,
+                hintsAccepted: Int? = nil) {
         self.ok = ok; self.uploaded = uploaded; self.accepted = accepted; self.duplicates = duplicates
-        self.rejected = rejected; self.acksOriginated = acksOriginated; self.error = error
+        self.rejected = rejected; self.acksOriginated = acksOriginated; self.broadcastsOriginated = broadcastsOriginated
+        self.error = error
         self.hintsUploaded = hintsUploaded; self.hintsAccepted = hintsAccepted
     }
 }
@@ -82,6 +86,18 @@ public final class GatewaySyncer: @unchecked Sendable {
                 log("originating ACK ref=\(Hex.encode(ack.refMsgId)) ticket=#\(ack.ticketNo) status=\(ack.status.name) -> node \(Hex.encode(ack.targetNode))")
                 originated += 1
             }
+            // Every sync hands back every live broadcast; originating is idempotent, so each gateway just puts them all in.
+            var bcasts = 0
+            for payload in resp.broadcasts {
+                guard let b = BroadcastCodec.decode(payload) else {
+                    log("sync: backend returned an undecodable BROADCAST payload; skipped")
+                    continue
+                }
+                if try node.originateBroadcast(b) != nil {
+                    log("originating BROADCAST \(b.idHex) \(b.kind) \(b.disaster.key)")
+                    bcasts += 1
+                }
+            }
             // Only after ACKs are safely in the store do we advance the cursor / mark frames uploaded.
             state.markUploaded(batch.map { $0.key })
             state.setAckCursor(resp.ackCursor)
@@ -90,7 +106,7 @@ public final class GatewaySyncer: @unchecked Sendable {
             log("sync ok frames=\(batch.count) accepted=\(resp.accepted) duplicates=\(resp.duplicates) "
                 + "rejected=\(resp.rejected) acks=\(originated) ack_cursor=\(resp.ackCursor)\(hintNote)")
             return SyncOutcome(ok: true, uploaded: batch.count, accepted: resp.accepted, duplicates: resp.duplicates,
-                               rejected: resp.rejected, acksOriginated: originated,
+                               rejected: resp.rejected, acksOriginated: originated, broadcastsOriginated: bcasts,
                                hintsUploaded: hintsInBatch, hintsAccepted: resp.hints?.accepted)
         } catch {
             moreWaiting = false

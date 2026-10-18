@@ -53,6 +53,8 @@ public enum Route: Hashable, Sendable {
     case request(msgId: String)
     /// New request (step 1 of 3). `prefillFrom` is the msg id of the request being added to.
     case ask(mode: AskMode, prefillFrom: String?)
+    /// The triage questions between New request and Check and send (medical and rescue requests only).
+    case triage
     /// Check and send (step 2 of 3).
     case check
     case network
@@ -65,7 +67,7 @@ public enum Route: Hashable, Sendable {
     /// Routes that hide the tab bar: the ask flow and the first-run language screen.
     public var hidesTabBar: Bool {
         switch self {
-        case .ask, .check, .language: return true
+        case .ask, .triage, .check, .language: return true
         default: return false
         }
     }
@@ -73,7 +75,7 @@ public enum Route: Hashable, Sendable {
     /// True for the two screens that share one `AskFlow`.
     public var isAskFlow: Bool {
         switch self {
-        case .ask, .check: return true
+        case .ask, .triage, .check: return true
         default: return false
         }
     }
@@ -97,6 +99,7 @@ public enum Route: Hashable, Sendable {
         case .requests: return "requests"
         case .request(let id): return "request/\(id)"
         case .ask(let mode, let from): return "ask?mode=\(mode.arg)" + (from.map { "&prefillFrom=\($0)" } ?? "")
+        case .triage: return "triage"
         case .check: return "check"
         case .network: return "network"
         case .console: return "network/console"
@@ -112,6 +115,7 @@ public enum Route: Hashable, Sendable {
         case "language": self = .language
         case "home": self = .home
         case "requests": self = .requests
+        case "triage": self = .triage
         case "check": self = .check
         case "network": self = .network
         case "network/console": self = .console
@@ -152,6 +156,9 @@ public enum RouteStack {
         return s
     }
 
-    /// New request -> Check and send.
+    /// New request -> the triage questions.
+    public static func toTriage(_ stack: [Route]) -> [Route] { stack + [.triage] }
+
+    /// New request (or the triage questions) -> Check and send.
     public static func toCheck(_ stack: [Route]) -> [Route] { stack + [.check] }
 }

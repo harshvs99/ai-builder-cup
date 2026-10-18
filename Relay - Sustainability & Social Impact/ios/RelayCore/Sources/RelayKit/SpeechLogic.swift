@@ -22,6 +22,25 @@ public enum SpeechLogic {
     public static let errorCannotCheckSupport = 14
     public static let errorCannotListenToDownloadEvents = 15
 
+    // ---------------------------------------------------------------- Gemma as the speech recogniser
+
+    /// Languages whose Gemma transcription has been scored against recordings (ml/voice-spike: English and Hindi only, one
+    /// speaker, 34 clips). Google publishes no per-language speech-recognition list for the model, so every other language
+    /// is "may work": its transcript is shown for the person to check rather than trusted.
+    public static let gemmaSpeechMeasured: Set<Lang> = [.en, .hi]
+
+    /// Whether to let Gemma's audio input do the listening after the phone's recogniser failed with `kind`. Only for a
+    /// language problem (no pack, no offline model, unsupported), never a busy microphone or a denied permission, and only
+    /// when the phone can run the model. The platform recogniser always goes first: it is fast, streaming, and already works.
+    public static func useGemmaForSpeech(_ kind: Kind, gemmaUsable: Bool) -> Bool { kind == .languageUnavailable && gemmaUsable }
+
+    /// Shown while Gemma is listening: asks for a check unless the language was measured.
+    public static func gemmaNote(_ lang: Lang) -> String {
+        gemmaSpeechMeasured.contains(lang)
+            ? "Using the on-device assistant to listen."
+            : "Using the on-device assistant to listen in \(languageName(lang)) (not fully tested) — check the text before sending."
+    }
+
     /// Recogniser language tag for each Relay language; Waray and Cebuano fall back to Filipino.
     public static func recognizerTag(_ lang: Lang) -> String {
         switch lang {

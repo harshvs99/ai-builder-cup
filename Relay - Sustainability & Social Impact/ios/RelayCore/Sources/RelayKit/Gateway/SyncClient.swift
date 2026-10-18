@@ -27,12 +27,15 @@ public struct SyncResponse: Equatable, Sendable {
     /// ACK payloads (not frames), oldest first.
     public var acks: [[UInt8]]
     public var ackCursor: Int64
+    /// BROADCAST payloads (SPEC 5.6) the control room has live now; every gateway originates them into the mesh. Empty = none.
+    public var broadcasts: [[UInt8]]
     /// Present only when the backend reports hints (it adds `hints` when the upload held any); nil otherwise.
     public var hints: HintCounts?
 
-    public init(accepted: Int, duplicates: Int, rejected: Int, acks: [[UInt8]], ackCursor: Int64, hints: HintCounts? = nil) {
+    public init(accepted: Int, duplicates: Int, rejected: Int, acks: [[UInt8]], ackCursor: Int64, hints: HintCounts? = nil,
+                broadcasts: [[UInt8]] = []) {
         self.accepted = accepted; self.duplicates = duplicates; self.rejected = rejected
-        self.acks = acks; self.ackCursor = ackCursor; self.hints = hints
+        self.acks = acks; self.ackCursor = ackCursor; self.hints = hints; self.broadcasts = broadcasts
     }
 }
 
@@ -95,11 +98,12 @@ public final class SyncClient: Sendable {
         let duplicates: Int?
         let rejected: Int?
         let acks: [String]?
+        let broadcasts: [String]?
         let ack_cursor: Int64
         /// A malformed `hints` value (string, array, null) is ignored, not a failure.
         let hints: HintsBody?
 
-        enum CodingKeys: String, CodingKey { case accepted, duplicates, rejected, acks, ack_cursor, hints }
+        enum CodingKeys: String, CodingKey { case accepted, duplicates, rejected, acks, broadcasts, ack_cursor, hints }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -107,6 +111,8 @@ public final class SyncClient: Sendable {
             duplicates = try c.decodeIfPresent(Int.self, forKey: .duplicates)
             rejected = try c.decodeIfPresent(Int.self, forKey: .rejected)
             acks = try c.decodeIfPresent([String].self, forKey: .acks)
+            // A malformed `broadcasts` value is ignored, like `hints`: it must never fail the ACKs next to it.
+            broadcasts = (try? c.decodeIfPresent([String].self, forKey: .broadcasts)) ?? nil
             ack_cursor = try c.decode(Int64.self, forKey: .ack_cursor)
             hints = try? c.decodeIfPresent(HintsBody.self, forKey: .hints)
         }
@@ -161,9 +167,11 @@ public final class SyncClient: Sendable {
             throw SyncException("bad response body: \(error)")
         }
         let acks = (r.acks ?? []).compactMap { Data(base64Encoded: $0).map { [UInt8]($0) } } // skip bad entries
+        let broadcasts = (r.broadcasts ?? []).compactMap { Data(base64Encoded: $0).map { [UInt8]($0) } }
         return SyncResponse(accepted: r.accepted ?? 0, duplicates: r.duplicates ?? 0, rejected: r.rejected ?? 0,
                             acks: acks, ackCursor: r.ack_cursor,
-                            hints: r.hints.map { HintCounts(accepted: $0.accepted ?? 0, duplicates: $0.duplicates ?? 0, rejected: $0.rejected ?? 0) })
+                            hints: r.hints.map { HintCounts(accepted: $0.accepted ?? 0, duplicates: $0.duplicates ?? 0, rejected: $0.rejected ?? 0) },
+                            broadcasts: broadcasts)
     }
 
     /// Convenience for tests and callers holding the body as text.

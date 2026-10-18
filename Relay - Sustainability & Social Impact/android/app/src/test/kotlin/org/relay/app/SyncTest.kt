@@ -331,4 +331,49 @@ class SyncTest {
         assertNull(c.parse("{$base,\"hints\":null}").hints)
         assertEquals(2L, c.parse("{$base,\"hints\":[1]}").ackCursor)
     }
+
+    // ------------------------------------------------------------ control-room broadcasts (SPEC 5.6)
+    private fun broadcastPayload(type: org.relay.core.triage.DisasterType, ageSec: Long = 60, id: ByteArray = TestSupport.id(0x61)): String {
+        val b = org.relay.core.payload.Broadcast(id, org.relay.core.payload.BroadcastKind.DISASTER, type, System.currentTimeMillis() / 1000 - ageSec)
+        return Base64.getEncoder().encodeToString(org.relay.core.payload.BroadcastCodec.encode(b))
+    }
+
+    @Test fun everySyncReturnsLiveBroadcastsAndTheGatewayOriginatesEachOnce() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val logs = ArrayList<String>()
+        val s = syncer(node, store, GatewayState(null), logs)
+        responder = { JSONObject().put("accepted", 0).put("duplicates", 0).put("rejected", 0).put("acks", JSONArray()).put("ack_cursor", 0)
+            .put("broadcasts", JSONArray().put(broadcastPayload(org.relay.core.triage.DisasterType.FLOOD))) }
+
+        val first = s.syncOnce()
+        assertTrue(first.ok); assertEquals(1, first.broadcastsOriginated)
+        assertEquals(1, store.all().count { it.type == FrameTypes.BROADCAST })
+        // the backend repeats the same live list every round: nothing new is originated, nothing duplicated
+        assertEquals(0, s.syncOnce().broadcastsOriginated)
+        assertEquals(1, store.all().count { it.type == FrameTypes.BROADCAST })
+    }
+
+    @Test fun broadcastsAreNeverUploadedBackAndABadOrExpiredOneIsSkipped() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val s = syncer(node, store, GatewayState(null))
+        responder = { JSONObject().put("accepted", 0).put("duplicates", 0).put("rejected", 0).put("acks", JSONArray()).put("ack_cursor", 0)
+            .put("broadcasts", JSONArray()
+                .put(broadcastPayload(org.relay.core.triage.DisasterType.CYCLONE, id = TestSupport.id(0x62)))
+                .put(broadcastPayload(org.relay.core.triage.DisasterType.FLOOD, ageSec = 25 * 3600, id = TestSupport.id(0x63)))
+                .put("not-base64-!!")
+                .put(Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3)))) }
+        val out = s.syncOnce()
+        assertTrue(out.ok)
+        assertEquals(1, out.broadcastsOriginated)                 // only the live, well-formed one
+        assertEquals(0, s.syncOnce().uploaded)                    // a broadcast is not a NEED: it goes down, never up
+    }
+
+    @Test fun anOlderBackendWithoutTheKeyChangesNothing() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val out = syncer(node, store, GatewayState(null)).syncOnce()
+        assertTrue(out.ok); assertEquals(0, out.broadcastsOriginated)
+    }
 }

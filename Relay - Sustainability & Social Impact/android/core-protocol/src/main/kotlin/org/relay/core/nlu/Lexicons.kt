@@ -139,12 +139,12 @@ internal object Lexicons {
             "~वापस\\s+(?:नहीं|नही)", "ଖୋଜି*", "ଖୋଜୁ*")),
         Concept("water", Category.WATER, 1, "water", "needs water", request = true, lex = Lex(
             "~water(?!\\s+(?:is\\s+)?(?:rising|entering|level|coming|came|inside|up|everywhere|logging))",
-            "drinking water", "thirst*", "pyaas*", "pyas*", "प्यास*", "~पानी(?!\\s+(?:भर|बढ|घुस|आ))",
+            "drinking water", "thirst*", "peene*", "peena*", "पीने*", "पीना*", "pyaas*", "pyas*", "प्यास*", "~पानी(?!\\s+(?:भर|बढ|घुस|आ))",
             "~pa+ni(?!\\s+(?:bhar|badh|ghus|aa|aaya|aya))", "पेयजल", "~ପାଣି(?!\\s+(?:ବଢ|ଭର|ପଶ|ଆସ))", "ପାନୀୟ ଜଳ", "pina pani", "tubig*", "inom*", "uhaw*", "inumon*")),
         Concept("milk", Category.FOOD, 1, "milk", "needs milk", request = true, lex = Lex(
             "milk", "doodh*", "दूध*", "ଦୁଧ*", "gatas*")),
         Concept("food", Category.FOOD, 1, "food", "needs food", request = true, lex = Lex(
-            "food*", "hungry", "hunger*", "starv*", "khana*", "khaana*", "khaane*", "खाना*", "खाने*", "भूख*",
+            "food*", "hungry", "hunger*", "starv*", "khana*", "khaana*", "khaane*", "khane*", "खाना*", "खाने*", "भूख*",
             "bhookh*", "bhukh*", "ଖାଦ୍ୟ*", "ଖାଇବା*", "ଭୋକ*", "bhoka*", "khadya*", "khaddya*", "khaibaku*",
             "kheibaku*", "ration*", "rice", "chawal*", "चावल*", "biscuit*", "pagkain*", "gutom*", "nagugutom*",
             "nagutom*", "kaon*", "pagkaon*", "ginutom*")),

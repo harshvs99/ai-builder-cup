@@ -261,12 +261,13 @@ final class AppModel {
 
     // ================================================================== voice in
 
-    /// True when this phone can recognise [lang] on the device. False for Odia: hide the mic, offer typing.
-    func isVoiceInputAvailable(for lang: Lang) -> Bool { SpeechInput.isOnDeviceAvailable(lang) }
+    /// True when this phone can recognise [lang]: on the device, or (Odia) with the on-device model when it is installed.
+    func isVoiceInputAvailable(for lang: Lang) -> Bool { SpeechInput.isOnDeviceAvailable(lang) || GemmaRunner.canRunHere() }
 
     /// Starts listening in the current language: asks for microphone + speech permission first (first mic tap), then
     /// records. Progress is in `speechState`/`transcript`; the final text arrives via `onTranscript`.
-    func startListening() async {
+    /// `quietSec` ends the utterance after that much quiet once speech was heard (nil: the long default for a story).
+    func startListening(quietSec: Double? = nil) async {
         transcript = ""
         transcriptIsFinal = false
         speaker.stop()
@@ -277,7 +278,7 @@ final class AppModel {
                         offerAppSettings: true)
             return
         }
-        speech.start(lang: lang)
+        if let quietSec { speech.start(lang: lang, quietSec: quietSec) } else { speech.start(lang: lang) }
     }
 
     /// Stop recording and deliver what was heard.
@@ -294,6 +295,31 @@ final class AppModel {
         transcriptIsFinal = false
     }
 
+    // ================================================================== control-room declarations
+
+    /// Disasters the control room declared that are still inside the 24 h window (SPEC 5.6); empty = triage asks nothing
+    /// disaster-specific. The last known position lets an area-limited declaration be ruled out.
+    func activeDisasters() -> DisasterGate.Active {
+        let here = location.fix.map { (latE5: Geo.toE5($0.lat), lonE5: Geo.toE5($0.lon)) }
+        return repository.disasters.active(here: here)
+    }
+
+    /// Hours since each live declaration was issued, by type key (for the model's prompt).
+    func disasterAgesHours() -> [String: Int64] { repository.disasters.agesHours() }
+
+    /// Declarations on this phone, for the developer lab.
+    func declaredDisasters() -> [DisasterContext] { repository.disasters.all() }
+
+    /// Developer/demo: speak as the control room. Goes through the mesh like a gateway's broadcast; with the mesh stopped it
+    /// is set locally instead. Returns a one-line note for the lab.
+    func declareDisaster(_ type: DisasterType) -> String {
+        if engine.isRunning, engine.declareDisaster(type) { return "Broadcast \(type.key) sent from this phone" }
+        repository.disasters.put(DisasterContext(type: type, issuedAtSec: Int64(Date().timeIntervalSince1970)))
+        return "Mesh not running: \(type.key) set locally"
+    }
+
+    func clearDisastersHere() { repository.disasters.clear() }
+
     // ================================================================== voice out
 
     /// Speaks [text] aloud in [lang] (default: the app language) at the Settings voice speed, replacing any speech in
@@ -302,6 +328,14 @@ final class AppModel {
     func speak(_ text: String, lang: Lang? = nil) -> Bool {
         speaker.speed = settings.voiceSpeed
         return speaker.speak(text, lang: lang ?? settings.language)
+    }
+
+    /// Speaks `lines` in a row in `lang` and calls `onDone` after the last one. False when there is no voice (then `onDone`
+    /// is never called and the caller carries on without speech).
+    @discardableResult
+    func speakAll(_ lines: [String], lang: Lang? = nil, onDone: (@MainActor () -> Void)? = nil) -> Bool {
+        speaker.speed = settings.voiceSpeed
+        return speaker.speakAll(lines, lang: lang ?? settings.language, onDone: onDone)
     }
 
     func stopSpeaking() { speaker.stop() }

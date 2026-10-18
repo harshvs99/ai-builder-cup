@@ -134,7 +134,7 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
 - `GET /v1/teams`: six Puri-district teams (2 boat, 2 medical, 2 supply), seeded from
   `app/data/teams_puri.json` on first use. `load` = approved, unreleased dispatches; `status` is
   `off` (operator), `busy` (at capacity) or `free`.
-- `POST /v1/dispatch/propose`: walks OPEN tickets by score, then age; matches team kind to category
+- `POST /v1/dispatch/propose?ticket_no=N` (required; the dashboard calls it when an operator opens a ticket): proposes for that one OPEN ticket (404 unknown, 409 not open). The allocation walks all open tickets by score, then age, so room and priority count as for the whole queue, but only this ticket's proposal is written, cleared or drafted; matches team kind to category
   (RESCUE/MISSING_PERSON boat, MEDICAL medical, the rest supply; any free team as fallback); never
   exceeds capacity (existing load plus this run). ETA = straight-line km from the team base to the
   ticket (GPS fix, else `geo`, else a flat 45 min) at 15 km/h (boat) or 25 km/h, plus 10 min prep,

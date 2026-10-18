@@ -4,6 +4,8 @@ import Foundation
 /// `FieldMerge.merge`, never trusted.
 public struct ModelFields: Equatable, Sendable {
     public var category: NeedCategory?
+    /// Further categories asked for besides `category`.
+    public var extraCategories: [NeedCategory]?
     public var item: String?
     public var landmark: String?
     public var urgency: Int?
@@ -12,10 +14,10 @@ public struct ModelFields: Equatable, Sendable {
     public var summary: String?
 
     public init(
-        category: NeedCategory? = nil, item: String? = nil, landmark: String? = nil, urgency: Int? = nil,
+        category: NeedCategory? = nil, extraCategories: [NeedCategory]? = nil, item: String? = nil, landmark: String? = nil, urgency: Int? = nil,
         people: Int? = nil, vulnFlags: Set<VulnFlag>? = nil, summary: String? = nil
     ) {
-        self.category = category; self.item = item; self.landmark = landmark; self.urgency = urgency
+        self.category = category; self.extraCategories = extraCategories; self.item = item; self.landmark = landmark; self.urgency = urgency
         self.people = people; self.vulnFlags = vulnFlags; self.summary = summary
     }
 }
@@ -60,6 +62,12 @@ public struct FieldMerge: Sendable {
         merged.people = pick(.people, rules.people, model?.people.flatMap { (1...255).contains($0) ? $0 : nil }, rules.people)
         merged.vulnFlags = pick(.vuln, rules.vulnFlags, model?.vulnFlags, Set<VulnFlag>())
         merged.summary = pick(.summary, text(rules.summary, 40), text(model?.summary, 40), "")
+        // Extra categories are a union: a second need either source noticed is worth a ticket the person can untick.
+        var extras: [NeedCategory] = []
+        for c in rules.extraCategories + (model?.extraCategories ?? []) where c != merged.category && c != .other && !extras.contains(c) {
+            extras.append(c)
+        }
+        merged.extraCategories = extras
         return (merged, sources)
     }
 

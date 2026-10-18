@@ -25,6 +25,9 @@ final class TabNavigator {
 
     func toCheck() { path = RouteStack.toCheck(path) }
 
+    /// New request -> the triage questions (medical and rescue requests).
+    func toTriage() { path = RouteStack.toTriage(path) }
+
     /// After Send: open the new request and drop New request / Check from the stack.
     func finishAsk(msgId: String) {
         path = RouteStack.finishAsk(path, msgId: msgId)
@@ -70,6 +73,8 @@ final class AskFlowController {
     var moreOpened = false
     /// "Done, check it" was tapped and the recogniser is finishing.
     var busy = false
+    /// The triage conversation between New request and Check and send; kept here so coming back from Check resumes it.
+    let triage = TriageController()
 }
 
 /// Destinations pushed on a tab's `NavigationStack`. Roots are tabs and never pushed.
@@ -80,6 +85,7 @@ struct RouteDestination: View {
         switch route {
         case .request(let id): RequestDetailScreen(msgId: id)
         case .ask(let mode, let from): NewRequestScreen(mode: mode, prefillFrom: from)
+        case .triage: TriageScreen()
         case .check: CheckScreen()
         case .console: DeveloperScreen(isConsole: true)
         case .developer: DeveloperScreen(isConsole: false)

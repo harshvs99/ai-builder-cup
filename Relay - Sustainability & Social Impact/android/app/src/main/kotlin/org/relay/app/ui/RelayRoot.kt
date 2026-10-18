@@ -36,6 +36,7 @@ import org.relay.app.rememberPermissions
 import org.relay.app.ble.BlePermissions
 import org.relay.app.ui.ask.AskScreen
 import org.relay.app.ui.ask.CheckScreen
+import org.relay.app.ui.ask.TriageScreen
 import org.relay.app.ui.home.HomeScreen
 import org.relay.app.ui.home.LanguageScreen
 import org.relay.app.ui.home.RequestsScreen
@@ -144,6 +145,7 @@ fun RelayRoot() {
                             remember(e) { navController.getBackStackEntry(Routes.ASK_FLOW) },
                         )
                     }
+                    composable(Routes.TRIAGE) { e -> TriageScreen(nav, remember(e) { navController.getBackStackEntry(Routes.ASK_FLOW) }) }
                     // remember: after Send pops the flow, this screen still composes during its exit animation.
                     composable(Routes.CHECK) { e -> CheckScreen(nav, remember(e) { navController.getBackStackEntry(Routes.ASK_FLOW) }) }
                 }

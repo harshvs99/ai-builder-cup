@@ -13,6 +13,11 @@ class AskStrings(private val lang: Lang) {
         lang, "What do you need most right now?", "अभी आपको सबसे ज़्यादा किस चीज़ की ज़रूरत है?",
         "ଏବେ ଆପଣଙ୍କୁ ସବୁଠାରୁ ଅଧିକ କ'ଣ ଦରକାର?", "Ano ang pinakakailangan ninyo ngayon?", "Ano an pinakakinahanglan niyo yana?",
     ) // needs native review
+    val headlineHint get() = tr(
+        lang, "Say what you need and how many people are with you.", "बताइए कि क्या चाहिए और आपके साथ कितने लोग हैं।",
+        "କ'ଣ ଦରକାର ଓ ଆପଣଙ୍କ ସାଙ୍ଗରେ କେତେ ଜଣ ଅଛନ୍ତି କୁହନ୍ତୁ।", "Sabihin kung ano ang kailangan at ilan kayo.", "Hunga kon ano an kinahanglan ngan pira kamo.",
+    ) // needs native review
+    val howManyPeople get() = tr(lang, "How many people need this?", "यह कितने लोगों के लिए चाहिए?", "ଏହା କେତେ ଜଣଙ୍କ ପାଇଁ ଦରକାର?", "Ilang tao ang nangangailangan nito?", "Pira nga tawo an nangangaro hini?") // needs native review
     val hearItAgain get() = tr(lang, "Hear it again", "फिर से सुनें", "ପୁଣି ଶୁଣନ୍ତୁ", "Pakinggan ulit", "Pamatii liwat") // needs native review
     val noVoiceInstalled get() = tr(
         lang, "This phone has no voice installed for this language.", "इस फ़ोन में इस भाषा की आवाज़ नहीं है।",
@@ -164,4 +169,36 @@ class AskStrings(private val lang: Lang) {
     ) // needs native review
     val noteLabel get() = tr(lang, "Note", "टिप्पणी", "ଟିପ୍ପଣୀ", "Tala", "Sumat") // needs native review
     fun charsLeft(n: Int) = tr(lang, "$n characters left", "$n अक्षर बाकी", "$n ଅକ୍ଷର ବାକି", "$n karakter ang natitira", "$n ka karakter an nahibilin") // needs native review
+
+    // ---- Triage (medical and rescue requests: a short back-and-forth before Check and send)
+    val triageTitle get() = tr(lang, "A few quick questions", "कुछ छोटे सवाल", "କିଛି ଛୋଟ ପ୍ରଶ୍ନ", "Ilang mabilis na tanong", "Pipira nga mabinit nga pangutana") // needs native review
+    val triageAnswerHint get() = tr(
+        lang, "Answer out loud, or tap a button.", "बोलकर जवाब दें, या बटन दबाएँ।", "କହି ଉତ୍ତର ଦିଅନ୍ତୁ, କିମ୍ବା ବଟନ ଛୁଅନ୍ତୁ।",
+        "Sumagot nang malakas, o pindutin ang isang button.", "Sumagot nga mabaskog, o pinduta an button.",
+    ) // needs native review
+    val triageUnclear get() = tr(
+        lang, "Please say yes or no, or tap a button.", "कृपया हाँ या नहीं कहें, या बटन दबाएँ।", "ଦୟାକରି ହଁ ବା ନା କୁହନ୍ତୁ, କିମ୍ବା ବଟନ ଛୁଅନ୍ତୁ।",
+        "Pakisabi ang oo o hindi, o pindutin ang isang button.", "Pakisiring oo o diri, o pinduta an button.",
+    ) // needs native review
+    val triageYes get() = tr(lang, "Yes", "हाँ", "ହଁ", "Oo", "Oo") // needs native review
+    val triageNo get() = tr(lang, "No", "नहीं", "ନା", "Hindi", "Diri") // needs native review
+    val triageDontKnow get() = tr(lang, "Don't know", "पता नहीं", "ଜଣା ନାହିଁ", "Hindi alam", "Diri aram") // needs native review
+    val triageThinking get() = tr(lang, "Thinking…", "सोच रहा है…", "ଭାବୁଛି…", "Nag-iisip…", "Nagpapahunahuna…") // needs native review
+    val triageSkip get() = tr(lang, "Skip questions", "सवाल छोड़ें", "ପ୍ରଶ୍ନ ଛାଡ଼ନ୍ତୁ", "Laktawan ang mga tanong", "Laktawi an mga pangutana") // needs native review
+    val triageCritical get() = tr(
+        lang, "This sounds life-threatening. It will be sent as urgent.", "यह जानलेवा लग रहा है। इसे अत्यंत ज़रूरी के रूप में भेजा जाएगा।",
+        "ଏହା ଜୀବନ ପ୍ରତି ବିପଦଜନକ ଲାଗୁଛି। ଏହାକୁ ଜରୁରୀ ଭାବେ ପଠାଯିବ।", "Mukhang nakamamatay ito. Ipapadala ito bilang agaran.",
+        "Nakakamatay ini. Ipadadara ini sugad nga dagmitan.",
+    ) // needs native review
+    val triageAdviceTitle get() = tr(lang, "What to do now", "अभी क्या करें", "ବର୍ତ୍ତମାନ କ'ଣ କରିବେ", "Ano ang gagawin ngayon", "Ano an buhaton yana") // needs native review
+    val triageReview get() = tr(lang, "Review and send", "जाँचें और भेजें", "ଯାଞ୍ଚ କରି ପଠାନ୍ତୁ", "Suriin at ipadala", "Usisaa ngan ipadara") // needs native review
+    val triageModelReady get() = tr(lang, "Assistant on", "सहायक चालू", "ସହାୟକ ଚାଲୁ", "Naka-on ang katulong", "Nakabukas an katabang") // needs native review
+    val triageModelLoading get() = tr(lang, "Assistant starting…", "सहायक शुरू हो रहा है…", "ସହାୟକ ଆରମ୍ଭ ହେଉଛି…", "Sinisimulan ang katulong…", "Gin-uumpisahan an katabang…") // needs native review
+    val triageModelOff get() = tr(lang, "Basic questions only", "सिर्फ़ सामान्य सवाल", "କେବଳ ସାଧାରଣ ପ୍ରଶ୍ନ", "Pangunahing tanong lang", "Pangunahon nga pangutana la") // needs native review
+    fun triageDeclared(kinds: String) = tr(
+        lang, "Control room alert: $kinds", "कंट्रोल रूम की चेतावनी: $kinds", "କଣ୍ଟ୍ରୋଲ ରୁମ ସତର୍କତା: $kinds",
+        "Babala ng control room: $kinds", "Pasidaan han control room: $kinds",
+    ) // needs native review
+    val triageYouSaid get() = tr(lang, "You", "आप", "ଆପଣ", "Kayo", "Ikaw") // needs native review
+    val triageStartMic get() = tr(lang, "Answer by voice", "बोलकर जवाब दें", "କହି ଉତ୍ତର ଦିଅନ୍ତୁ", "Sumagot gamit ang boses", "Sumagot gamit an boses") // needs native review
 }

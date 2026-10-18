@@ -36,6 +36,20 @@ class AskLogicTest {
         assertTrue(d.landmark.isNotBlank())
     }
 
+    @Test fun extractionKeepsEveryNeedTheTextAsksFor() {
+        val d = draftFrom("Yahan per Ek Ghar Pati Mahila Hai unke liye insulin medical supplies aur khane Peene Ka intejaam chahie")
+        assertEquals(Category.MEDICAL, d.category)
+        // water and food are one chip, so they come as one extra
+        assertEquals(1, d.extraCategories.size)
+        assertEquals(2, AskLogic.perCategory(d).size)
+    }
+
+    @Test fun handPickedCategoriesAreNotOverwrittenByExtras() {
+        val d = AskLogic.applyIntake(AskLogic.setCategory(AskDraft(), Category.SHELTER), RuleIntake.extract("insulin and food", Lang.EN))
+        assertEquals(Category.SHELTER, d.category)
+        assertTrue(d.extraCategories.isEmpty())
+    }
+
     @Test fun nothingUnderstoodIsNullCategory() {
         val d = draftFrom("hello")
         assertNull(d.category)
@@ -234,6 +248,24 @@ class AskLogicTest {
         val need = vm.buildNeed(ByteArray(8), ByteArray(8), 1L, Lang.EN, null)
         assertEquals(Category.WATER, need.category)
         assertEquals("food and water", need.item)
+    }
+
+    @Test fun transportOutIsItsOwnRescueTicket() {
+        val vm = AskViewModel()
+        vm.toggleTransport()
+        assertTrue(AskLogic.hasContent(vm.state.value.draft, ""))
+        var n = 0
+        fun build() = vm.buildNeeds({ ByteArray(8) { (++n).toByte() } }, ByteArray(8), 1L, Lang.EN, null)
+        assertEquals(listOf("evacuation"), build().map { it.item })
+        vm.toggleCategory(Category.RESCUE)
+        vm.toggleCategory(Category.MEDICAL)
+        vm.setPeople(3)
+        val needs = build()
+        assertEquals(listOf(Category.RESCUE, Category.MEDICAL, Category.RESCUE), needs.map { it.category })
+        assertEquals(listOf("rescue", "medicine", "evacuation"), needs.map { it.item })
+        assertTrue(needs.all { it.people == 3 })
+        vm.toggleTransport()
+        assertEquals(2, build().size)
     }
 
     @Test fun removingThePrimaryPromotesTheNext() {

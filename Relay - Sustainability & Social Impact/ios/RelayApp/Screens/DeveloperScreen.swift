@@ -16,6 +16,10 @@ struct DeveloperScreen: View {
         let status = model.status
         List {
             Section {
+                NavigationLink { GemmaLabScreen() } label: { Text(verbatim: "Gemma lab (on-device model)") }
+            }
+            DisasterLab()
+            Section {
                 row("Node id", model.nodeIdHex)
                 row("Backend", model.settings.backendUrl)
             } header: {

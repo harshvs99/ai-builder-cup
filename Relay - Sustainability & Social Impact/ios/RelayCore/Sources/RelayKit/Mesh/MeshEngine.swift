@@ -66,6 +66,7 @@ public final class MeshEngine: @unchecked Sendable {
         func onNeed(_ need: Need, frame: Frame, fromLink: String?) { engine?.gossipNeed(need, frame, fromLink) }
         func onAckForMe(_ ack: Ack, frame: Frame) { engine?.gossipAckForMe(ack) }
         func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) { engine?.gossipLocHint(hint, frame, fromLink) }
+        func onBroadcast(_ broadcast: Broadcast, frame: Frame, fromLink: String?) { engine?.gossipBroadcast(broadcast, frame, fromLink) }
         func onPeerHello(linkId: String, hello: Hello) { engine?.gossipPeerHello(linkId, hello) }
         func gatewayChanged(_ internet: Bool, _ outcome: SyncOutcome?) { engine?.gatewayChanged(internet: internet, outcome: outcome) }
     }
@@ -189,6 +190,11 @@ public final class MeshEngine: @unchecked Sendable {
         ]
         lock.lock(); st.timers = timers; lock.unlock()
         queue.async { [weak self] in self?.resendOwnNeeds() }
+        // Broadcasts carried in the store from before this start still count (their 24 h life runs from issue).
+        queue.async { [weak self] in
+            guard let self else { return }
+            for (b, _) in self.node.storedBroadcasts() { self.repo.disasters.apply(b) }
+        }
         publish()
     }
 
@@ -249,6 +255,16 @@ public final class MeshEngine: @unchecked Sendable {
             repo.log("could not originate NEED \(need.msgIdHex): \(error)")
         }
         publish()
+    }
+
+    /// Developer/demo: this phone speaks as the control room. The broadcast goes through the same path as one from a gateway
+    /// (stored, flooded, delivered to `gossipBroadcast`), so it also switches on the questions on this phone. Returns false
+    /// when it was not originated.
+    @discardableResult
+    public func declareDisaster(_ type: DisasterType, cleared: Bool = false) -> Bool {
+        let b = Broadcast(id: NodeId.random(), kind: cleared ? .disasterCleared : .disaster, disaster: type,
+                          issuedAt: Int64(Date().timeIntervalSince1970))
+        return ((try? node.originateBroadcast(b)) ?? nil) != nil
     }
 
     public func resyncNow() {
@@ -314,6 +330,12 @@ public final class MeshEngine: @unchecked Sendable {
         repo.log("LOC_HINT stored ref=\(hint.refMsgIdHex) relay=\(Hex.encode(hint.relayNode)) from=\(fromLink ?? "local") "
             + "acc<=\(hint.accuracyMaxM) m ttl=\(frame.ttl)")
         gateway.kick() // no-op unless this phone is a gateway; lets hints upload promptly
+        publish()
+    }
+
+    fileprivate func gossipBroadcast(_ b: Broadcast, _ frame: Frame, _ fromLink: String?) {
+        repo.log("BROADCAST \(b.idHex) \(b.kind) \(b.disaster.key) issued=\(b.issuedAt) from=\(fromLink ?? "local") ttl=\(frame.ttl)")
+        repo.disasters.apply(b)
         publish()
     }
 

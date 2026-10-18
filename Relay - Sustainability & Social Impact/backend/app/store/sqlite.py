@@ -112,6 +112,14 @@ CREATE TABLE IF NOT EXISTS loc_hints (
 );
 CREATE INDEX IF NOT EXISTS idx_loc_hints_ref ON loc_hints(ref_msg_id);
 
+-- Control-room BROADCAST payloads (SPEC 5.6), served to every gateway on every sync for 24 h after issue.
+CREATE TABLE IF NOT EXISTS broadcasts (
+    bcast_id  TEXT PRIMARY KEY,                -- 16 hex chars
+    issued_at INTEGER NOT NULL,
+    payload   BLOB    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_issued ON broadcasts(issued_at);
+
 CREATE TABLE IF NOT EXISTS acks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,   -- the sync cursor
     ack_id      BLOB    NOT NULL UNIQUE,
@@ -397,6 +405,15 @@ class SqliteStore:
         marks = ",".join("?" * len(msg_ids))
         rows = self._q(f"SELECT * FROM loc_hints WHERE ref_msg_id IN ({marks}) ORDER BY rowid", msg_ids)
         return [{**dict(r), "key": r["hint_key"]} for r in rows]
+
+    # ------------------------------------------------------------------ control-room broadcasts
+    def add_broadcast(self, bcast_id: str, issued_at: int, payload: bytes) -> bool:
+        with self.tx() as c:
+            cur = c.execute("INSERT OR IGNORE INTO broadcasts(bcast_id, issued_at, payload) VALUES (?,?,?)", (bcast_id, issued_at, payload))
+            return cur.rowcount == 1
+
+    def live_broadcasts(self, since: int) -> list[bytes]:
+        return [bytes(r["payload"]) for r in self._q("SELECT payload FROM broadcasts WHERE issued_at >= ? ORDER BY issued_at, rowid", (since,))]
 
     def ticket_for_msg(self, msg_id: str) -> int | None:
         return self._linked_ticket(msg_id)

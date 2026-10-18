@@ -4,11 +4,13 @@ import org.relay.app.ui.i18n.CommonStrings
 import org.relay.core.intake.IntakeDraft
 import org.relay.core.intake.IntakeField
 import org.relay.core.intake.QuestionBank
+import org.relay.core.nlu.NeedDraft
 import org.relay.core.payload.Category
 import org.relay.core.payload.NeedAnswer
 import org.relay.core.payload.NeedCodec
 import org.relay.core.payload.Utf8
 import org.relay.core.payload.VulnFlag
+import org.relay.core.triage.TriageResult
 
 /**
  * The request being composed across New request and Check and send. Pure data: no Android types.
@@ -23,6 +25,8 @@ data class AskDraft(
      * flags, landmark, note and urgency; [category] stays the one the item and follow-up answers belong to.
      */
     val extraCategories: List<Category> = emptyList(),
+    /** Also needs a vehicle out of the area. Its own RESCUE ticket (item "evacuation"), apart from a plain rescue one. */
+    val transportOut: Boolean = false,
     val item: String = "",
     val people: Int = 1,
     val vulnFlags: Set<VulnFlag> = emptySet(),
@@ -70,6 +74,21 @@ object AskLogic {
     /** Display order of vulnerability flags (children first, as in the design). */
     val flagOrder = listOf(VulnFlag.CHILD, VulnFlag.ELDERLY, VulnFlag.PREGNANT, VulnFlag.INJURED, VulnFlag.TRAPPED)
 
+    /**
+     * The "who is with you" flags worth offering on New request for the chosen categories (context-aware: no "pregnant"
+     * prompt under a water request). Check and send still offers all of them.
+     */
+    fun relevantFlags(categories: List<Category>): List<VulnFlag> {
+        val want = mutableSetOf(VulnFlag.CHILD, VulnFlag.ELDERLY)
+        if (Category.MEDICAL in categories) { want += VulnFlag.PREGNANT; want += VulnFlag.INJURED }
+        if (Category.RESCUE in categories) { want += VulnFlag.TRAPPED; want += VulnFlag.INJURED; want += VulnFlag.PREGNANT }
+        if (Category.SHELTER in categories || Category.MISSING_PERSON in categories) want += VulnFlag.PREGNANT
+        return flagOrder.filter { it in want }
+    }
+
+    /** True once the person has said or picked something, so follow-up inputs (how many people) make sense. */
+    fun showDetails(d: AskDraft, transcript: String): Boolean = d.categories.isNotEmpty() || d.transportOut || transcript.isNotBlank()
+
     // ---------------------------------------------------------------- byte limits
 
     fun byteLength(s: String): Int = s.toByteArray(Charsets.UTF_8).size
@@ -100,6 +119,7 @@ object AskLogic {
         fun free(f: IntakeField) = f !in draft.edited
         return draft.copy(
             category = if (free(IntakeField.CATEGORY)) n.category.takeIf { it != Category.OTHER } else draft.category,
+            extraCategories = if (free(IntakeField.CATEGORY)) extrasFor(n) else draft.extraCategories,
             // An item extracted for another category than the person chose (rice, for a chosen "water") is not theirs.
             item = if (free(IntakeField.ITEM)) {
                 if (free(IntakeField.CATEGORY) || draft.category == null || n.category == draft.category) fit(n.item.trim(), MAX_ITEM) else ""
@@ -109,6 +129,38 @@ object AskLogic {
             landmark = if (free(IntakeField.LANDMARK)) fit(n.landmark.trim(), MAX_LANDMARK) else draft.landmark,
             summary = if (free(IntakeField.SUMMARY)) fit(n.summary.trim(), MAX_SUMMARY) else draft.summary,
             urgency = if (free(IntakeField.URGENCY)) n.urgency.coerceIn(0, 3) else draft.urgency,
+        ).pruned()
+    }
+
+    /** The extra categories extraction heard, one per chip group and none in the primary's group ("water" + "food" is one). */
+    private fun extrasFor(n: NeedDraft): List<Category> {
+        if (n.category == Category.OTHER) return emptyList()
+        val taken = group(n.category).toMutableSet()
+        return n.extraCategories.filter { c -> c !in taken && taken.addAll(group(c)) }
+    }
+
+    /**
+     * Fold a finished triage conversation into [draft]. Triage knows more than the first sentence did, so its categories
+     * lead (medical before rescue, each its own ticket), urgency only ever goes up, danger flags are added, the answers it
+     * collected go on the wire, and its control-room summary replaces the extractor's. Fields it sets count as edited, so
+     * a later extraction pass cannot undo them.
+     */
+    fun applyTriage(d: AskDraft, r: TriageResult): AskDraft {
+        val triaged = r.categories.filter { it != Category.OTHER }
+        if (triaged.isEmpty()) return d
+        val others = d.categories.filter { c -> triaged.none { c in group(it) } }
+        val ordered = (triaged + others).fold(emptyList<Category>()) { acc, c -> if (acc.any { group(it).contains(c) }) acc else acc + c }
+        return d.copy(
+            category = ordered.first(),
+            extraCategories = ordered.drop(1),
+            urgency = maxOf(d.urgency, r.urgency).coerceIn(0, 3),
+            vulnFlags = d.vulnFlags + r.vuln,
+            people = if (IntakeField.PEOPLE !in d.edited && r.people != null) r.people!!.coerceIn(1, MAX_PEOPLE) else d.people,
+            landmark = if (IntakeField.LANDMARK !in d.edited && d.landmark.isBlank() && !r.landmark.isNullOrBlank()) fit(r.landmark!!.trim(), MAX_LANDMARK) else d.landmark,
+            summary = if (IntakeField.SUMMARY !in d.edited && r.summary.isNotBlank()) fit(r.summary, MAX_SUMMARY) else d.summary,
+            answers = d.answers + r.answers.associate { it.questionId to it.value },
+            edited = d.edited + setOf(IntakeField.CATEGORY, IntakeField.URGENCY, IntakeField.VULN) +
+                (if (r.summary.isNotBlank()) setOf(IntakeField.SUMMARY) else emptySet()),
         ).pruned()
     }
 
@@ -169,12 +221,21 @@ object AskLogic {
      */
     fun perCategory(d: AskDraft): List<AskDraft> {
         val cats = d.categories
-        if (cats.size <= 1) return listOf(d.pruned())
-        return cats.mapIndexed { i, c ->
-            val n = d.copy(category = c, extraCategories = emptyList())
+        val out = cats.mapIndexed { i, c ->
+            val n = d.copy(category = c, extraCategories = emptyList(), transportOut = false)
             (if (i == 0) n else n.copy(item = "", answers = emptyMap())).pruned()
+        }.toMutableList()
+        if (d.transportOut) {
+            // Alone, it takes what the person typed; next to other tickets the item stays with the first one.
+            val item = if (cats.isEmpty() && d.item.isNotBlank()) d.item else EVACUATION_WORD
+            out += d.copy(category = Category.RESCUE, extraCategories = emptyList(), transportOut = false, item = item, answers = emptyMap()).pruned()
         }
+        return out.ifEmpty { listOf(d.pruned()) }
     }
+
+    const val EVACUATION_WORD = "evacuation"
+
+    fun toggleTransport(d: AskDraft): AskDraft = d.copy(transportOut = !d.transportOut)
 
     fun setItem(d: AskDraft, text: String) = d.copy(item = fit(text, MAX_ITEM), edited = d.edited + IntakeField.ITEM)
 
@@ -202,7 +263,7 @@ object AskLogic {
 
     /** True once there is enough to move on: a category (even "Other") or anything said or typed. */
     fun hasContent(d: AskDraft, transcript: String): Boolean =
-        d.category != null || transcript.isNotBlank() || d.item.isNotBlank()
+        d.category != null || d.transportOut || transcript.isNotBlank() || d.item.isNotBlank()
 
     private fun generic(category: Category?, item: String): Boolean {
         val i = item.trim().lowercase()
@@ -239,6 +300,7 @@ object AskLogic {
         val need = needWords(common, d)
         if (need.isNotEmpty()) add(need)
         d.extraCategories.forEach { add(chipLabel(common, it)) }
+        if (d.transportOut) add(common.transportOut)
         if (d.people > 1 || d.vulnFlags.isNotEmpty()) add(
             if (d.vulnFlags.isEmpty()) common.people(d.people) else peopleLine(common, d.people, d.vulnFlags),
         )

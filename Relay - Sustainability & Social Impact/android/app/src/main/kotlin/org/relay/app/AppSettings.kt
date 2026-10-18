@@ -28,6 +28,8 @@ data class Settings(
     /** Comma-separated node-id hex prefixes; empty = accept every peer. */
     val allowlist: String = "",
     val language: Lang = Lang.EN,
+    /** Languages the user added beyond English and Hindi, in the order added (never contains EN or HI). */
+    val extraLanguages: List<Lang> = emptyList(),
     val themeMode: ThemeMode = ThemeMode.AUTO,
     /** Multiplies all text by 1.2. */
     val largerText: Boolean = false,
@@ -51,9 +53,24 @@ data class Settings(
     /** The old "Pretend offline" behaviour: never act as a gateway. */
     val pretendOffline: Boolean get() = gatewayMode == GatewayMode.NEVER
 
+    /**
+     * The languages speech input should expect: English, Hindi, then the user's added languages. The app language
+     * counts too, so installs from before this setting existed still include theirs. Order is stable, no duplicates.
+     */
+    val preferredLanguages: List<Lang> get() = ALWAYS_PREFERRED + normalizedExtras(extraLanguages + language)
+
+    /** Switches the app language; a language beyond English and Hindi is also remembered as a preferred one. */
+    fun withLanguage(lang: Lang): Settings = copy(language = lang, extraLanguages = normalizedExtras(extraLanguages + lang))
+
     companion object {
         /** Build-time `relay.deviceKey`; `dev-relay-key` when none was configured. */
         val DEFAULT_KEY: String = BuildConfig.DEFAULT_KEY
+
+        /** English and Hindi are always preferred. */
+        val ALWAYS_PREFERRED: List<Lang> = listOf(Lang.EN, Lang.HI)
+
+        /** Drops EN, HI and repeats, keeping first-seen order. */
+        fun normalizedExtras(langs: List<Lang>): List<Lang> = langs.filter { it !in ALWAYS_PREFERRED }.distinct()
     }
 }
 
@@ -87,6 +104,9 @@ class AppSettings(ctx: Context) {
             else prefs.getString("key", Settings.DEFAULT_KEY) ?: Settings.DEFAULT_KEY,
         allowlist = prefs.getString("allowlist", "") ?: "",
         language = Lang.fromTag(prefs.getString("lang", "en") ?: "en") ?: Lang.EN,
+        extraLanguages = Settings.normalizedExtras(
+            (prefs.getString("extra_langs", "") ?: "").split(',').mapNotNull { Lang.fromTag(it) },
+        ),
         themeMode = enumOr(prefs.getString("theme", null), ThemeMode.AUTO),
         largerText = prefs.getBoolean("larger_text", false),
         readAloud = prefs.getBoolean("read_aloud", false),
@@ -116,6 +136,7 @@ class AppSettings(ctx: Context) {
             .putString("allowlist", next.allowlist)
             .putBoolean("offline", next.pretendOffline)
             .putString("lang", next.language.tag)
+            .putString("extra_langs", next.extraLanguages.joinToString(",") { it.tag })
             .putString("theme", next.themeMode.name)
             .putBoolean("larger_text", next.largerText)
             .putBoolean("read_aloud", next.readAloud)

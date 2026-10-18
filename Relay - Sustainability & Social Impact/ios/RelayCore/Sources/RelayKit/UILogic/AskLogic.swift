@@ -10,6 +10,8 @@ public struct AskDraft: Equatable, Sendable {
     /// Further categories the person also needs (water *and* food). Each goes out as its own NEED, sharing the
     /// people, flags, landmark, note and urgency; `category` stays the one the item and follow-up answers belong to.
     public var extraCategories: [NeedCategory]
+    /// Also needs a vehicle out of the area. Its own RESCUE ticket (item "evacuation"), apart from a plain rescue one.
+    public var transportOut: Bool
     public var item: String
     public var people: Int
     public var vulnFlags: Set<VulnFlag>
@@ -21,11 +23,11 @@ public struct AskDraft: Equatable, Sendable {
     public var edited: Set<IntakeField>
 
     public init(
-        category: NeedCategory? = nil, extraCategories: [NeedCategory] = [], item: String = "", people: Int = 1, vulnFlags: Set<VulnFlag> = [],
+        category: NeedCategory? = nil, extraCategories: [NeedCategory] = [], transportOut: Bool = false, item: String = "", people: Int = 1, vulnFlags: Set<VulnFlag> = [],
         landmark: String = "", summary: String = "", urgency: Int = 1, answers: [Int: Int] = [:],
         edited: Set<IntakeField> = []
     ) {
-        self.category = category; self.extraCategories = extraCategories; self.item = item; self.people = people; self.vulnFlags = vulnFlags
+        self.category = category; self.extraCategories = extraCategories; self.transportOut = transportOut; self.item = item; self.people = people; self.vulnFlags = vulnFlags
         self.landmark = landmark; self.summary = summary; self.urgency = urgency; self.answers = answers
         self.edited = edited
     }
@@ -78,6 +80,21 @@ public enum AskLogic {
     /// Display order of vulnerability flags (children first, as in the design).
     public static let flagOrder: [VulnFlag] = [.child, .elderly, .pregnant, .injured, .trapped]
 
+    /// The "who is with you" flags worth offering on New request for the chosen categories (context-aware: no "pregnant"
+    /// prompt under a water request). Check and send still offers all of them.
+    public static func relevantFlags(_ categories: [NeedCategory]) -> [VulnFlag] {
+        var want: Set<VulnFlag> = [.child, .elderly]
+        if categories.contains(.medical) { want.formUnion([.pregnant, .injured]) }
+        if categories.contains(.rescue) { want.formUnion([.trapped, .injured, .pregnant]) }
+        if categories.contains(.shelter) || categories.contains(.missingPerson) { want.insert(.pregnant) }
+        return flagOrder.filter { want.contains($0) }
+    }
+
+    /// True once the person has said or picked something, so follow-up inputs (how many people) make sense.
+    public static func showDetails(_ d: AskDraft, _ transcript: String) -> Bool {
+        !d.categories.isEmpty || d.transportOut || !transcript.trimmed.isEmpty
+    }
+
     // ---------------------------------------------------------------- byte limits
 
     public static func byteLength(_ s: String) -> Int { s.utf8.count }
@@ -103,7 +120,10 @@ public enum AskLogic {
         let n = intake.need
         func free(_ f: IntakeField) -> Bool { !draft.edited.contains(f) }
         var d = draft
-        if free(.category) { d.category = n.category == .other ? nil : n.category }
+        if free(.category) {
+            d.category = n.category == .other ? nil : n.category
+            d.extraCategories = extras(of: n)
+        }
         // An item extracted for another category than the person chose (rice, for a chosen "water") is not theirs.
         let itemFits = free(.category) || d.category == nil || n.category == d.category
         if free(.item) { d.item = itemFits ? fit(n.item.trimmed, maxItem) : "" }
@@ -115,7 +135,43 @@ public enum AskLogic {
         return d.pruned()
     }
 
+    /// The extra categories extraction heard, one per chip group and none in the primary's group ("water" + "food" is one).
+    private static func extras(of n: NeedDraft) -> [NeedCategory] {
+        if n.category == .other { return [] }
+        var taken = Set(group(n.category))
+        var out: [NeedCategory] = []
+        for c in n.extraCategories where !taken.contains(c) {
+            taken.formUnion(group(c))
+            out.append(c)
+        }
+        return out
+    }
+
     private static func clamp(_ v: Int, _ lo: Int, _ hi: Int) -> Int { min(max(v, lo), hi) }
+
+    /// Fold a finished triage conversation into `draft`. Triage knows more than the first sentence did, so its categories
+    /// lead (medical before rescue, each its own ticket), urgency only ever goes up, danger flags are added, the answers it
+    /// collected go on the wire, and its control-room summary replaces the extractor's. Fields it sets count as edited, so
+    /// a later extraction pass cannot undo them. Port of Android `AskLogic.applyTriage`.
+    public static func applyTriage(_ d: AskDraft, _ r: TriageResult) -> AskDraft {
+        let triaged = r.categories.filter { $0 != .other }
+        if triaged.isEmpty { return d }
+        let others = d.categories.filter { c in !triaged.contains { group($0).contains(c) } }
+        var ordered: [NeedCategory] = []
+        for c in triaged + others where !ordered.contains(where: { group($0).contains(c) }) { ordered.append(c) }
+        var n = d
+        n.category = ordered.first
+        n.extraCategories = Array(ordered.dropFirst())
+        n.urgency = clamp(max(d.urgency, r.urgency), 0, 3)
+        n.vulnFlags = d.vulnFlags.union(r.vuln)
+        if !d.edited.contains(.people), let p = r.people { n.people = clamp(p, 1, maxPeople) }
+        if !d.edited.contains(.landmark), d.landmark.isEmpty, let l = r.landmark, !l.trimmed.isEmpty { n.landmark = fit(l.trimmed, maxLandmark) }
+        if !d.edited.contains(.summary), !r.summary.isEmpty { n.summary = fit(r.summary, maxSummary) }
+        for a in r.answers { n.answers[a.questionId] = a.value }
+        n.edited.formUnion([.category, .urgency, .vuln])
+        if !r.summary.isEmpty { n.edited.insert(.summary) }
+        return n.pruned()
+    }
 
     /// Set the category by hand; nil clears the choice so extraction decides again.
     public static func setCategory(_ d: AskDraft, _ c: NeedCategory?) -> AskDraft {
@@ -180,14 +236,31 @@ public enum AskLogic {
     /// category's own word as item and the shared fields. A draft with no category gives a single `.other` one.
     public static func perCategory(_ d: AskDraft) -> [AskDraft] {
         let cats = d.categories
-        if cats.count <= 1 { return [d.pruned()] }
-        return cats.enumerated().map { i, c in
+        var out: [AskDraft] = cats.enumerated().map { i, c in
             var n = d
             n.category = c
             n.extraCategories = []
+            n.transportOut = false
             if i > 0 { n.item = ""; n.answers = [:] }
             return n.pruned()
         }
+        if d.transportOut {
+            var t = d
+            t.category = .rescue
+            t.extraCategories = []
+            t.transportOut = false
+            // Alone, it takes what the person typed; next to other tickets the item stays with the first one.
+            t.item = cats.isEmpty && !d.item.trimmed.isEmpty ? d.item : evacuationWord
+            t.answers = [:]
+            out.append(t.pruned())
+        }
+        return out.isEmpty ? [d.pruned()] : out
+    }
+
+    public static let evacuationWord = "evacuation"
+
+    public static func toggleTransport(_ d: AskDraft) -> AskDraft {
+        var n = d; n.transportOut.toggle(); return n
     }
 
     public static func setItem(_ d: AskDraft, _ text: String) -> AskDraft {
@@ -229,7 +302,7 @@ public enum AskLogic {
 
     /// True once there is enough to move on: a category (even "Other") or anything said or typed.
     public static func hasContent(_ d: AskDraft, _ transcript: String) -> Bool {
-        d.category != nil || !transcript.trimmed.isEmpty || !d.item.trimmed.isEmpty
+        d.category != nil || d.transportOut || !transcript.trimmed.isEmpty || !d.item.trimmed.isEmpty
     }
 
     private static func isGeneric(_ category: NeedCategory?, _ item: String) -> Bool {
@@ -265,6 +338,7 @@ public enum AskLogic {
         let need = needWords(common, d)
         if !need.isEmpty { chips.append(need) }
         chips.append(contentsOf: d.extraCategories.map { chipLabel(common, $0) })
+        if d.transportOut { chips.append(common.transportOut) }
         if d.people > 1 || !d.vulnFlags.isEmpty {
             chips.append(d.vulnFlags.isEmpty ? common.people(d.people) : peopleLine(common, d.people, d.vulnFlags))
         }

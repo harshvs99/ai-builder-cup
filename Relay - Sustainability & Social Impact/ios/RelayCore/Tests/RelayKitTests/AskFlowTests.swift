@@ -95,6 +95,30 @@ final class AskFlowTests: XCTestCase {
         XCTAssertEqual("food and water", need.item)
     }
 
+    func testTransportOutIsItsOwnRescueTicket() throws {
+        var flow = AskFlow()
+        flow.toggleTransport()
+        XCTAssertTrue(flow.canContinue, "the chip alone is enough to continue")
+        var n: UInt8 = 0
+        func build(_ f: AskFlow) -> [Need] {
+            f.buildNeeds(newMsgId: { n += 10; return self.ids(n) }, originNode: ids(8), createdAtSec: 1, lang: .en, fix: nil)
+        }
+        var needs = build(flow)
+        XCTAssertEqual([.rescue], needs.map(\.category))
+        XCTAssertEqual(["evacuation"], needs.map(\.item))
+        // Next to a plain rescue and a medical need: three tickets, the two RESCUE ones told apart by item.
+        flow.toggleCategory(.rescue)
+        flow.toggleCategory(.medical)
+        flow.setPeople(3)
+        needs = build(flow)
+        XCTAssertEqual([.rescue, .medical, .rescue], needs.map(\.category))
+        XCTAssertEqual(["rescue", "medicine", "evacuation"], needs.map(\.item))
+        XCTAssertTrue(needs.allSatisfy { $0.people == 3 })
+        for need in needs { XCTAssertLessThanOrEqual(need.item.utf8.count, NeedCodec.maxItem) }
+        flow.toggleTransport()
+        XCTAssertEqual(2, build(flow).count)
+    }
+
     func testRemovingThePrimaryPromotesTheNext() {
         var flow = AskFlow()
         flow.toggleCategory(.rescue)

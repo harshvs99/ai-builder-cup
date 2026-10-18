@@ -35,6 +35,18 @@ class RuleExtractorTest {
 
     private fun t(text: String, hint: Lang? = null, block: NeedDraft.() -> Unit = {}) { x(text, hint).apply(block) }
 
+    // ------------------------------------------------------------------ more than one need in one message
+    @Test fun hindiInsulinAndFoodAndDrinkGivesSupplyExtras() {
+        val d = x("Yahan per Ek Ghar Pati Mahila Hai unke liye insulin medical supplies aur khane Peene Ka intejaam chahie")
+        assertEquals(Category.MEDICAL, d.category)
+        assertEquals(setOf(Category.WATER, Category.FOOD), d.extraCategories.toSet())
+    }
+
+    @Test fun singleNeedHasNoExtras() {
+        assertTrue(x("my mother needs insulin, near the school").extraCategories.isEmpty())
+        assertTrue(x("we have food but no water").extraCategories.isEmpty())
+    }
+
     // ------------------------------------------------------------------ the required case
     @Test fun requiredExample() {
         val d = x("my mother needs insulin, near the school")

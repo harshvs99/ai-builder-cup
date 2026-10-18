@@ -73,8 +73,9 @@ export function createClient(base: string, operatorKey?: string | null) {
     resolve(no: number): Promise<Ticket> {
       return request<Ticket>(`/v1/tickets/${no}/resolve`, { method: 'POST' });
     },
-    proposeDispatch(): Promise<{ proposals: unknown[] }> {
-      return request('/v1/dispatch/propose', { method: 'POST' });
+    /** Propose a team for one open ticket; other tickets' proposals are left alone. */
+    proposeDispatch(ticketNo: number): Promise<{ proposals: unknown[] }> {
+      return request(`/v1/dispatch/propose?ticket_no=${ticketNo}`, { method: 'POST' });
     },
     listTeams(signal?: AbortSignal): Promise<Team[]> {
       return request<Team[]>('/v1/teams', { signal });

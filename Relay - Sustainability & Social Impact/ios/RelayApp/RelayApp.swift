@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct RelayApp: App {
@@ -20,6 +21,11 @@ struct RelayApp: App {
                 .environment(model)
                 .task { model.start() } // idempotent
                 .onChange(of: scenePhase, initial: true) { _, phase in model.setScenePhase(phase) }
+                // The on-device model is the biggest thing the app can hold in RAM: free it when hidden or when iOS asks.
+                .onChange(of: scenePhase) { _, phase in if phase == .background { Task { await GemmaRunner.shared.onBackgrounded() } } }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+                    Task { await GemmaRunner.shared.onMemoryWarning() }
+                }
         }
     }
 }

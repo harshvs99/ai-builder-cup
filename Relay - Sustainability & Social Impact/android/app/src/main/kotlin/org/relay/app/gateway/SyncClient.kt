@@ -19,6 +19,8 @@ data class SyncResponse(
     /** ACK payloads (not frames), oldest first. */
     val acks: List<ByteArray>,
     val ackCursor: Long,
+    /** BROADCAST payloads (SPEC 5.6) the control room has live now; every gateway originates them into the mesh. Absent = none. */
+    val broadcasts: List<ByteArray> = emptyList(),
     /** Present only when the backend reports hints (it adds `hints` when the upload held any); null otherwise. */
     val hints: HintCounts? = null,
 )
@@ -114,7 +116,13 @@ class SyncClient(
             for (i in 0 until acksJson.length()) {
                 try { acks += dec.decode(acksJson.getString(i)) } catch (_: IllegalArgumentException) { /* skip bad entry */ }
             }
+            val bJson = o.optJSONArray("broadcasts") ?: JSONArray()
+            val broadcasts = ArrayList<ByteArray>(bJson.length())
+            for (i in 0 until bJson.length()) {
+                try { broadcasts += dec.decode(bJson.getString(i)) } catch (_: IllegalArgumentException) { /* skip bad entry */ }
+            }
             return SyncResponse(
+                broadcasts = broadcasts,
                 accepted = o.optInt("accepted", 0),
                 duplicates = o.optInt("duplicates", 0),
                 rejected = o.optInt("rejected", 0),

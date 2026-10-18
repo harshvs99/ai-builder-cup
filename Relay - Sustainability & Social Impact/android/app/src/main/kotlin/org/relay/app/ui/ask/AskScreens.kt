@@ -21,10 +21,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -51,6 +54,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -81,6 +85,9 @@ import org.relay.app.ui.i18n.stringsFor
 import org.relay.app.ui.theme.RelayTheme
 import org.relay.core.payload.Category
 import org.relay.core.payload.Lang
+import org.relay.core.payload.VulnFlag
+import org.relay.core.triage.ComplexityRouter
+import org.relay.core.triage.Route
 
 /** What the listening card shows about the microphone. Built from [VoiceState] with plain-words problems. */
 sealed interface VoiceUi {
@@ -142,7 +149,9 @@ fun AskScreen(nav: RelayNav, mode: AskMode, prefillFrom: String?, flowOwner: Vie
         }
         voice.cancel()
         doneRequested = false
-        nav.toCheck()
+        // Simple needs (water, food, shelter) go straight to Check and send; medical and rescue get the triage questions first.
+        val now = vm.state.value
+        if (ComplexityRouter.route(now.transcript, now.draft.categories, now.draft.vulnFlags) == Route.TRIAGE) nav.toTriage() else nav.toCheck()
     }
 
     val voiceUi: VoiceUi = when (val v = voiceState) {
@@ -163,9 +172,12 @@ fun AskScreen(nav: RelayNav, mode: AskMode, prefillFrom: String?, flowOwner: Vie
     AskContent(
         s = s, lang = lang, state = state, voice = voiceUi,
         onBack = nav::back,
-        onHear = { if (speaker?.speak(s.ask.headline, lang) != true) Toast.makeText(ctx, s.ask.noVoiceInstalled, Toast.LENGTH_SHORT).show() },
+        onHear = { if (speaker?.speak(s.ask.headline + " " + s.ask.headlineHint, lang) != true) Toast.makeText(ctx, s.ask.noVoiceInstalled, Toast.LENGTH_SHORT).show() },
         onTranscript = { vm.onTranscript(it, lang) },
         onToggleCategory = vm::toggleCategory,
+        onToggleTransport = vm::toggleTransport,
+        onSetPeople = vm::setPeople,
+        onToggleFlag = vm::toggleFlag,
         onStop = { voice.stop() },
         onResume = { startVoice() },
         onDone = { doneRequested = true },
@@ -186,12 +198,15 @@ fun AskContent(
     onHear: () -> Unit,
     onTranscript: (String) -> Unit,
     onToggleCategory: (Category) -> Unit,
+    onToggleTransport: () -> Unit,
     onStop: () -> Unit,
     onResume: () -> Unit,
     onDone: () -> Unit,
     onTypeInstead: () -> Unit,
     onUseVoice: () -> Unit,
     busy: Boolean = false,
+    onSetPeople: (Int) -> Unit = {},
+    onToggleFlag: (VulnFlag) -> Unit = {},
 ) {
     val draft = state.draft
     val canContinue = AskLogic.hasContent(draft, state.transcript) && !busy
@@ -215,6 +230,7 @@ fun AskContent(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(s.ask.headline, style = MaterialTheme.typography.headlineSmall)
+                Text(s.ask.headlineHint, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SpeakButton(s.ask.hearItAgain, onHear)
             }
 
@@ -276,6 +292,7 @@ fun AskContent(
                     AskLogic.mainCategories.forEach { c ->
                         CategoryChip(AskLogic.chipLabel(s.common, c), c, AskLogic.isChosen(draft, c)) { onToggleCategory(c) }
                     }
+                    CategoryChip(s.common.transportOut, Category.RESCUE, draft.transportOut) { onToggleTransport() }
                     val moreSelected = draft.categories.any { it in AskLogic.moreCategories }
                     SimpleChip(s.common.somethingElse, moreSelected || showMore) { showMore = !showMore }
                 }
@@ -283,6 +300,31 @@ fun AskContent(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         AskLogic.moreCategories.forEach { c ->
                             CategoryChip(AskLogic.chipLabel(s.common, c), c, AskLogic.isChosen(draft, c)) { onToggleCategory(c) }
+                        }
+                    }
+                }
+            }
+            // Follow-up inputs appear once there is something to attach them to: how many people, and who is with them.
+            if (AskLogic.showDetails(draft, state.transcript)) {
+                SectionCard(title = s.ask.howManyPeople) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        FilledTonalIconButton(
+                            onClick = { onSetPeople(draft.people - 1) }, enabled = draft.people > 1,
+                            modifier = Modifier.size(48.dp).semantics { contentDescription = s.ask.fewerPeople },
+                        ) { Icon(Icons.Filled.Remove, contentDescription = null) }
+                        Text(
+                            "${draft.people}", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 28.dp),
+                        )
+                        FilledTonalIconButton(
+                            onClick = { onSetPeople(draft.people + 1) }, enabled = draft.people < AskLogic.MAX_PEOPLE,
+                            modifier = Modifier.size(48.dp).semantics { contentDescription = s.ask.morePeople },
+                        ) { Icon(Icons.Filled.Add, contentDescription = null) }
+                    }
+                    Text(s.ask.whoIsWithYou, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AskLogic.relevantFlags(draft.categories).forEach { f ->
+                            SimpleChip(s.common.vulnFlag(f), f in draft.vulnFlags) { onToggleFlag(f) }
                         }
                     }
                 }
@@ -387,11 +429,11 @@ private val previewState = AskState(draft = previewDraft, transcript = "We are 6
 @Preview(showBackground = true, heightDp = 780)
 @Composable
 private fun AskPreview() = RelayPreview {
-    AskContent(stringsFor(Lang.EN), Lang.EN, previewState, VoiceUi.Listening(), {}, {}, {}, {}, {}, {}, {}, {}, {})
+    AskContent(stringsFor(Lang.EN), Lang.EN, previewState, VoiceUi.Listening(), {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 }
 
 @Preview(showBackground = true, heightDp = 780)
 @Composable
 private fun AskDarkPreview() = RelayPreview(dark = true) {
-    AskContent(stringsFor(Lang.HI), Lang.HI, previewState.copy(typing = true), VoiceUi.Paused, {}, {}, {}, {}, {}, {}, {}, {}, {})
+    AskContent(stringsFor(Lang.HI), Lang.HI, previewState.copy(typing = true), VoiceUi.Paused, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 }

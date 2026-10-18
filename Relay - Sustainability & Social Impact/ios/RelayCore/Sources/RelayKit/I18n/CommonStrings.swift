@@ -128,6 +128,9 @@ public struct CommonStrings: Equatable, Sendable {
         }
     } // needs native review (non-English)
 
+    /// The "get me out of here" chip: a vehicle to leave the area. Goes out as a RESCUE ticket, item "evacuation".
+    public var transportOut: String { tr(lang, "Transport out", "बाहर जाने का साधन", "ବାହାରକୁ ଯିବା ଯାନ", "Sasakyan palabas", "Sakyanan paggawas") } // needs native review (non-English)
+
     public func vulnFlag(_ f: VulnFlag) -> String {
         switch f {
         case .elderly: return tr(lang, "elderly", "बुज़ुर्ग", "ବୃଦ୍ଧ", "matatanda", "tigurang")

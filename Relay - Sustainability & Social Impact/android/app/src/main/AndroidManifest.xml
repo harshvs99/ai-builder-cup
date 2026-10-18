@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- LiteRT-LM (on-device Gemma) is built for API 31; GemmaRunner never touches it below that. -->
+    <uses-sdk tools:overrideLibrary="com.google.ai.edge.litertlm" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -46,6 +49,10 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.Relay">
+        <!-- Android 12+ only lets an app load these vendor libraries if it declares them. LiteRT-LM's GPU backend needs OpenCL. -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
 
         <!-- Opt in to constrained (satellite) data networks. -->
         <meta-data

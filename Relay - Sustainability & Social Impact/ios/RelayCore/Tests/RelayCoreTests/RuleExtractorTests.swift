@@ -7,6 +7,18 @@ final class RuleExtractorTests: XCTestCase {
 
     private func utf8Count(_ s: String) -> Int { s.utf8.count }
 
+    // ------------------------------------------------------------------ more than one need in one message
+    func testHindiInsulinAndFoodAndDrinkGivesSupplyExtras() {
+        let d = x("Yahan per Ek Ghar Pati Mahila Hai unke liye insulin medical supplies aur khane Peene Ka intejaam chahie")
+        XCTAssertEqual(.medical, d.category)
+        XCTAssertEqual(Set<NeedCategory>([.water, .food]), Set(d.extraCategories))
+    }
+
+    func testSingleNeedHasNoExtras() {
+        XCTAssertTrue(x("my mother needs insulin, near the school").extraCategories.isEmpty)
+        XCTAssertTrue(x("we have food but no water").extraCategories.isEmpty)
+    }
+
     // ------------------------------------------------------------------ the required case
     func testRequiredExample() {
         let d = x("my mother needs insulin, near the school")

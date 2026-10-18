@@ -165,6 +165,34 @@ final class VectorsTests: XCTestCase {
         for (k, v) in table { XCTAssertEqual(v.intValue, LocHintCodec.accMaxM[Int(k)!]) }
     }
 
+    // ---- BROADCAST (SPEC 5.6): its own vector list, so nothing that walks `vectors` is affected
+    func testBroadcastVectorsMatchByteForByte() throws {
+        let list = try XCTUnwrap(root["broadcast_vectors"] as? [JObj])
+        XCTAssertGreaterThanOrEqual(list.count, 3)
+        for v in list {
+            let name = s(v, "name")
+            let fl = obj(v, "fields")
+            let kind: BroadcastKind = s(fl, "kind") == "disaster" ? .disaster : .disasterCleared
+            let b = Broadcast(id: h(s(fl, "bcast_id")), kind: kind, disaster: try XCTUnwrap(DisasterType.fromKey(s(fl, "disaster"))),
+                              issuedAt: l(fl, "issued_at"), latE5: i(fl, "lat_e5"), lonE5: i(fl, "lon_e5"), radiusKm: i(fl, "radius_km"))
+            let payload = try BroadcastCodec.encode(b)
+            XCTAssertEqual(s(v, "payload_hex"), Hex.encode(payload), "\(name) payload")
+            XCTAssertEqual(b, BroadcastCodec.decode(h(s(v, "payload_hex"))), "\(name) decode")
+            XCTAssertEqual(s(v, "frame_hex"), Hex.encode(try FrameCodec.encode(frameOf(v, payload))), "\(name) frame")
+            XCTAssertEqual(s(fl, "bcast_id"), b.keyHex, "\(name) key")
+            XCTAssertEqual(l(fl, "expires_at"), b.issuedAt + BroadcastCodec.ttlSec, "\(name) expiry")
+            XCTAssertEqual(FrameTypes.broadcast, i(obj(v, "frame"), "type"))
+        }
+        XCTAssertEqual(BroadcastCodec.size, i(obj(root, "sizes"), "broadcast_payload"))
+        XCTAssertEqual(BroadcastCodec.ttlSec, l(root, "broadcast_ttl_s"))
+    }
+
+    func testBroadcastPayloadsEveryDecoderMustReject() {
+        let bad = root["must_reject_broadcast_payloads"] as! [String: String]
+        XCTAssertGreaterThanOrEqual(bad.count, 8)
+        for (name, hexv) in bad { XCTAssertNil(BroadcastCodec.decode(h(hexv)), "must reject \(name)") }
+    }
+
     func testBroadcastRecipientAllFfIsBroadcast() throws {
         let f = Frame(type: FrameTypes.ack, ttl: 3, timestampMs: 5, senderId: [UInt8](repeating: 1, count: 8),
                       recipientId: [UInt8](repeating: 0xFF, count: 8), payload: [1])

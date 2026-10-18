@@ -243,7 +243,7 @@ fun LegacyHomeScreen(actions: SetupActions) {
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LANGUAGE_LABELS.forEach { (l, label) ->
-                    FilterChip(selected = lang == l, onClick = { MeshRepository.settings.update { it.copy(language = l) } }, label = { Text(label) })
+                    FilterChip(selected = lang == l, onClick = { MeshRepository.settings.update { it.withLanguage(l) } }, label = { Text(label) })
                 }
             }
         }

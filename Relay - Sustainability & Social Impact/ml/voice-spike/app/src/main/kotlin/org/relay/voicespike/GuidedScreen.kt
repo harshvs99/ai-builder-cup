@@ -77,6 +77,8 @@ fun modelLine(st: UiState): String {
 private fun langLabel(it: GuidedItem) = when {
     it.id.startsWith("hx") -> "Hinglish (read as written)"
     it.lang == "hi" -> "हिन्दी  Hindi"
+    it.lang == "bn" -> "বাংলা  Bengali"
+    it.lang == "bho" -> "भोजपुरी  Bhojpuri"
     else -> "English (Indian)"
 }
 

@@ -104,10 +104,10 @@ const teamViews = () => TEAMS.map((t) => {
 const gatewaySeen = new Map(GATEWAYS.map((g, i) => [g, i === GATEWAYS.length - 1 ? now() - 3 * 3600 : now()]));
 setInterval(() => { for (const g of GATEWAYS.slice(0, -1)) gatewaySeen.set(g, now() - Math.floor(Math.random() * 20)); }, 5000);
 let sitrep = null;
-function propose() {
+function propose(only) {  // one ticket, as the real API
   const out = [];
   for (const t of tickets.values()) {
-    if (t.status !== 'OPEN') continue;
+    if (t.status !== 'OPEN' || t.ticket_no !== only) continue;
     const team = teamViews().find((x) => x.status === 'free' && x.kind === (KIND_FOR[t.category] ?? 'supply'));
     if (!team) continue;
     t.proposal = {
@@ -145,7 +145,14 @@ const server = http.createServer((req, res) => {
     return send(res, 200, { gateways: [...gatewaySeen].map(([node, last_seen]) => ({ node, last_seen, online: last_seen >= now() - 60 }))
       .sort((a, b) => b.last_seen - a.last_seen), online_window_s: 60 });
   }
-  if (req.method === 'POST' && path === '/v1/dispatch/propose') return send(res, 200, { proposals: propose() });
+  if (req.method === 'POST' && path === '/v1/dispatch/propose') {
+    const n = Number(url.searchParams.get('ticket_no'));
+    if (!url.searchParams.has('ticket_no') || !Number.isInteger(n)) return send(res, 422, { detail: 'ticket_no is required' });
+    const t = tickets.get(n);
+    if (!t) return send(res, 404, { detail: 'unknown ticket' });
+    if (t.status !== 'OPEN') return send(res, 409, { detail: 'ticket is not open' });
+    return send(res, 200, { proposals: propose(n) });
+  }
   if (req.method === 'GET' && path === '/v1/sitreps/latest') return sitrep ? send(res, 200, sitrep) : send(res, 404, { detail: 'no sitrep yet' });
   if (req.method === 'POST' && path === '/v1/sitreps/run') {
     const open = [...tickets.values()].filter((t) => t.status === 'OPEN');

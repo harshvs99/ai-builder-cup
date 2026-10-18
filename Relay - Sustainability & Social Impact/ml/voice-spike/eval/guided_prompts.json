@@ -180,5 +180,130 @@
     "note": "Hinglish (Latin script), lang=hi; negation: has food, needs water",
     "text": "Khana to hai lekin peene ka paani nahi hai, hum teen log hain jisme ek garbhwati madam hain, market ke paas.",
     "expected": {"category": "WATER", "urgency": 2, "people": 3, "vuln": ["PREGNANT"], "item": "water", "landmark": "market"}
+  },
+  {
+    "id": "bn_01", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমার দাদুর বুকে ব্যথা হচ্ছে, শ্বাস নিতে পারছেন না, দয়া করে তাড়াতাড়ি ওষুধ পাঠান। আমরা পেট্রোল পাম্পের কাছে আছি।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["ELDERLY"], "item": "medicine", "landmark": "petrol pump"}
+  },
+  {
+    "id": "bn_02", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমাদের এখানে দুই দিন ধরে খাবার জল নেই, আমরা ছয়জন আছি, স্কুলের পাশে।",
+    "expected": {"category": "WATER", "urgency": 2, "people": 6, "vuln": [], "item": "water", "landmark": "school"}
+  },
+  {
+    "id": "bn_03", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "বাচ্চারা কাল থেকে কিছু খায়নি, ঘরে চাল শেষ হয়ে গেছে, আমরা চারজন, দয়া করে খাবার পাঠান।",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 4, "vuln": ["CHILD"], "item": "food", "landmark": ""}
+  },
+  {
+    "id": "bn_04", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "বন্যার জল ঘরে ঢুকে গেছে, আমরা পাঁচজন ছাদে আটকে আছি, সঙ্গে একটা ছোট বাচ্চা আছে, ঘড়ির টাওয়ারের কাছে।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 5, "vuln": ["CHILD", "TRAPPED"], "item": "rescue", "landmark": "clock tower"}
+  },
+  {
+    "id": "bn_05", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমার স্ত্রী আট মাসের গর্ভবতী, ব্যথা শুরু হয়ে গেছে, একটা অ্যাম্বুলেন্স দরকার, আমরা হাসপাতালের গলিতে আছি।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["PREGNANT"], "item": "ambulance", "landmark": "hospital"}
+  },
+  {
+    "id": "bn_06", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "বৃষ্টিতে আমাদের ঘর ভেঙে গেছে, আমরা সাতজন রাস্তায় আছি, সঙ্গে দুজন বাচ্চা আর একজন বৃদ্ধা, থাকার জায়গা চাই, রেল স্টেশনের কাছে।",
+    "expected": {"category": "SHELTER", "urgency": 2, "people": 7, "vuln": ["CHILD", "ELDERLY"], "item": "shelter", "landmark": "railway station"}
+  },
+  {
+    "id": "bn_07", "lang": "bn", "note": "landmark 'ghat' (river landing); transliterated place noun; Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমার ছোট ছেলেকে নৌকা উল্টে যাওয়ার পর থেকে খুঁজে পাচ্ছি না, তার বয়স আট বছর, শেষবার তাকে ঘাটে দেখেছি।",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["CHILD"], "item": "missing person", "landmark": "ghat"}
+  },
+  {
+    "id": "bn_08", "lang": "bn", "note": "negation: water is NOT needed (category trap); Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "খাবার জলের সমস্যা নেই, কিন্তু ওষুধ শেষ হয়ে গেছে, আমার বাবা বয়স্ক মানুষ, তাঁর সুগার আছে, আমরা বাজারের কাছে আছি।",
+    "expected": {"category": "MEDICAL", "urgency": 2, "people": 1, "vuln": ["ELDERLY"], "item": "medicine", "landmark": "market"}
+  },
+  {
+    "id": "bn_09", "lang": "bn", "note": "implicit RESCUE ('buried', no keyword); Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "ঘরের দেওয়াল ভেঙে পড়েছে, তার নিচে দুজন চাপা পড়ে আছে, দয়া করে এখনই আসুন, মন্দিরের পাশে।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 2, "vuln": ["TRAPPED"], "item": "rescue", "landmark": "temple"}
+  },
+  {
+    "id": "bn_10", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমরা বারোজন আছি, পানীয় জল প্রায় শেষ, আজ রাতের মধ্যে কিছু জল পাঠালে ভালো হয়।",
+    "expected": {"category": "WATER", "urgency": 1, "people": 12, "vuln": [], "item": "water", "landmark": ""}
+  },
+  {
+    "id": "bn_11", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "ঘরে শুকনো খাবার কম আছে, আমরা তিনজন, একজন বৃদ্ধা সঙ্গে আছেন, কাল সকালের মধ্যে পাঠালেই চলবে, নদীর ধারে।",
+    "expected": {"category": "FOOD", "urgency": 1, "people": 3, "vuln": ["ELDERLY"], "item": "food", "landmark": "river"}
+  },
+  {
+    "id": "bn_12", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমার বৃদ্ধ মা সকাল থেকে ত্রাণ শিবির থেকে নিখোঁজ, তিনি ঠিকমতো দেখতে পান না, দয়া করে খোঁজ করুন।",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["ELDERLY"], "item": "missing person", "landmark": "relief camp"}
+  },
+  {
+    "id": "bn_13", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমার ভাইয়ের পা কেটে অনেক রক্ত পড়ছে, সে হাঁটতে পারছে না, ডাক্তার পাঠান, বাস স্ট্যান্ডের কাছে।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["INJURED"], "item": "doctor", "landmark": "bus stand"}
+  },
+  {
+    "id": "bn_14", "lang": "bn", "note": "Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "রাতে খুব ঠান্ডা পড়ছে, আমাদের কোনো কম্বল নেই, আমরা চারজন আছি।",
+    "expected": {"category": "OTHER", "urgency": 2, "people": 4, "vuln": [], "item": "blanket", "landmark": ""}
+  },
+  {
+    "id": "bn_15", "lang": "bn", "note": "implicit trapped (tree, water all around); Bengali written by Claude: needs native-speaker review before counting results",
+    "text": "আমরা তিনজন একটা গাছের ওপর উঠে বসে আছি, চারদিকে শুধু জল, দয়া করে নৌকা পাঠান।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 3, "vuln": ["TRAPPED"], "item": "rescue", "landmark": ""}
+  },
+  {
+    "id": "bho_01", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "हमार बाबूजी के सीना में बहुत दरद बा, साँस नइखे ले पावत, जल्दी दवाई भेजीं, हमनी के पेट्रोल पंप के लगे बानी।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["ELDERLY"], "item": "medicine", "landmark": "petrol pump"}
+  },
+  {
+    "id": "bho_02", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "हमनी के गाँव में दू दिन से पीए के पानी नइखे, आठ जाना बानी, इस्कूल के पास।",
+    "expected": {"category": "WATER", "urgency": 2, "people": 8, "vuln": [], "item": "water", "landmark": "school"}
+  },
+  {
+    "id": "bho_03", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "लइका सब काल्ह से भूखल बाड़न, घर में राशन खतम हो गइल, पाँच जाना बानी, खाना भेज दीं।",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 5, "vuln": ["CHILD"], "item": "food", "landmark": ""}
+  },
+  {
+    "id": "bho_04", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "बाढ़ के पानी घर में घुस गइल, छह जाना छत पर फँसल बानी जा, एगो छोट लइका भी बा, मंदिर के पास।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 6, "vuln": ["CHILD", "TRAPPED"], "item": "rescue", "landmark": "temple"}
+  },
+  {
+    "id": "bho_05", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "हमार मेहरारू पेट से बाड़ी, दरद सुरू हो गइल बा, एम्बुलेंस चाहीं, हमनी अस्पताल के गली में बानी।",
+    "expected": {"category": "MEDICAL", "urgency": 3, "people": 1, "vuln": ["PREGNANT"], "item": "ambulance", "landmark": "hospital"}
+  },
+  {
+    "id": "bho_06", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "बरखा में घर गिर गइल, हमनी चार जाना सड़क पर बानी, एगो बूढ़ दादी भी बाड़ी, रहे के जगह चाहीं, रेलवे टेसन के लगे।",
+    "expected": {"category": "SHELTER", "urgency": 2, "people": 4, "vuln": ["ELDERLY"], "item": "shelter", "landmark": "railway station"}
+  },
+  {
+    "id": "bho_07", "lang": "bho", "note": "landmark 'बस अड्डा' = bus stand; Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "हमार छोटकी बेटी मेला के भीड़ में हेरा गइल बिया, चार बरिस के बा, आखिरी बेर बस अड्डा के लगे देखाइल रहे।",
+    "expected": {"category": "MISSING_PERSON", "urgency": 2, "people": 1, "vuln": ["CHILD"], "item": "missing person", "landmark": "bus stand"}
+  },
+  {
+    "id": "bho_08", "lang": "bho", "note": "negation: water is NOT needed (category trap); Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "पानी के दिक्कत नइखे, बाकिर खाना खतम हो गइल बा, हमनी तीन जाना बानी, बजार के पास।",
+    "expected": {"category": "FOOD", "urgency": 2, "people": 3, "vuln": [], "item": "food", "landmark": "market"}
+  },
+  {
+    "id": "bho_09", "lang": "bho", "note": "implicit RESCUE ('buried'); landmark contains 'water' (category trap); Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "देवाल गिर गइल बा आ ओकरा नीचे दू आदमी दबल बाड़न, जल्दी आईं, पानी टंकी के लगे।",
+    "expected": {"category": "RESCUE", "urgency": 3, "people": 2, "vuln": ["TRAPPED"], "item": "rescue", "landmark": "water tank"}
+  },
+  {
+    "id": "bho_10", "lang": "bho", "note": "Bhojpuri (Devanagari) written by Claude: needs native-speaker review before counting results",
+    "text": "राते में बहुत ठंडा लागत बा, कम्बल नइखे, हमनी सात जाना बानी, एगो बुजुर्ग भी बाड़न।",
+    "expected": {"category": "OTHER", "urgency": 2, "people": 7, "vuln": ["ELDERLY"], "item": "blanket", "landmark": ""}
   }
 ]

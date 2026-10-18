@@ -165,7 +165,7 @@ internal fun SettingsContent(
     }
 
     if (languageSheet) LanguageSheet(settings.language, s.chooseLanguage, onPick = { l ->
-        onUpdate { it.copy(language = l) }
+        onUpdate { it.withLanguage(l) }
         languageSheet = false
     }, onDismiss = { languageSheet = false })
 

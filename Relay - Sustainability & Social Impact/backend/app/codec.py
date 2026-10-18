@@ -23,6 +23,7 @@ TYPE_ACK = 0x71
 TYPE_HELLO = 0x72
 TYPE_INVENTORY = 0x73
 TYPE_LOC_HINT = 0x74
+TYPE_BROADCAST = 0x75
 
 FLAG_HAS_RECIPIENT = 0x01
 FLAG_HAS_SIGNATURE = 0x02
@@ -77,6 +78,7 @@ _NEED_FIXED = struct.Struct(">B8s8sIBBBBiiBB")  # 35 bytes
 _ACK_FIXED = struct.Struct(">B8s8s8sIBH")  # 32 bytes (+1 length byte for text)
 _HELLO = struct.Struct(">B8sBBH")
 _LOC_HINT = struct.Struct(">B8s8siiBbI")  # 31 bytes (SPEC 5.5)
+_BROADCAST = struct.Struct(">B8sBBIiiH")  # 25 bytes (SPEC 5.6)
 _FRAME_HEAD = struct.Struct(">BBBQBH")
 
 
@@ -534,3 +536,65 @@ def decode_loc_hint(payload: bytes) -> LocHint:
     if not _coords_ok(lat_e5, lon_e5):
         raise CodecError("coordinates out of range")
     return LocHint(ref, relay, lat_e5, lon_e5, acc, rssi, observed_at)
+
+
+# --------------------------------------------------------------------------------------
+# BROADCAST (SPEC 5.6): the control room speaking to every phone
+# --------------------------------------------------------------------------------------
+
+BROADCAST_TTL_S = 24 * 3600  # a broadcast lives 24 h from issued_at
+BROADCAST_KINDS = {1: "disaster", 2: "cleared"}
+DISASTER_CODES = {0: "flood", 1: "cyclone", 2: "earthquake", 3: "landslide"}
+_BROADCAST_KIND_CODES = {v: k for k, v in BROADCAST_KINDS.items()}
+_DISASTER_NAME_CODES = {v: k for k, v in DISASTER_CODES.items()}
+
+
+@dataclass(frozen=True)
+class Broadcast:
+    bcast_id: bytes
+    kind: str  # "disaster" | "cleared"
+    disaster: str  # "flood" | "cyclone" | "earthquake" | "landslide"
+    issued_at: int  # unix seconds
+    lat_e5: int = 0
+    lon_e5: int = 0
+    radius_km: int = 0  # 0 = the whole control-room area
+
+    @property
+    def key(self) -> bytes:
+        return self.bcast_id
+
+    def is_live(self, now: float) -> bool:
+        return 0 <= now - self.issued_at <= BROADCAST_TTL_S
+
+
+def encode_broadcast(b: Broadcast) -> bytes:
+    _need_bytes("bcast_id", b.bcast_id, 8)
+    if b.kind not in _BROADCAST_KIND_CODES:
+        raise CodecError("unknown broadcast kind")
+    if b.disaster not in _DISASTER_NAME_CODES:
+        raise CodecError("unknown disaster")
+    _u("issued_at", b.issued_at, 32)
+    _u("radius_km", b.radius_km, 16)
+    for name, v in (("lat_e5", b.lat_e5), ("lon_e5", b.lon_e5)):
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise CodecError(f"{name} must be an int")
+    if not _coords_ok(b.lat_e5, b.lon_e5):
+        raise CodecError("coordinates out of range")
+    return _BROADCAST.pack(
+        PROTOCOL_VERSION, b.bcast_id, _BROADCAST_KIND_CODES[b.kind], _DISASTER_NAME_CODES[b.disaster],
+        b.issued_at, b.lat_e5, b.lon_e5, b.radius_km,
+    )
+
+
+def decode_broadcast(payload: bytes) -> Broadcast:
+    payload = _check_bytes_input(payload)
+    if len(payload) != _BROADCAST.size:
+        raise CodecError("BROADCAST payload must be 25 bytes")
+    ver, bid, kind, disaster, issued_at, lat_e5, lon_e5, radius = _BROADCAST.unpack(payload)
+    if ver != PROTOCOL_VERSION:
+        raise CodecError("unsupported BROADCAST payload version")
+    if kind not in BROADCAST_KINDS or disaster not in DISASTER_CODES:
+        raise CodecError("unknown broadcast kind or disaster")
+    if not _coords_ok(lat_e5, lon_e5):
+        raise CodecError("coordinates out of range")
+    return Broadcast(bid, BROADCAST_KINDS[kind], DISASTER_CODES[disaster], issued_at, lat_e5, lon_e5, radius)

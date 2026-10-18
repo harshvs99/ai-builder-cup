@@ -227,6 +227,7 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
         onBack = nav::back,
         onTurnOnLocation = ::turnOnLocation,
         onSetCategory = vm::pickCategory,
+        onToggleTransport = vm::toggleTransport,
         onSetItem = vm::setItem,
         onSetPeople = vm::setPeople,
         onToggleFlag = vm::toggleFlag,
@@ -257,6 +258,7 @@ fun CheckContent(
     onBack: () -> Unit,
     onTurnOnLocation: () -> Unit,
     onSetCategory: (Category) -> Unit,
+    onToggleTransport: () -> Unit,
     onSetItem: (String) -> Unit,
     onSetPeople: (Int) -> Unit,
     onToggleFlag: (VulnFlag) -> Unit,
@@ -295,7 +297,7 @@ fun CheckContent(
             Text(s.ask.isThisRight, style = MaterialTheme.typography.headlineSmall)
 
             SectionCard {
-                EditableRow(s.ask.rowNeed, (listOf(AskLogic.needWords(common, draft)) + draft.extraCategories.map { AskLogic.chipLabel(common, it) })
+                EditableRow(s.ask.rowNeed, (listOf(AskLogic.needWords(common, draft)) + draft.extraCategories.map { AskLogic.chipLabel(common, it) } + listOfNotNull(common.transportOut.takeIf { draft.transportOut }))
                     .filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { s.ask.nothingChosen }, { editor = CheckEditor.NEED })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 EditableRow(s.ask.rowPeople, AskLogic.peopleLine(common, draft.people, draft.vulnFlags), { editor = CheckEditor.PEOPLE })
@@ -379,7 +381,7 @@ fun CheckContent(
     editor?.let { which ->
         EditorSheet(onDismiss = { editor = null }, doneLabel = common.done) {
             when (which) {
-                CheckEditor.NEED -> NeedEditor(s, draft, onSetCategory, onSetItem)
+                CheckEditor.NEED -> NeedEditor(s, draft, onSetCategory, onToggleTransport, onSetItem)
                 CheckEditor.PEOPLE -> PeopleEditor(s, draft, onSetPeople, onToggleFlag)
                 CheckEditor.WHERE -> WhereEditor(s, draft, locUi, accuracyM, onSetLandmark, onTurnOnLocation)
                 CheckEditor.NOTE -> NoteEditor(s, draft, onSetSummary)
@@ -462,12 +464,13 @@ private fun EditorSheet(onDismiss: () -> Unit, doneLabel: String, content: @Comp
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NeedEditor(s: Strings, d: AskDraft, onCategory: (Category) -> Unit, onItem: (String) -> Unit) {
+private fun NeedEditor(s: Strings, d: AskDraft, onCategory: (Category) -> Unit, onTransport: () -> Unit, onItem: (String) -> Unit) {
     Text(s.ask.editNeedTitle, style = MaterialTheme.typography.titleLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         AskLogic.editorCategories.forEach { c ->
             CategoryChip(s.common.categoryName(c), c, c in d.categories) { onCategory(c) }
         }
+        CategoryChip(s.common.transportOut, Category.RESCUE, d.transportOut) { onTransport() }
     }
     LimitedField(s, s.ask.itemLabel, d.item, AskLogic.MAX_ITEM, onItem)
 }
@@ -552,7 +555,7 @@ private val previewDraft = AskDraft(
 private fun CheckPreview() = RelayPreview {
     CheckContent(
         stringsFor(Lang.EN), Lang.EN, previewDraft, LocUi.READY, 40f, SendPhase.IDLE,
-        {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {},
+        {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {},
     )
 }
 
@@ -561,6 +564,6 @@ private fun CheckPreview() = RelayPreview {
 private fun CheckDarkPreview() = RelayPreview(dark = true) {
     CheckContent(
         stringsFor(Lang.HI), Lang.HI, previewDraft.copy(category = Category.MEDICAL, answers = emptyMap()), LocUi.OFF, null, SendPhase.IDLE,
-        {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {},
+        {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {},
     )
 }

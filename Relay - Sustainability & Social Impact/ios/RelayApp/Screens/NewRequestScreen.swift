@@ -26,6 +26,7 @@ struct NewRequestScreen: View {
                     headline(screen)
                     card(screen)
                     categories(screen)
+                    details
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.bottom, Theme.Space.l)
@@ -110,7 +111,14 @@ struct NewRequestScreen: View {
             }
             model.cancelListening()
             ctl.busy = false
-            if ctl.flow.goToCheck() { nav.toCheck() }
+            guard ctl.flow.goToCheck() else { return }
+            // Simple needs (water, food, shelter) go straight to Check and send; medical and rescue get the triage questions first.
+            let s = ctl.flow.state
+            if ComplexityRouter.route(text: s.transcript, categories: s.draft.categories, vuln: s.draft.vulnFlags) == .triage {
+                nav.toTriage()
+            } else {
+                nav.toCheck()
+            }
         }
     }
 
@@ -119,8 +127,9 @@ struct NewRequestScreen: View {
     private func headline(_ screen: AskScreenModel) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(screen.headline).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+            Text(strings.ask.headlineHint).font(.body).foregroundStyle(.secondary)
             Button {
-                noVoiceInstalled = !model.speak(strings.ask.headline)
+                noVoiceInstalled = !model.speak(strings.ask.headline + " " + strings.ask.headlineHint)
             } label: {
                 Label(screen.hearItAgain, systemImage: "speaker.wave.2.fill").font(.subheadline.weight(.medium))
             }
@@ -216,10 +225,51 @@ struct NewRequestScreen: View {
         }
     }
 
+    /// Follow-up inputs appear once there is something to attach them to: how many people, and who is with them.
+    @ViewBuilder
+    private var details: some View {
+        if AskLogic.showDetails(ctl.flow.draft, ctl.flow.state.transcript) {
+            let draft = ctl.flow.draft
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                Text(strings.ask.howManyPeople).font(.headline)
+                HStack(spacing: Theme.Space.xl) {
+                    Spacer()
+                    stepButton("minus", label: strings.ask.fewerPeople, enabled: draft.people > 1) { ctl.flow.setPeople(draft.people - 1) }
+                    Text("\(draft.people)").font(.largeTitle.bold()).monospacedDigit().frame(minWidth: 64)
+                    stepButton("plus", label: strings.ask.morePeople, enabled: draft.people < AskLogic.maxPeople) { ctl.flow.setPeople(draft.people + 1) }
+                    Spacer()
+                }
+                SmallCapsLabel(strings.ask.whoIsWithYou)
+                ChipFlow {
+                    ForEach(AskLogic.relevantFlags(draft.categories), id: \.self) { flag in
+                        TintedChip(strings.common.vulnFlag(flag), isSelected: draft.vulnFlags.contains(flag)) { ctl.flow.toggleFlag(flag) }
+                    }
+                }
+            }
+            .padding(Theme.Space.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .relaySurfaceCard()
+        }
+    }
+
+    private func stepButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.title2.weight(.semibold))
+                .frame(width: 56, height: 56)
+                .relayGlassCircle(tint: nil)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+        .accessibilityLabel(label)
+    }
+
     private func categoryChip(_ chip: CategoryChipModel) -> some View {
         let category = RequestCategory(chip.category)
         return TintedChip(chip.label, systemImage: category.systemImage, tint: category.tint, isSelected: chip.isSelected) {
-            ctl.flow.toggleCategory(chip.category)
+            if chip.isTransport { ctl.flow.toggleTransport() } else { ctl.flow.toggleCategory(chip.category) }
         }
     }
 

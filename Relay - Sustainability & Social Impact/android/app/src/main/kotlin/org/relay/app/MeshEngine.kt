@@ -37,6 +37,7 @@ import org.relay.core.ids.Hex
 import org.relay.core.payload.Ack
 import org.relay.core.payload.Hello
 import org.relay.core.payload.LocHint
+import org.relay.core.payload.Broadcast
 import org.relay.core.payload.Need
 import org.relay.core.payload.NeedCodec
 import java.util.Random
@@ -189,6 +190,8 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         executor.scheduleWithFixedDelay({ node.expire() }, 1, 1, TimeUnit.HOURS)
         executor.scheduleWithFixedDelay({ publish() }, 1, 1, TimeUnit.SECONDS)
         executor.execute { resendOwnNeeds() }
+        // Broadcasts carried in the store from before this start still count (their 24 h life runs from issue).
+        executor.execute { for ((b, _) in node.storedBroadcasts()) DisasterStore.get(ctx).apply(b) }
         publish()
     }
 
@@ -227,6 +230,20 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         node.originateNeed(need)
         repo.log("originated NEED ${need.msgIdHex} cat=${need.category} urgency=${need.urgency} item=\"${need.item}\"")
         publish()
+    }
+
+    /**
+     * Developer/demo: this phone speaks as the control room. The broadcast goes through the same path as one from a gateway
+     * (stored, flooded, delivered to [onBroadcast]), so it also switches on the questions on this phone. Returns false when it
+     * already holds an identical id (cannot happen with a fresh random id).
+     */
+    fun declareDisaster(type: org.relay.core.triage.DisasterType, cleared: Boolean = false): Boolean {
+        val id = ByteArray(8).also { java.security.SecureRandom().nextBytes(it) }
+        val b = Broadcast(
+            id, if (cleared) org.relay.core.payload.BroadcastKind.DISASTER_CLEARED else org.relay.core.payload.BroadcastKind.DISASTER,
+            type, System.currentTimeMillis() / 1000,
+        )
+        return node.originateBroadcast(b) != null
     }
 
     fun resyncNow() {
@@ -282,6 +299,12 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
     override fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) {
         repo.log("LOC_HINT stored ref=${hint.refMsgIdHex} relay=${Hex.encode(hint.relayNode)} from=${fromLink ?: "local"} acc<=${hint.accuracyMaxM} m ttl=${frame.ttl}")
         gateway.kick() // no-op unless this phone is a gateway; lets hints upload promptly
+        publish()
+    }
+
+    override fun onBroadcast(broadcast: Broadcast, frame: Frame, fromLink: String?) {
+        repo.log("BROADCAST ${broadcast.idHex} ${broadcast.kind} ${broadcast.disaster.key} issued=${broadcast.issuedAt} from=${fromLink ?: "local"} ttl=${frame.ttl}")
+        DisasterStore.get(ctx).apply(broadcast)
         publish()
     }
 

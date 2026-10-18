@@ -66,6 +66,12 @@ final class RoutesTests: XCTestCase {
         XCTAssertTrue(RouteStack.languageDone().isEmpty)
         let ask = Route.ask(mode: .voice, prefillFrom: nil)
         XCTAssertEqual([ask, .check], RouteStack.toCheck([ask]))
+        XCTAssertEqual([ask, .triage], RouteStack.toTriage([ask]))
+        XCTAssertEqual([ask, .triage, .check], RouteStack.toCheck(RouteStack.toTriage([ask])))
+        XCTAssertEqual([.request(msgId: "n1")], RouteStack.finishAsk([ask, .triage, .check], msgId: "n1"))
+        XCTAssertEqual("triage", Route.triage.path)
+        XCTAssertEqual(.triage, Route(path: "triage"))
+        XCTAssertTrue(Route.triage.hidesTabBar && Route.triage.isAskFlow)
         // After Send, the ask/check screens go and the new request opens on top of whatever was below.
         XCTAssertEqual([.request(msgId: "n1")], RouteStack.finishAsk([ask, .check], msgId: "n1"))
         XCTAssertEqual([.request(msgId: "old"), .request(msgId: "n1")], RouteStack.finishAsk([.request(msgId: "old"), ask, .check], msgId: "n1"))

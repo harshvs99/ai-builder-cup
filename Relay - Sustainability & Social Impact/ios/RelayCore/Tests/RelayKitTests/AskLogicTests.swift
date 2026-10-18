@@ -17,6 +17,20 @@ final class AskLogicTests: XCTestCase {
         XCTAssertFalse(d.landmark.trimmed.isEmpty)
     }
 
+    func testExtractionKeepsEveryNeedTheTextAsksFor() {
+        let d = draftFrom("Yahan per Ek Ghar Pati Mahila Hai unke liye insulin medical supplies aur khane Peene Ka intejaam chahie")
+        XCTAssertEqual(.medical, d.category)
+        // water and food are one chip, so they come as one extra
+        XCTAssertEqual(1, d.extraCategories.count)
+        XCTAssertEqual(2, AskLogic.perCategory(d).count)
+    }
+
+    func testHandPickedCategoryIsNotOverwrittenByExtras() {
+        let d = AskLogic.applyIntake(AskLogic.setCategory(AskDraft(), .shelter), RuleIntake.shared.extract("insulin and food", langHint: .en))
+        XCTAssertEqual(.shelter, d.category)
+        XCTAssertTrue(d.extraCategories.isEmpty)
+    }
+
     func testNothingUnderstoodIsNilCategory() {
         let d = draftFrom("hello")
         XCTAssertNil(d.category)

@@ -121,6 +121,9 @@ class CommonStrings(private val lang: Lang) {
         Category.OTHER -> tr(lang, "Other", "अन्य", "ଅନ୍ୟ", "Iba pa", "Iba pa")
     } // needs native review (non-English)
 
+    /** The "get me out of here" chip: a vehicle to leave the area. Goes out as a RESCUE ticket, item "evacuation". */
+    val transportOut: String get() = tr(lang, "Transport out", "बाहर जाने का साधन", "ବାହାରକୁ ଯିବା ଯାନ", "Sasakyan palabas", "Sakyanan paggawas") // needs native review (non-English)
+
     fun vulnFlag(f: VulnFlag): String = when (f) {
         VulnFlag.ELDERLY -> tr(lang, "elderly", "बुज़ुर्ग", "ବୃଦ୍ଧ", "matatanda", "tigurang")
         VulnFlag.CHILD -> tr(lang, "children", "बच्चे", "ପିଲା", "bata", "bata")

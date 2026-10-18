@@ -4,6 +4,7 @@ import org.relay.core.frame.FrameTypes
 import org.relay.core.gossip.GossipNode
 import org.relay.core.gossip.PacketStore
 import org.relay.core.payload.AckCodec
+import org.relay.core.payload.BroadcastCodec
 
 /** Outcome of one sync attempt, for the UI. */
 data class SyncOutcome(
@@ -13,6 +14,8 @@ data class SyncOutcome(
     val duplicates: Int = 0,
     val rejected: Int = 0,
     val acksOriginated: Int = 0,
+    /** Control-room broadcasts this round put into the mesh for the first time (already-held ones are not counted). */
+    val broadcastsOriginated: Int = 0,
     val error: String? = null,
     /** How many of the [uploaded] frames were LOC_HINTs (the rest are NEEDs). */
     val hintsUploaded: Int = 0,
@@ -64,6 +67,16 @@ class GatewaySyncer(
                 log("originating ACK ref=${org.relay.core.ids.Hex.encode(ack.refMsgId)} ticket=#${ack.ticketNo} status=${ack.status} -> node ${org.relay.core.ids.Hex.encode(ack.targetNode)}")
                 originated++
             }
+            // Every sync hands back every live broadcast; originating is idempotent, so each gateway just puts them all in.
+            var bcasts = 0
+            for (payload in resp.broadcasts) {
+                val b = BroadcastCodec.decode(payload)
+                if (b == null) { log("sync: backend returned an undecodable BROADCAST payload; skipped"); continue }
+                if (node.originateBroadcast(b) != null) {
+                    log("originating BROADCAST ${b.idHex} ${b.kind} ${b.disaster.key}")
+                    bcasts++
+                }
+            }
             // Only after ACKs are safely in the store do we advance the cursor / mark frames uploaded.
             state.markUploaded(batch.map { it.key })
             state.setAckCursor(resp.ackCursor)
@@ -73,7 +86,7 @@ class GatewaySyncer(
             log("sync ok frames=${batch.size} accepted=${resp.accepted} duplicates=${resp.duplicates} " +
                 "rejected=${resp.rejected} acks=$originated ack_cursor=${resp.ackCursor}$hintNote")
             SyncOutcome(
-                true, batch.size, resp.accepted, resp.duplicates, resp.rejected, originated,
+                true, batch.size, resp.accepted, resp.duplicates, resp.rejected, originated, broadcastsOriginated = bcasts,
                 hintsUploaded = hintsInBatch, hintsAccepted = resp.hints?.accepted,
             )
         } catch (e: Exception) {
