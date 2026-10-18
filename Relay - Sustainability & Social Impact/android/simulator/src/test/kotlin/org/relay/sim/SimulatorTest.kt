@@ -215,4 +215,23 @@ class SimulatorTest {
             assertTrue(r.hintRelays.isEmpty()); assertEquals(null, r.geoSource)
         } finally { proc.destroyForcibly() }
     }
+
+    @Test fun announcementReachesFivePhonesOverThreeHopsInTheirLanguageAndAWithdrawalSupersedesIt() {
+        val o = AnnouncementScenario.run()
+        assertTrue(o.render(), o.pass)
+        assertEquals(6, o.holders)                                   // every phone relays and holds it, whatever district or language
+        assertEquals("पुरी में चक्रवात शरण स्थल खुले हैं।", o.afterFlood.getValue("a").single().text)
+        assertEquals(Lang.EN, o.afterFlood.getValue("c").single().lang)
+        assertTrue(o.afterFlood.getValue("e").isEmpty())             // Odia: no frame in its language yet
+        assertEquals(Lang.EN, o.afterFallback.getValue("e").single().lang) // ... English after 10 minutes
+        assertTrue(o.afterFlood.getValue("f").isEmpty() && o.afterFallback.getValue("f").isEmpty()) // Delhi phone: relays, never shows
+        assertTrue(o.afterWithdraw.values.all { it.isEmpty() })
+    }
+
+    @Test fun announcementScenarioIsDeterministicAndHasACliPath() {
+        assertEquals(AnnouncementScenario.run(5).transmissions, AnnouncementScenario.run(5).transmissions)
+        val lines = ArrayList<String>()
+        assertTrue(runScenarios("announcement", emptyMap(), lines::add))
+        assertTrue(lines.single().contains("result         : PASS"))
+    }
 }

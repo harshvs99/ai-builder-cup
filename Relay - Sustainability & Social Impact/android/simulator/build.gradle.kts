@@ -25,6 +25,7 @@ application {
 dependencies {
     implementation(project(":core-protocol"))
     implementation(libs.kotlinx.serialization.json)
+    runtimeOnly(libs.org.json) // core-protocol parses the backend JSON with org.json (the Android platform provides it)
     testImplementation(libs.junit)
 }
 
