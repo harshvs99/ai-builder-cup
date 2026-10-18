@@ -272,11 +272,13 @@ class BleTransport(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val dev = result.device ?: return
+            noteRssi(result)
             val hint = nodeHint(result)
             handler.post { maybeConnect(dev, hint) }
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            results.forEach { noteRssi(it) }
             val items = results.mapNotNull { r -> r.device?.let { it to nodeHint(r) } }
             handler.post { for ((d, h) in items) maybeConnect(d, h) }
         }
@@ -290,6 +292,15 @@ class BleTransport(
             }
         }
     }
+
+    /** Remember the signal strength of this advertiser for the link we may open to it (see [rssiFor]). */
+    private fun noteRssi(result: ScanResult) {
+        val mac = result.device?.address ?: return
+        registry.noteScanRssi(mac, result.rssi)
+    }
+
+    /** Last scan RSSI (dBm) of the link [linkId], or null when unknown (always null for peripheral links). Any thread. */
+    fun rssiFor(linkId: String): Int? = registry.rssiFor(linkId)
 
     private fun scheduleScanRetry(delayMs: Long) { scanNotBefore = now() + delayMs }
 

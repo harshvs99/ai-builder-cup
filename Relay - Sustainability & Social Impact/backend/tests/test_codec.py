@@ -23,6 +23,14 @@ def _need_from_fields(f) -> codec.Need:
     )
 
 
+def _hint_from_fields(f) -> codec.LocHint:
+    return codec.LocHint(
+        ref_msg_id=bytes.fromhex(f["ref_msg_id"]), relay_node=bytes.fromhex(f["relay_node"]),
+        lat_e5=codec.to_e5(f["lat"]), lon_e5=codec.to_e5(f["lon"]), acc=f["acc"], rssi_dbm=f["rssi_dbm"],
+        observed_at=f["observed_at"],
+    )
+
+
 def _vec(name):
     return next(v for v in VECTORS["vectors"] if v["name"] == name)
 
@@ -55,6 +63,11 @@ def test_golden_vector_encode_decode(v):
     elif kind == "INVENTORY":
         inv = codec.Inventory(f["chunk_index"], f["chunk_count"], tuple(bytes.fromhex(i) for i in f["ids"]))
         assert codec.encode_inventory(inv).hex() == v["payload_hex"]
+    elif kind == "LOC_HINT":
+        h = _hint_from_fields(f)
+        assert (h.lat_e5, h.lon_e5) == (f["lat_e5"], f["lon_e5"])
+        assert codec.encode_loc_hint(h).hex() == v["payload_hex"]
+        assert h.key.hex() == f["key"] and h.accuracy_max_m == f["acc_max_m"]
     elif kind == "OPAQUE":
         fr = v["frame"]
         key = codec.opaque_key(fr["type"], bytes.fromhex(fr["sender_id"]), fr["timestamp_ms"], payload)
@@ -91,6 +104,9 @@ def test_golden_vector_encode_decode(v):
     elif kind == "INVENTORY":
         i = codec.decode_inventory(fr.payload)
         assert (i.chunk_index, i.chunk_count, [x.hex() for x in i.ids]) == (f["chunk_index"], f["chunk_count"], f["ids"])
+    elif kind == "LOC_HINT":
+        assert codec.decode_loc_hint(fr.payload) == _hint_from_fields(f)
+        assert fr.recipient_id is None and fr.sender_id == codec.decode_loc_hint(fr.payload).relay_node
     elif kind == "OPAQUE":
         assert fr.signature.hex() == f["signature"]
 
@@ -101,6 +117,7 @@ def test_reference_sizes():
     assert len(bytes.fromhex(_vec("need_truncation_negative_coords")["payload_hex"])) == s["need2_payload"]
     assert len(bytes.fromhex(_vec("ack_received_directed")["payload_hex"])) == s["ack1_payload"]
     assert len(bytes.fromhex(_vec("need_v2_max_size")["payload_hex"])) == s["need_v2_max_payload"] == 121
+    assert len(bytes.fromhex(_vec("loc_hint_basic")["payload_hex"])) == s["loc_hint_payload"] == 31
 
 
 def test_v1_vectors_stay_v1_and_answer_vectors_are_v2():
@@ -232,3 +249,44 @@ def test_fuzz_mutated_valid_frames():
                     pass
         except CodecError:
             pass
+
+
+# ------------------------------------------------------------------ LOC_HINT (SPEC 5.5)
+
+@pytest.mark.parametrize("name,hexstr", list(VECTORS["must_reject_loc_hint_payloads"].items()))
+def test_must_reject_loc_hint_payloads(name, hexstr):
+    with pytest.raises(CodecError):
+        codec.decode_loc_hint(bytes.fromhex(hexstr))
+
+
+def test_loc_hint_accuracy_table_matches_vectors():
+    assert {int(k): v for k, v in VECTORS["loc_hint_acc_max_m"].items()} == codec.HINT_ACC_MAX_M
+
+
+def test_loc_hint_roundtrip_and_extremes():
+    base = _hint_from_fields(_vec("loc_hint_basic")["fields"])
+    for acc in codec.HINT_ACC_MAX_M:
+        for rssi in (-128, -127, -67, 0, 127):
+            h = codec.LocHint(**{**base.__dict__, "acc": acc, "rssi_dbm": rssi})
+            assert codec.decode_loc_hint(codec.encode_loc_hint(h)) == h
+    edge = codec.LocHint(**{**base.__dict__, "lat_e5": -9_000_000, "lon_e5": 18_000_000, "observed_at": 0xFFFFFFFF})
+    assert codec.decode_loc_hint(codec.encode_loc_hint(edge)) == edge
+
+
+@pytest.mark.parametrize("change", [
+    {"acc": 0}, {"acc": 5}, {"rssi_dbm": 128}, {"rssi_dbm": -129}, {"lat_e5": 9_000_001}, {"lon_e5": -18_000_001},
+    {"observed_at": -1}, {"observed_at": 1 << 32}, {"ref_msg_id": b"\x00" * 7}, {"lat_e5": True},
+])
+def test_loc_hint_encoder_rejects_bad_input(change):
+    base = _hint_from_fields(_vec("loc_hint_basic")["fields"])
+    with pytest.raises(CodecError):
+        codec.encode_loc_hint(codec.LocHint(**{**base.__dict__, **change}))
+
+
+def test_loc_hint_key_is_derived_per_need_and_relay_only():
+    a, b = bytes([1]) * 8, bytes([2]) * 8
+    assert codec.loc_hint_key(a, b) == codec.loc_hint_key(a, b) and len(codec.loc_hint_key(a, b)) == 8
+    assert codec.loc_hint_key(a, b) != codec.loc_hint_key(b, a) != codec.loc_hint_key(a, a)
+    h1 = codec.LocHint(a, b, 1, 2, 1, -50, 10)
+    h2 = codec.LocHint(a, b, 5, 6, 4, -90, 99)
+    assert h1.key == h2.key

@@ -57,6 +57,9 @@ const FIXTURES = [
   { category: 'MISSING_PERSON', item: null, landmark: 'San Jose', summary: 'looking for 8-year-old boy, last seen near church', lat: 11.2354, lon: 125.0126, urgency: 2, people: 1, vuln_flags: ['CHILD'], lang: 'ceb', report_count: 1, max_hops: 2, first_reported_at: min(5) },
   // Phone with Location switched off: loc_acc 0, no coordinates (must stay off the map, in the queue)
   { category: 'MEDICAL', item: 'insulin', landmark: 'school', summary: 'mother needs insulin (location off)', lat: null, lon: null, loc_acc: 0, urgency: 3, people: 1, vuln_flags: ['ELDERLY'], lang: 'en', report_count: 1, max_hops: 1, first_reported_at: min(3) },
+  // No fix, but two nearby relay phones sent location hints: the backend adds an approximate mesh estimate
+  // (has_location stays false; the dashboard draws a dashed circle, never a GPS dot).
+  { category: 'WATER', item: 'drinking water', landmark: null, summary: 'no clean water, family of 6 (location off, mesh estimate)', lat: null, lon: null, loc_acc: 0, geo: { lat: 20.2763, lon: 85.8309, source: 'mesh', radius_m: 130, hint_count: 2 }, urgency: 2, people: 6, vuln_flags: ['CHILD'], lang: 'or', report_count: 1, max_hops: 2, first_reported_at: min(6) },
 ];
 FIXTURES.forEach(addTicket);
 

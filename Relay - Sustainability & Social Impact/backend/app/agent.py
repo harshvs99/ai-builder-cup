@@ -45,17 +45,21 @@ from .codec import (
     INITIAL_TTL,
     LANG_CODES,
     Ack,
+    LocHint,
     Need,
     encode_ack,
 )
 from .geocode import Gazetteer, Geocoder, default_gazetteer, geocoder_from_env
 from .location import add_no_fix_note, best_loc_acc
-from .store import AckSpec, PacketIn, Plan, Store
+from .meshgeo import HintView
+from .meshgeo import estimate as mesh_estimate
+from .store import AckSpec, HintIn, PacketIn, Plan, Store
 
 log = logging.getLogger("relay.agent")
 
 FUTURE_SKEW_S = 300
 MAX_AGE_S = 72 * 3600
+HINT_FUTURE_S = 24 * 3600  # same limit the mesh applies to a frame timestamp
 
 
 # --------------------------------------------------------------------------------------
@@ -426,6 +430,14 @@ class IncomingNeed:
 
 
 @dataclass
+class HintResult:
+    accepted: int = 0
+    duplicates: int = 0
+    rejected: int = 0
+    refreshed: list[int] = field(default_factory=list)  # tickets whose mesh estimate was recomputed
+
+
+@dataclass
 class BatchResult:
     accepted: int = 0
     duplicates: int = 0
@@ -502,6 +514,8 @@ class TriagePipeline:
             res.packet_tickets[msg_hex] = out.ticket_no
             if out.ticket_no not in res.touched:
                 res.touched.append(out.ticket_no)
+            if need.loc_acc == 0 and self.store.hints_for([msg_hex]):  # hints may have arrived before this NEED did
+                self.refresh_mesh_geo(out.ticket_no)
 
         if (self.agent.enriches or self.geocoder.name != "none") and res.touched and not res.incomplete:
             budget = self.enrich_budget_s
@@ -509,6 +523,52 @@ class TriagePipeline:
                 budget = max(0.0, min(budget, total_budget_s - (time.monotonic() - start)))
             self._enrich(res.touched, budget)
         return res
+
+    # ------------------------------------------------------------------ mesh location hints
+    def process_hints(self, gateway_node: str, hints: list[LocHint]) -> HintResult:
+        """Store LOC_HINTs (idempotent) and recompute the estimate of every ticket they help. A hint for a NEED that
+        is not triaged yet is kept; ``process_batch`` applies it when the NEED arrives. Never raises on bad hints."""
+        res = HintResult()
+        now_i = int(self.clock())
+        good: list[HintIn] = []
+        for h in hints:
+            if (
+                (h.lat_e5 == 0 and h.lon_e5 == 0)  # a phone's "no position" placeholder, not a place
+                or h.observed_at > now_i + HINT_FUTURE_S
+                or h.observed_at < now_i - MAX_AGE_S
+            ):
+                res.rejected += 1
+                continue
+            good.append(HintIn(
+                key=h.key.hex(), ref_msg_id=h.ref_msg_id.hex(), relay_node=h.relay_node.hex(), lat_e5=h.lat_e5,
+                lon_e5=h.lon_e5, acc=h.acc, rssi_dbm=h.rssi_dbm, observed_at=h.observed_at,
+                gateway_node=gateway_node, received_at=now_i,
+            ))
+        stored = self.store.add_hints(good)
+        res.accepted = sum(stored)
+        res.duplicates = len(good) - res.accepted
+        for ref in dict.fromkeys(h.ref_msg_id for h, new in zip(good, stored) if new):
+            try:
+                ticket_no = self.store.ticket_for_msg(ref)
+                if ticket_no is not None and self.refresh_mesh_geo(ticket_no) and ticket_no not in res.refreshed:
+                    res.refreshed.append(ticket_no)
+            except Exception:
+                log.exception("could not apply location hints for NEED %s", ref)
+        return res
+
+    def refresh_mesh_geo(self, ticket_no: int) -> bool:
+        """Recompute a no-fix ticket's ``geo`` from its stored hints. True if an estimate was written. A ticket with
+        a GPS fix is left alone (the store refuses), and so is one without usable hints (its landmark ``geo`` stays)."""
+        try:
+            packets = self.store.ticket_packets(ticket_no)
+            if not packets or any(p["loc_acc"] != 0 for p in packets):
+                return False
+            rows = self.store.hints_for([p["msg_id"] for p in packets])
+            geo = mesh_estimate([HintView.from_row(r) for r in rows])
+            return geo is not None and self.store.set_mesh_geo(ticket_no, geo)
+        except Exception:
+            log.exception("mesh location estimate failed for ticket %s", ticket_no)
+            return False
 
     @staticmethod
     def to_packet(it: IncomingNeed, now_i: int) -> PacketIn:

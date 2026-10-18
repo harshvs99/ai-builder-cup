@@ -4,7 +4,7 @@ import type { Ticket } from '../types';
 import { categoryMeta } from '../lib/categories';
 import { formatRelative } from '../lib/time';
 import { tierOf, ticketTitle } from '../lib/sort';
-import { accuracyLabel, isMappable, noLocationBadge } from '../lib/location';
+import { accuracyLabel, hasMeshEstimate, isMappable, meshEstimateLabel, noLocationBadge } from '../lib/location';
 
 interface Props {
   ticket: Ticket;
@@ -67,7 +67,23 @@ export function Detail({ ticket: t, nowSec, onClose, onApproved }: Props) {
               {accuracyLabel(t) && <span className="acc" title="GPS accuracy"> · accuracy {accuracyLabel(t)}</span>}
             </>
           ) : (
-            <span className="noloc">{noLocationBadge(t)}</span>
+            <>
+              <span className="noloc">{noLocationBadge(t)}</span>
+              {hasMeshEstimate(t) && (
+                <div className="est-line">
+                  <span
+                    className="approx-badge"
+                    title="Estimated from nearby relay phones, not a GPS fix"
+                  >
+                    Approximate
+                  </span>{' '}
+                  <span className="est-label">{meshEstimateLabel(t.geo)}</span>
+                  <div className="muted small">
+                    around {t.geo.lat.toFixed(4)}, {t.geo.lon.toFixed(4)} · dashed circle on the map
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </dd>
         <dt>Priority</dt>

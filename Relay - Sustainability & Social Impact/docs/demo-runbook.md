@@ -33,6 +33,23 @@ scripts/stop-local-poc.sh
 ```
 Flags: `--no-e2e` (backend only), `--keep-db`, `--no-build`. Dashboard: <http://localhost:8080/>.
 
+## Mesh-assisted location (requester with no GPS)
+
+Settings → **Help locate neighbours** (default **on** in demo builds, **off** in village builds: build with
+`-Prelay.helpLocateDefault=false`). A phone with it on and a GPS fix of 100 m or better, which hears a no-fix NEED
+*directly* from the phone that sent it, tells the control room where it is; the dashboard then shows a dashed
+"about N m · from K nearby phones" circle for that ticket instead of only the landmark. It never overrides a real fix,
+and the header still counts the ticket as "without location".
+
+- Laptop-only check (backend running, e.g. after `scripts/run-local-poc.sh`):
+  `cd android && ./gradlew -q :simulator:run --args="locate --backend http://localhost:8080"` runs A (no fix) with two relays
+  that have one and a third phone with a fix that is *not* next to A. Passes iff exactly the two neighbours hint and the
+  backend ticket gets a `mesh` estimate within its own radius of the truth. `--no-help` turns the switch off and passes
+  iff no hint is sent.
+- Two emulators/phones: turn Help locate neighbours on, give the *relay* phone a location (Home open, Location on; the
+  emulator's extended controls can set one) and send a NEED from the other with Location off. A background relay has
+  no fix: the mesh service is not a `location` foreground service, so keep the relay's app open.
+
 ## Automated two-emulator BLE demo
 
 Needs both emulators (`emulator-5554`, `emulator-5556`) running at the same time. Run the **BLE demo: two emulators** configuration, or from a terminal:

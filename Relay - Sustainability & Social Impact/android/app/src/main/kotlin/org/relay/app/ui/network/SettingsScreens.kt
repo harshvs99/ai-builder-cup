@@ -138,6 +138,10 @@ internal fun SettingsContent(
 
         Group(s.groupNetworkPermissions) {
             SettingNavRow(s.gatewayMode, { gatewayDialog = true }, value = gatewayName(GatewayChoice.effective(settings.gatewayMode), s))
+            SettingSwitchRow(
+                s.helpLocate, settings.helpLocateNeighbours, { v -> onUpdate { it.copy(helpLocateNeighbours = v) } },
+                supporting = s.helpLocateHelp,
+            )
             PermissionRow(s.permBluetooth, perms.bluetooth, strings, onOpenSystemSettings)
             PermissionRow(s.permLocation, perms.location, strings, onOpenSystemSettings)
             PermissionRow(s.permMicrophone, perms.microphone, strings, onOpenSystemSettings)

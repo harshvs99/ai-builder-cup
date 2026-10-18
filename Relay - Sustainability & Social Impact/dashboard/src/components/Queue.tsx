@@ -2,7 +2,7 @@ import type { Ticket } from '../types';
 import { categoryMeta } from '../lib/categories';
 import { formatRelative } from '../lib/time';
 import { tierOf, ticketTitle } from '../lib/sort';
-import { noLocationBadge } from '../lib/location';
+import { hasMeshEstimate, meshEstimateShort, noLocationBadge } from '../lib/location';
 
 const STATUS_LABEL: Record<Ticket['status'], string> = {
   OPEN: 'Open',
@@ -54,6 +54,11 @@ export function Queue({ tickets, loaded, nowSec, fresh, selected, onSelect }: Pr
                       <span className={`status ${t.status}`}>{STATUS_LABEL[t.status] ?? 'Open'}</span>
                     </span>
                     {noLoc && <span className="noloc">{noLoc}</span>}
+                    {hasMeshEstimate(t) && (
+                      <span className="est-short" title="Approximate position from nearby relay phones, not a GPS fix">
+                        ◌ approx. {meshEstimateShort(t.geo)}
+                      </span>
+                    )}
                   </span>
                   {t.report_count > 1 && <span className="count" title="Reports merged">×{t.report_count}</span>}
                 </button>

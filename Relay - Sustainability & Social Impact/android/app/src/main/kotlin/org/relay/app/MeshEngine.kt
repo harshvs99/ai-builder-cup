@@ -21,6 +21,8 @@ import org.relay.app.gateway.SyncClient
 import org.relay.app.gateway.SyncConfig
 import org.relay.app.gateway.SyncHealth
 import org.relay.app.gateway.SyncOutcome
+import org.relay.app.location.HintFix
+import org.relay.app.location.LocationProvider
 import org.relay.core.frame.Frame
 import org.relay.core.frame.FrameCodec
 import org.relay.core.frame.FrameTypes
@@ -28,11 +30,13 @@ import org.relay.core.gossip.ExecutorScheduler
 import org.relay.core.gossip.GossipListener
 import org.relay.core.gossip.GossipNode
 import org.relay.core.gossip.LinkSender
+import org.relay.core.gossip.LocHintResponder
 import org.relay.core.gossip.PushPlanner
 import org.relay.core.gossip.WallClock
 import org.relay.core.ids.Hex
 import org.relay.core.payload.Ack
 import org.relay.core.payload.Hello
+import org.relay.core.payload.LocHint
 import org.relay.core.payload.Need
 import org.relay.core.payload.NeedCodec
 import java.util.Random
@@ -93,6 +97,22 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         listener = this,
         appVersion = 1,
         pushBudgetBytes = PushPlanner.DEFAULT_BUDGET_BYTES,
+    )
+
+    /**
+     * Mesh-assisted location (SPEC 5.5): puts a LOC_HINT into the mesh when a directly-heard NEED has no position and
+     * this phone has a good fix. Re-checks the "Help locate neighbours" setting at the moment of emission, so turning
+     * it off stops hinting immediately. [LocationProvider.start] re-posts itself to the main thread.
+     */
+    private val locHints = LocHintResponder(
+        node = node,
+        clock = WallClock,
+        scheduler = ExecutorScheduler(executor),
+        enabled = { repo.settings.current.helpLocateNeighbours },
+        fix = { HintFix.fromProvider() },
+        rssi = { linkId -> transport.rssiFor(linkId) },
+        requestFix = { LocationProvider.start(ctx) },
+        log = { repo.log(it) },
     )
 
     private val syncer = GatewaySyncer(
@@ -253,8 +273,15 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
     // ---------------------------------------------------------------- GossipListener
 
     override fun onNeed(need: Need, frame: Frame, fromLink: String?) {
+        locHints.onNeed(need, fromLink)
         repo.log("NEED delivered ${need.msgIdHex} from=${fromLink ?: "local"} ttl=${frame.ttl} cat=${need.category} urgency=${need.urgency} item=\"${need.item}\"")
         gateway.kick()
+        publish()
+    }
+
+    override fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) {
+        repo.log("LOC_HINT stored ref=${hint.refMsgIdHex} relay=${Hex.encode(hint.relayNode)} from=${fromLink ?: "local"} acc<=${hint.accuracyMaxM} m ttl=${frame.ttl}")
+        gateway.kick() // no-op unless this phone is a gateway; lets hints upload promptly
         publish()
     }
 
@@ -294,6 +321,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
                     hopsToGateway = node.hopsToGateway,
                     storedNeeds = all.count { it.type == FrameTypes.NEED },
                     storedAcks = all.count { it.type == FrameTypes.ACK },
+                    storedHints = all.count { it.type == FrameTypes.LOC_HINT },
                     stats = node.stats(),
                     transport = transport.info(),
                     internetAvailable = internet,

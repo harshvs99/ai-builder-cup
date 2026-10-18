@@ -9,6 +9,9 @@ import java.util.Base64
 
 data class SyncConfig(val baseUrl: String, val deviceKey: String)
 
+/** The optional `hints` object of a sync response: counts for the LOC_HINT frames in the upload. */
+data class HintCounts(val accepted: Int, val duplicates: Int, val rejected: Int)
+
 data class SyncResponse(
     val accepted: Int,
     val duplicates: Int,
@@ -16,6 +19,8 @@ data class SyncResponse(
     /** ACK payloads (not frames), oldest first. */
     val acks: List<ByteArray>,
     val ackCursor: Long,
+    /** Present only when the backend reports hints (it adds `hints` when the upload held any); null otherwise. */
+    val hints: HintCounts? = null,
 )
 
 /** Result of a `GET /v1/health` reachability probe; [detail] is short, human-readable text. */
@@ -115,6 +120,9 @@ class SyncClient(
                 rejected = o.optInt("rejected", 0),
                 acks = acks,
                 ackCursor = o.getLong("ack_cursor"),
+                hints = o.optJSONObject("hints")?.let { h ->
+                    HintCounts(h.optInt("accepted", 0), h.optInt("duplicates", 0), h.optInt("rejected", 0))
+                },
             )
         } catch (e: Exception) {
             throw SyncException("bad response body: ${e.message}", e)

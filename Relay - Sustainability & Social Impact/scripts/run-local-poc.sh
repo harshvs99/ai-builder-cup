@@ -70,6 +70,8 @@ if [ "$E2E" = 1 ]; then
   echo "==> simulator end-to-end (A -> B -> C -> D -> backend -> ACKs back to A)"
   cd "$ROOT/android"
   ./gradlew --console=plain -q :simulator:run --args="e2e --backend http://localhost:$PORT --approve --lang or"
+  echo "==> mesh-assisted location (no-fix NEED, two relays with a fix -> 'mesh' estimate on the ticket)"
+  ./gradlew --console=plain -q :simulator:run --args="locate --backend http://localhost:$PORT"
 fi
 
 LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"

@@ -14,6 +14,7 @@ import org.junit.Test
 import org.relay.app.location.Fix
 import org.relay.app.location.FixPolicy
 import org.relay.app.location.FixWait
+import org.relay.app.location.HintFix
 import org.relay.app.location.LocUi
 import org.relay.app.location.LocationState
 
@@ -122,4 +123,14 @@ class LocationLogicTest {
     }
 
     @Test fun defaultWaitBudgetIsTenSeconds() = assertEquals(10_000L, FixWait.DEFAULT_TIMEOUT_MS)
+
+    // ---- LOC_HINT fix bridge
+    @Test fun hintFixConvertsAndKeepsOnlyUsableFixes() {
+        val f = HintFix.current(fix(12f, at = now - 5_000), now)!!
+        assertEquals(20.3, f.lat, 0.0); assertEquals(85.8, f.lon, 0.0)
+        assertEquals(12f, f.accuracyM, 0f); assertEquals(now - 5_000, f.atMs)
+        assertNull(HintFix.current(null, now))
+        assertNull("older than FixPolicy.MAX_AGE_MS", HintFix.current(fix(12f, at = now - FixPolicy.MAX_AGE_MS - 1), now))
+        assertEquals("fix without a timestamp counts as taken now", now, HintFix.current(fix(12f, at = 0L), now)!!.atMs)
+    }
 }

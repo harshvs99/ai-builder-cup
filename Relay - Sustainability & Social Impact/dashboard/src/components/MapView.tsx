@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import {
   LngLatBounds,
   Map as MapLibreMap,
+  Marker,
   NavigationControl,
   setWorkerUrl,
   type ExpressionSpecification,
@@ -15,7 +16,9 @@ import type { Ticket } from '../types';
 import { CATEGORIES } from '../types';
 import { CATEGORY_META } from '../lib/categories';
 import { PULSE_MS } from '../hooks';
-import { boundsOf, isMappable, toFeatures } from '../lib/location';
+import {
+  estimateBounds, estimatedTickets, hasMeshEstimate, isMappable, plottableBounds, toEstimateAreas, toFeatures,
+} from '../lib/location';
 
 setWorkerUrl(workerUrl);
 
@@ -67,6 +70,7 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
   const freshRef = useRef(fresh);
   const onSelectRef = useRef(onSelect);
   const raf = useRef<number | null>(null);
+  const estMarkers = useRef(new Map<number, { marker: Marker; el: HTMLDivElement }>());
   ticketsRef.current = tickets;
   selectedRef.current = selected;
   freshRef.current = fresh;
@@ -75,7 +79,7 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
   const fitAll = () => {
     const map = mapRef.current;
     const list = ticketsRef.current;
-    const box4 = boundsOf(list); // only tickets with a GPS fix
+    const box4 = plottableBounds(list); // GPS fixes + mesh-estimate circles
     if (!map || !box4) return;
     const b = new LngLatBounds([box4[0], box4[1]], [box4[2], box4[3]]);
     const ne = b.getNorthEast();
@@ -88,13 +92,51 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
   };
   useImperativeHandle(ref, () => ({ fitAll }));
 
+  /** Dashed, translucent centre markers for mesh-estimated tickets (circle layers cannot be dashed). */
+  const syncEstimateMarkers = (map: MapLibreMap) => {
+    const live = new Set<number>();
+    for (const t of estimatedTickets(ticketsRef.current)) {
+      live.add(t.ticket_no);
+      let entry = estMarkers.current.get(t.ticket_no);
+      if (!entry) {
+        const el = document.createElement('div');
+        el.className = 'est-marker';
+        el.setAttribute('role', 'button');
+        const no = t.ticket_no;
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          onSelectRef.current(no);
+        });
+        const marker = new Marker({ element: el }).setLngLat([t.geo.lon, t.geo.lat]).addTo(map);
+        entry = { marker, el };
+        estMarkers.current.set(t.ticket_no, entry);
+      }
+      entry.marker.setLngLat([t.geo.lon, t.geo.lat]);
+      entry.el.style.setProperty('--c', CATEGORY_META[t.category]?.color ?? CATEGORY_META.OTHER.color);
+      entry.el.classList.toggle('selected', t.ticket_no === selectedRef.current);
+      entry.el.classList.toggle('dispatched', t.status !== 'OPEN');
+      entry.el.title = `Ticket #${t.ticket_no}: approximate location (estimate, not a GPS fix)`;
+      entry.el.setAttribute('aria-label', `Ticket ${t.ticket_no} approximate location`);
+    }
+    for (const [no, { marker }] of estMarkers.current) {
+      if (!live.has(no)) {
+        marker.remove();
+        estMarkers.current.delete(no);
+      }
+    }
+  };
+
   const pushData = () => {
     const map = mapRef.current;
     if (!map || !ready.current) return;
     (map.getSource('tickets') as GeoJSONSource | undefined)?.setData(
       toFeatures(ticketsRef.current, selectedRef.current),
     );
-    if (!fitted.current && ticketsRef.current.some(isMappable)) {
+    (map.getSource('estimates') as GeoJSONSource | undefined)?.setData(
+      toEstimateAreas(ticketsRef.current, selectedRef.current),
+    );
+    syncEstimateMarkers(map);
+    if (!fitted.current && ticketsRef.current.some((t) => isMappable(t) || hasMeshEstimate(t))) {
       fitted.current = true; // first load only
       fitAll();
     }
@@ -152,6 +194,30 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
     map.on('load', () => {
       map.addSource('tickets', { type: 'geojson', data: EMPTY });
       map.addSource('pulses', { type: 'geojson', data: EMPTY });
+      map.addSource('estimates', { type: 'geojson', data: EMPTY });
+      // Mesh-estimate uncertainty discs: translucent fill + dashed outline, beneath the GPS dots.
+      map.addLayer({
+        id: 'estimate-fill',
+        type: 'fill',
+        source: 'estimates',
+        paint: {
+          'fill-color': colorExpr,
+          'fill-opacity': [
+            'case', ['==', ['get', 'selected'], 1], 0.2, ['==', ['get', 'dispatched'], 1], 0.07, 0.15,
+          ],
+        },
+      });
+      map.addLayer({
+        id: 'estimate-line',
+        type: 'line',
+        source: 'estimates',
+        paint: {
+          'line-color': colorExpr,
+          'line-width': ['case', ['==', ['get', 'selected'], 1], 3, 2],
+          'line-dasharray': [2, 2],
+          'line-opacity': ['case', ['==', ['get', 'dispatched'], 1], 0.45, 0.95],
+        },
+      });
       map.addLayer({
         id: 'pulse-ring',
         type: 'circle',
@@ -183,6 +249,12 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
         const no = f?.properties?.ticket_no;
         if (typeof no === 'number') onSelectRef.current(no);
       });
+      map.on('click', 'estimate-fill', (e: MapMouseEvent) => {
+        // A GPS dot on top wins; the disc only handles clicks on its own area.
+        if (map.queryRenderedFeatures(e.point, { layers: ['tickets-circle'] }).length > 0) return;
+        const no = map.queryRenderedFeatures(e.point, { layers: ['estimate-fill'] })[0]?.properties?.ticket_no;
+        if (typeof no === 'number') onSelectRef.current(no);
+      });
       map.on('mouseenter', 'tickets-circle', () => (map.getCanvas().style.cursor = 'pointer'));
       map.on('mouseleave', 'tickets-circle', () => (map.getCanvas().style.cursor = ''));
       ready.current = true;
@@ -195,6 +267,7 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
 
     return () => {
       ro.disconnect();
+      estMarkers.current.clear();
       if (raf.current !== null) cancelAnimationFrame(raf.current);
       raf.current = null;
       ready.current = false;
@@ -215,7 +288,18 @@ export function MapView({ ref, tickets, fresh, selected, onSelect }: Props) {
   useEffect(() => {
     const map = mapRef.current;
     const t = selected === null ? null : ticketsRef.current.find((x) => x.ticket_no === selected);
-    if (map && t && isMappable(t)) map.easeTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 11), duration: 500 });
+    if (!map || !t) return;
+    if (isMappable(t)) {
+      map.easeTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 11), duration: 500 });
+    } else if (hasMeshEstimate(t)) {
+      // Zoom to the whole uncertainty disc (a point when the backend sent no radius).
+      const [w, s, e, n] = estimateBounds(t.geo);
+      if (e - w < 1e-7 && n - s < 1e-7) {
+        map.easeTo({ center: [t.geo.lon, t.geo.lat], zoom: Math.max(map.getZoom(), 15), duration: 500 });
+      } else {
+        map.fitBounds([[w, s], [e, n]], { padding: 90, maxZoom: 18, duration: 500 });
+      }
+    }
   }, [selected]);
 
   return <div ref={box} className="map" />;

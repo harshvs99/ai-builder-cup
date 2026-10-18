@@ -157,3 +157,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .noloc-count { color: var(--p2); }
 .noloc-count.zero { color: var(--muted); }
 .acc { color: var(--muted); }
+
+/* Mesh-estimated position (approximate, never a GPS fix) */
+.approx-badge {
+  display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--p2); border: 1px dashed currentColor; background: transparent;
+}
+.est-line { margin-top: 3px; }
+.est-label { font-weight: 600; }
+.est-short { font-size: 12px; color: var(--p2); }
+.est-count { color: var(--muted); font-weight: 400; }
+
+/* Dashed centre marker on the map; --c is the ticket's category colour (as for GPS dots) */
+.est-marker {
+  --c: #6a727c;
+  width: 26px; height: 26px; border-radius: 50%; cursor: pointer; position: relative;
+  border: 3px dashed var(--c);
+  background: color-mix(in srgb, var(--c) 28%, transparent);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+}
+.est-marker::after {
+  content: ''; position: absolute; inset: 50% auto auto 50%; width: 5px; height: 5px;
+  margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--c);
+}
+.est-marker.selected { box-shadow: 0 0 0 2px #111, 0 0 0 4px rgba(255, 255, 255, 0.9); }
+.est-marker.dispatched { opacity: 0.5; }

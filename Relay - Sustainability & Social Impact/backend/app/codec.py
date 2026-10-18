@@ -1,4 +1,4 @@
-"""Relay mesh wire codec (protocol/SPEC.md, sections 3 and 5; NEED payload v1 and v2).
+"""Relay mesh wire codec (protocol/SPEC.md, sections 3 and 5; NEED payload v1 and v2, LOC_HINT).
 
 Strict by design: every decoder raises ``CodecError`` (and nothing else) on any input that
 the spec says to drop. Callers at a trust boundary (``/v1/sync``) catch ``CodecError`` and
@@ -22,6 +22,7 @@ TYPE_NEED = 0x70
 TYPE_ACK = 0x71
 TYPE_HELLO = 0x72
 TYPE_INVENTORY = 0x73
+TYPE_LOC_HINT = 0x74
 
 FLAG_HAS_RECIPIENT = 0x01
 FLAG_HAS_SIGNATURE = 0x02
@@ -53,6 +54,10 @@ MAX_LANDMARK = 24
 MAX_SUMMARY = 40
 MAX_ACK_TEXT = 112
 
+# LOC_HINT (SPEC 5.5): the relay's own accuracy bucket -> upper bound in metres; bucket 0 is not valid.
+HINT_ACC_MAX_M = {1: 10, 2: 25, 3: 50, 4: 100}
+RSSI_UNKNOWN = -128
+
 # Intake question bank (SPEC 5.1): id -> (key, {answer key: wire value}). Mirrors the Kotlin QuestionBank;
 # both are checked against ``answer_bank`` in protocol/vectors.json. Ids and values are never renumbered.
 _YNU = {"unknown": 0, "yes": 1, "no": 2}
@@ -71,6 +76,7 @@ _QUESTION_IDS = {key: qid for qid, (key, _) in QUESTION_BANK.items()}
 _NEED_FIXED = struct.Struct(">B8s8sIBBBBiiBB")  # 35 bytes
 _ACK_FIXED = struct.Struct(">B8s8s8sIBH")  # 32 bytes (+1 length byte for text)
 _HELLO = struct.Struct(">B8sBBH")
+_LOC_HINT = struct.Struct(">B8s8siiBbI")  # 31 bytes (SPEC 5.5)
 _FRAME_HEAD = struct.Struct(">BBBQBH")
 
 
@@ -456,3 +462,75 @@ def decode_inventory(payload: bytes) -> Inventory:
     if count < 1 or n > 19 or len(payload) != 4 + 8 * n:
         raise CodecError("malformed INVENTORY payload")
     return Inventory(idx, count, tuple(payload[4 + 8 * i:12 + 8 * i] for i in range(n)))
+
+
+# --------------------------------------------------------------------------------------
+# LOC_HINT (SPEC 5.5)
+# --------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LocHint:
+    ref_msg_id: bytes
+    relay_node: bytes  # also the frame sender_id
+    lat_e5: int
+    lon_e5: int
+    acc: int  # 1..4, see HINT_ACC_MAX_M
+    rssi_dbm: int  # RSSI_UNKNOWN (-128) when the relay could not read it
+    observed_at: int  # unix seconds
+
+    @property
+    def lat(self) -> float:
+        return self.lat_e5 / 100000
+
+    @property
+    def lon(self) -> float:
+        return self.lon_e5 / 100000
+
+    @property
+    def accuracy_max_m(self) -> int:
+        return HINT_ACC_MAX_M[self.acc]
+
+    @property
+    def key(self) -> bytes:
+        return loc_hint_key(self.ref_msg_id, self.relay_node)
+
+
+def loc_hint_key(ref_msg_id: bytes, relay_node: bytes) -> bytes:
+    """Dedupe key: first 8 bytes of SHA-256(0x74 || ref_msg_id || relay_node). One hint per relay per NEED."""
+    return hashlib.sha256(bytes([TYPE_LOC_HINT]) + ref_msg_id + relay_node).digest()[:8]
+
+
+def _coords_ok(lat_e5: int, lon_e5: int) -> bool:
+    return abs(lat_e5) <= 9_000_000 and abs(lon_e5) <= 18_000_000
+
+
+def encode_loc_hint(h: LocHint) -> bytes:
+    _need_bytes("ref_msg_id", h.ref_msg_id, 8)
+    _need_bytes("relay_node", h.relay_node, 8)
+    if not (isinstance(h.acc, int) and not isinstance(h.acc, bool) and h.acc in HINT_ACC_MAX_M):
+        raise CodecError("acc out of range")
+    if isinstance(h.rssi_dbm, bool) or not isinstance(h.rssi_dbm, int) or not -128 <= h.rssi_dbm <= 127:
+        raise CodecError("rssi_dbm out of range for i8")
+    _u("observed_at", h.observed_at, 32)
+    for name, v in (("lat_e5", h.lat_e5), ("lon_e5", h.lon_e5)):
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise CodecError(f"{name} must be an int")
+    if not _coords_ok(h.lat_e5, h.lon_e5):
+        raise CodecError("coordinates out of range")
+    return _LOC_HINT.pack(
+        PROTOCOL_VERSION, h.ref_msg_id, h.relay_node, h.lat_e5, h.lon_e5, h.acc, h.rssi_dbm, h.observed_at
+    )
+
+
+def decode_loc_hint(payload: bytes) -> LocHint:
+    payload = _check_bytes_input(payload)
+    if len(payload) != _LOC_HINT.size:
+        raise CodecError("LOC_HINT payload must be 31 bytes")
+    ver, ref, relay, lat_e5, lon_e5, acc, rssi, observed_at = _LOC_HINT.unpack(payload)
+    if ver != PROTOCOL_VERSION:
+        raise CodecError("unsupported LOC_HINT payload version")
+    if acc not in HINT_ACC_MAX_M:
+        raise CodecError("acc out of range")
+    if not _coords_ok(lat_e5, lon_e5):
+        raise CodecError("coordinates out of range")
+    return LocHint(ref, relay, lat_e5, lon_e5, acc, rssi, observed_at)

@@ -23,6 +23,22 @@ export interface PacketInfo {
   summary?: string;
 }
 
+/**
+ * Estimated position for a ticket with no GPS fix. Never a fix: has_location stays false.
+ * - "gazetteer" / "gemini_maps": looked up from the landmark text (`query`).
+ * - "mesh": from nearby relay phones' location hints; `radius_m` (a multiple of 10) bounds the
+ *   uncertainty and `hint_count` is how many phones contributed. No `query`.
+ */
+export type GeoSource = 'gazetteer' | 'gemini_maps' | 'mesh';
+export interface Geo {
+  lat: number;
+  lon: number;
+  source: GeoSource;
+  query?: string;
+  radius_m?: number;
+  hint_count?: number;
+}
+
 export interface Ticket {
   ticket_no: number;
   category: Category;
@@ -38,6 +54,8 @@ export interface Ticket {
   loc_acc?: number;
   /** Human label for loc_acc ("<10 m", ... "≥1 km"), null when there is no fix. */
   loc_acc_m?: string | null;
+  /** Optional estimate for a ticket without a fix; absent when unset. */
+  geo?: Geo | null;
   urgency: number;
   people: number;
   vuln_flags: string[];
