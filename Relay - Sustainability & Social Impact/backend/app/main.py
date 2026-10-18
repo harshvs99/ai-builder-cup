@@ -1080,7 +1080,12 @@ def create_app(
             rec = shelter_lists.discover(d.id, d.name, shelter_finder, clock())
         except Exception as e:
             log.warning("shelter discovery failed: %s: %s", type(e).__name__, e)
-            raise HTTPException(status_code=502, detail=f"shelter discovery failed ({type(e).__name__}); try again or enter the list manually") from e
+            reason = " ".join(str(e).split())[:300]
+            raise HTTPException(
+                status_code=502,
+                detail=f"shelter discovery failed ({type(e).__name__}: {reason}); try again or enter the list manually" if reason
+                else f"shelter discovery failed ({type(e).__name__}); try again or enter the list manually",
+            ) from e
         return store.add_shelter_list(rec)
 
     @app.post("/v1/ready/shelter-lists", dependencies=operator)
