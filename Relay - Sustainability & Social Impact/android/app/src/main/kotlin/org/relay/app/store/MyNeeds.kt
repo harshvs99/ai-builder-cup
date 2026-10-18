@@ -165,6 +165,14 @@ class MyNeedsStore(private val file: File) {
         return next
     }
 
+    /** Drops the need from the list; false if the id is unknown. */
+    @Synchronized fun remove(msgIdHex: String): Boolean {
+        if (items.none { it.msgIdHex == msgIdHex }) return false
+        items = items.filter { it.msgIdHex != msgIdHex }
+        save()
+        return true
+    }
+
     @Synchronized fun clear() { items = emptyList(); save() }
 
     private fun save() {

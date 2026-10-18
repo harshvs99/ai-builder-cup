@@ -30,6 +30,7 @@ class CommonStrings(private val lang: Lang) {
     val done get() = tr(lang, "Done", "हो गया", "ହୋଇଗଲା", "Tapos na", "Human na") // needs native review
     val back get() = tr(lang, "Back", "वापस", "ପଛକୁ", "Bumalik", "Balik") // needs native review
     val close get() = tr(lang, "Close", "बंद करें", "ବନ୍ଦ କରନ୍ତୁ", "Isara", "Sirhi") // needs native review
+    val delete get() = tr(lang, "Delete", "हटाएं", "ବିଲୋପ କରନ୍ତୁ", "Burahin", "Papason") // needs native review
     val seeAll get() = tr(lang, "See all", "सभी देखें", "ସବୁ ଦେଖନ୍ତୁ", "Tingnan lahat", "Kitaa ngatanan") // needs native review
     val turnOn get() = tr(lang, "Turn on", "चालू करें", "ଚାଲୁ କରନ୍ତୁ", "I-on", "Buksi") // needs native review
     val somethingElse get() = tr(lang, "Something else", "कुछ और", "ଅନ୍ୟ କିଛି", "Iba pa", "Iba pa") // needs native review
