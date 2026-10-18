@@ -98,6 +98,15 @@ class SyncRequest(BaseModel):
     gateway_node: str = Field(pattern=HEX16)
     frames: list[str] = Field(default_factory=list, max_length=MAX_FRAMES_PER_SYNC)
     ack_cursor: int = Field(default=0, ge=0)
+    # Announcements (SPEC 5.7). Either one present asks for ANNOUNCEMENT payloads; an older gateway sends neither.
+    district: str | None = None
+    announcement_cursor: int | None = Field(default=None, ge=0)
+
+    @field_validator("district")
+    @classmethod
+    def _district(cls, v: str | None) -> str | None:
+        # an unknown district is not an error: the gateway still gets the announcements of every district
+        return v.strip().lower() if isinstance(v, str) and districts.by_id(v.strip().lower()) else None
 
 
 class BroadcastRequest(BaseModel):
@@ -638,6 +647,12 @@ def create_app(
         }
         if live_broadcasts:  # every sync returns every live broadcast, so every gateway puts it into the mesh (SPEC 5.6)
             out["broadcasts"] = [base64.b64encode(p).decode("ascii") for p in live_broadcasts]
+        if {"district", "announcement_cursor"} & req.model_fields_set:  # older gateways send neither, get neither
+            payloads, ann_cursor = announcements.sync_payloads(
+                store.list_announcements(), req.announcement_cursor or 0, clock(), req.district
+            )
+            out["announcements"] = [base64.b64encode(p).decode("ascii") for p in payloads]
+            out["announcement_cursor"] = ann_cursor
         if hint_res is not None or hints_bad:  # only when the upload held hints: older gateways see no change
             out["hints"] = {
                 "accepted": hint_res.accepted if hint_res else 0,
@@ -972,15 +987,19 @@ def create_app(
             fields = announcements.apply_approval(row, body.langs, body.edits)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        saved = store.update_announcement(
-            announcement_id, {**fields, "status": "approved", "approved_at": int(clock())}
-        )
+        saved = store.update_announcement(announcement_id, {
+            **fields, "status": "approved", "approved_at": int(clock()),
+            "approved_seq": announcements.next_seq(store.list_announcements(), int(clock() * 1000)),
+        })
         return saved or row
 
     @app.post("/v1/announcements/{announcement_id}/withdraw", dependencies=operator)
     def withdraw_announcement(announcement_id: int) -> dict[str, Any]:
-        announcement_or_404(announcement_id)
-        return store.update_announcement(announcement_id, {"status": "withdrawn"}) or announcement_or_404(announcement_id)
+        row = announcement_or_404(announcement_id)
+        fields: dict[str, Any] = {"status": "withdrawn"}
+        if row["status"] == "approved":  # a draft was never on the wire, so there is nothing to supersede
+            fields["withdrawn_seq"] = announcements.next_seq(store.list_announcements(), int(clock() * 1000))
+        return store.update_announcement(announcement_id, fields) or announcement_or_404(announcement_id)
 
     @app.get("/v1/announcements/active", dependencies=[Depends(require_key)])
     def active_announcements(district: str) -> dict[str, Any]:
@@ -991,7 +1010,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(e))
         return {"announcements": [
             {
-                "id": b["id"], "district": b["district"], "source_lang": b["source_lang"],
+                "id": b["id"], "announcement_id": b.get("announcement_id"), "district": b["district"], "source_lang": b["source_lang"],
                 "created_at": b["created_at"], "approved_at": b["approved_at"],
                 "texts": {lang: b["translations"][lang]["text"] for lang in b["approved_langs"] if languages.is_enabled(lang)},
             }

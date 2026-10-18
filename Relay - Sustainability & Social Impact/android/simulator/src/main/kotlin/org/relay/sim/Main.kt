@@ -9,6 +9,7 @@ private const val USAGE = """Relay mesh simulator
   scenario grid --nodes 50             grid, corner to corner
   scenario partition                   two clusters bridged only by a walker node
   scenario loss --nodes 10 --loss 0.2  chain with random frame loss; must reach 100% after resync rounds
+  scenario announcement                a gateway injects an ANNOUNCEMENT; phones in the district show it in their language, a WITHDRAWN removes it
   scenario all                         every scenario above with its defaults
   e2e --backend http://localhost:8080 [--approve] [--text "..."] [--lang or] [--timeout 30] [--poll-ms 1000]
   e2e --fake [--approve]               same, against an in-process fake backend
@@ -33,6 +34,11 @@ private fun parseOpts(args: List<String>): Map<String, String> {
 
 internal fun runScenarios(name: String, o: Map<String, String>, print: (String) -> Unit = ::println): Boolean {
     val seed = o["seed"]?.toLongOrNull() ?: 42L
+    if (name == "announcement") {
+        val r = AnnouncementScenario.run(seed)
+        print(r.render())
+        return r.pass
+    }
     val outcomes = ArrayList<Outcome>()
     fun nodes(default: Int) = o["nodes"]?.toIntOrNull() ?: default
     when (name) {

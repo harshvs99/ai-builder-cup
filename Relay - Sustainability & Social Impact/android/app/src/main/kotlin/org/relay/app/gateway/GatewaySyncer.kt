@@ -4,6 +4,7 @@ import org.relay.core.frame.FrameTypes
 import org.relay.core.gossip.GossipNode
 import org.relay.core.gossip.PacketStore
 import org.relay.core.payload.AckCodec
+import org.relay.core.payload.AnnouncementCodec
 import org.relay.core.payload.BroadcastCodec
 
 /** Outcome of one sync attempt, for the UI. */
@@ -16,6 +17,8 @@ data class SyncOutcome(
     val acksOriginated: Int = 0,
     /** Control-room broadcasts this round put into the mesh for the first time (already-held ones are not counted). */
     val broadcastsOriginated: Int = 0,
+    /** Control-room announcements this round put into the mesh for the first time. */
+    val announcementsOriginated: Int = 0,
     val error: String? = null,
     /** How many of the [uploaded] frames were LOC_HINTs (the rest are NEEDs). */
     val hintsUploaded: Int = 0,
@@ -38,6 +41,8 @@ class GatewaySyncer(
     private val config: () -> SyncConfig,
     private val log: (String) -> Unit = {},
     private val maxFramesPerSync: Int = 100,
+    /** The district id this gateway is in (last Ready pack or the one the person chose), or null when unknown. */
+    private val district: () -> String? = { null },
 ) {
     /** True if more NEED or LOC_HINT frames are waiting after the last round (caller may re-run immediately). */
     @Volatile var moreWaiting: Boolean = false
@@ -58,7 +63,7 @@ class GatewaySyncer(
         val hintsInBatch = batch.count { it.type == FrameTypes.LOC_HINT }
         moreWaiting = pending.size > batch.size
         return try {
-            val resp = client.sync(config(), node.nodeId, batch.map { it.raw }, state.ackCursor())
+            val resp = client.sync(config(), node.nodeId, batch.map { it.raw }, state.ackCursor(), district(), state.announcementCursor())
             var originated = 0
             for (payload in resp.acks) {
                 val ack = AckCodec.decode(payload)
@@ -77,6 +82,17 @@ class GatewaySyncer(
                     bcasts++
                 }
             }
+            // Announcements (SPEC 5.7): originated like ACKs; originating one already held is a no-op. The cursor advances afterwards.
+            var anns = 0
+            for (payload in resp.announcements) {
+                val a = AnnouncementCodec.decode(payload)
+                if (a == null) { log("sync: backend returned an undecodable ANNOUNCEMENT payload; skipped"); continue }
+                if (node.originateAnnouncement(a) != null) {
+                    log("originating ANNOUNCEMENT ${a.idHex} ${a.lang.tag} ${a.status}")
+                    anns++
+                }
+            }
+            resp.announcementCursor?.let { state.setAnnouncementCursor(it) }
             // Only after ACKs are safely in the store do we advance the cursor / mark frames uploaded.
             state.markUploaded(batch.map { it.key })
             state.setAckCursor(resp.ackCursor)
@@ -86,7 +102,7 @@ class GatewaySyncer(
             log("sync ok frames=${batch.size} accepted=${resp.accepted} duplicates=${resp.duplicates} " +
                 "rejected=${resp.rejected} acks=$originated ack_cursor=${resp.ackCursor}$hintNote")
             SyncOutcome(
-                true, batch.size, resp.accepted, resp.duplicates, resp.rejected, originated, broadcastsOriginated = bcasts,
+                true, batch.size, resp.accepted, resp.duplicates, resp.rejected, originated, broadcastsOriginated = bcasts, announcementsOriginated = anns,
                 hintsUploaded = hintsInBatch, hintsAccepted = resp.hints?.accepted,
             )
         } catch (e: Exception) {

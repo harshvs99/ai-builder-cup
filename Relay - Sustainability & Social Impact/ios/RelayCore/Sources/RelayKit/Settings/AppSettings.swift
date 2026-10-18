@@ -37,13 +37,25 @@ public struct Settings: Equatable, Sendable {
     /// this phone publishes its own position (about 100 m or better) to the mesh and the control room. Default on in
     /// demo builds, off in village builds (`BuildConfig.helpLocateDefault`).
     public var helpLocateNeighbours: Bool
+    /// Last good `GET /v1/languages` body, cached so the picker is right offline; empty until one arrived.
+    public var serverLanguagesJson: String
+    /// The disabled language the "not available yet" line was already shown for (language tag), or empty.
+    public var languageNoticeFor: String
+    /// Languages this build can offer (`BuildConfig.enabledLanguages`). Not persisted: `AppSettings` fills it from the build.
+    public var buildLanguages: [Lang]
+    /// "My household" (contract section 3.2): stays on the phone; only its anonymous flags go to `/v1/ready/plan`.
+    public var household: Household
+    /// The household screen was saved at least once.
+    public var householdSet: Bool
 
     public init(
         backendUrl: String = BackendDefaults.emulatorUrl, deviceKey: String = BuildConfig.fallbackDeviceKey,
         allowlist: String = "", language: Lang = .en, extraLanguages: [Lang] = [], themeMode: ThemeMode = .auto, largerText: Bool = false,
         readAloud: Bool = false, voiceSpeed: VoiceSpeed = .normal, languageConfirmed: Bool = false,
         areaLabel: String = "", gatewayMode: GatewayMode = .automatic, carryInBackground: Bool = true,
-        helpLocateNeighbours: Bool = BuildConfig.standard.helpLocateDefault
+        helpLocateNeighbours: Bool = BuildConfig.standard.helpLocateDefault,
+        serverLanguagesJson: String = "", languageNoticeFor: String = "", buildLanguages: [Lang] = LanguageCatalog.buildDefault,
+        household: Household = Household(), householdSet: Bool = false
     ) {
         self.backendUrl = backendUrl; self.deviceKey = deviceKey; self.allowlist = allowlist; self.language = language
         self.extraLanguages = Settings.normalizedExtras(extraLanguages)
@@ -51,7 +63,19 @@ public struct Settings: Equatable, Sendable {
         self.voiceSpeed = voiceSpeed; self.languageConfirmed = languageConfirmed; self.areaLabel = areaLabel
         self.gatewayMode = gatewayMode; self.carryInBackground = carryInBackground
         self.helpLocateNeighbours = helpLocateNeighbours
+        self.serverLanguagesJson = serverLanguagesJson; self.languageNoticeFor = languageNoticeFor; self.buildLanguages = buildLanguages
+        self.household = household; self.householdSet = householdSet
     }
+
+    /// Languages the picker offers: enabled in this build AND in the cached server list (build default until one arrived).
+    public var offeredLanguages: [Lang] {
+        LanguageCatalog.offered(build: buildLanguages, server: LanguageCatalog.parseServer(serverLanguagesJson))
+    }
+
+    public var languageResolution: LanguageResolution { LanguageCatalog.resolve(stored: language, offered: offeredLanguages) }
+
+    /// The language every string is shown in: `language`, or English when it is no longer offered.
+    public var effectiveLanguage: Lang { languageResolution.effective }
 
     /// The old "Pretend offline" behaviour: never act as a gateway.
     public var pretendOffline: Bool { gatewayMode == .never }
@@ -60,9 +84,11 @@ public struct Settings: Equatable, Sendable {
     public static let alwaysPreferred: [Lang] = [.en, .hi]
 
     /// The languages speech input should expect: English, Hindi, then the user's added languages. The app language
-    /// counts too, so installs from before this setting existed still include theirs. Order is stable, no duplicates.
+    /// counts too, so installs from before this setting existed still include theirs. Only languages the picker offers
+    /// are kept (speech is en-IN and hi-IN unless a reviewed language is switched on). Order is stable, no duplicates.
     public var preferredLanguages: [Lang] {
-        Settings.alwaysPreferred + Settings.normalizedExtras(extraLanguages + [language])
+        let offered = offeredLanguages
+        return (Settings.alwaysPreferred + Settings.normalizedExtras(extraLanguages + [language])).filter { offered.contains($0) }
     }
 
     /// Switches the app language; a language beyond English and Hindi is also remembered as a preferred one.
@@ -143,7 +169,12 @@ public final class AppSettings: @unchecked Sendable {
             areaLabel: prefs.stringValue(forKey: "area") ?? "",
             gatewayMode: gateway,
             carryInBackground: prefs.boolValue(forKey: "carry_bg") ?? true,
-            helpLocateNeighbours: prefs.boolValue(forKey: "help_locate") ?? cfg.helpLocateDefault
+            helpLocateNeighbours: prefs.boolValue(forKey: "help_locate") ?? cfg.helpLocateDefault,
+            serverLanguagesJson: prefs.stringValue(forKey: "server_langs") ?? "",
+            languageNoticeFor: prefs.stringValue(forKey: "lang_notice_for") ?? "",
+            buildLanguages: cfg.enabledLanguages,
+            household: Household.fromJson(prefs.stringValue(forKey: "household")),
+            householdSet: prefs.boolValue(forKey: "household_set") ?? false
         )
     }
 
@@ -172,6 +203,10 @@ public final class AppSettings: @unchecked Sendable {
         store.setString(next.gatewayMode.rawValue, forKey: "gateway_mode")
         store.setBool(next.carryInBackground, forKey: "carry_bg")
         store.setBool(next.helpLocateNeighbours, forKey: "help_locate")
+        store.setString(next.serverLanguagesJson, forKey: "server_langs")
+        store.setString(next.languageNoticeFor, forKey: "lang_notice_for")
+        store.setString(next.household.normalized().toJson(), forKey: "household")
+        store.setBool(next.householdSet, forKey: "household_set")
         flow.send(next)
         let targets = Array(listeners.values)
         lock.unlock()

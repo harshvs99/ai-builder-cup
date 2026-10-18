@@ -26,10 +26,15 @@ object Routes {
     const val NETWORK = "network"
     const val CONSOLE = "network/console"
     const val SETTINGS = "settings"
+    const val READY = "ready"
+    const val SHELTERS = "shelters"
+    const val SHELTER = "shelter/{id}"
+    const val HOUSEHOLD = "settings/household"
     const val DEVELOPER = "settings/developer"
     /** Temporary: the pre-redesign Home, reachable until the new screens replace its pieces. */
     const val LEGACY_HOME = "legacy-home"
 
+    fun shelter(id: String) = "shelter/" + java.net.URLEncoder.encode(id, "UTF-8")
     fun request(msgId: String) = "request/$msgId"
     fun ask(mode: AskMode, prefillFrom: String? = null) =
         "ask?mode=${mode.arg}" + (prefillFrom?.let { "&prefillFrom=$it" } ?: "")
@@ -48,7 +53,8 @@ object Routes {
         HOME, LEGACY_HOME -> HOME
         REQUESTS, REQUEST -> REQUESTS
         NETWORK, CONSOLE -> NETWORK
-        SETTINGS, DEVELOPER -> SETTINGS
+        SETTINGS, DEVELOPER, HOUSEHOLD -> SETTINGS
+        READY, SHELTERS, SHELTER -> HOME
         else -> null
     }
 }
@@ -77,6 +83,10 @@ class RelayNav(val controller: NavHostController, val setup: SetupActions) {
     fun finishAskTo(msgId: String) {
         controller.navigate(Routes.request(msgId)) { popUpTo(Routes.ASK_FLOW) { inclusive = true } }
     }
+    fun openReady() { controller.navigate(Routes.READY) { launchSingleTop = true } }
+    fun openShelters() { controller.navigate(Routes.SHELTERS) }
+    fun openShelter(id: String) { controller.navigate(Routes.shelter(id)) }
+    fun openHousehold() { controller.navigate(Routes.HOUSEHOLD) }
     fun openConsole() { controller.navigate(Routes.CONSOLE) }
     fun openDeveloper() { controller.navigate(Routes.DEVELOPER) }
     fun openLegacyHome() { controller.navigate(Routes.LEGACY_HOME) }

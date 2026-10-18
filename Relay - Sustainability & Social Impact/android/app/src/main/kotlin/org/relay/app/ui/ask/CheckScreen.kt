@@ -112,7 +112,7 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
     val scope = rememberCoroutineScope()
     val state by vm.state.collectAsStateWithLifecycle()
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
-    val lang = settings.language
+    val lang = settings.effectiveLanguage
     val perms = rememberPermissions()
     val speaker = LocalSpeaker.current
     val nowMs by rememberNowMs()

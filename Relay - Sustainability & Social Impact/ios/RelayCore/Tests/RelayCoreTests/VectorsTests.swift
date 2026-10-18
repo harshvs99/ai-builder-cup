@@ -221,6 +221,45 @@ final class VectorsTests: XCTestCase {
         for (name, hexv) in bad { XCTAssertNil(BroadcastCodec.decode(h(hexv)), "must reject \(name)") }
     }
 
+    // ---- ANNOUNCEMENT (SPEC 5.7): its own vector list too
+    func testAnnouncementVectorsMatchByteForByte() throws {
+        let list = try XCTUnwrap(root["announcement_vectors"] as? [JObj])
+        XCTAssertGreaterThanOrEqual(list.count, 5)
+        for v in list {
+            let name = s(v, "name")
+            let fl = obj(v, "fields")
+            let a = Announcement(
+                announcementId: h(s(fl, "announcement_id")), lang: try XCTUnwrap(Lang.fromTag(s(fl, "lang"))),
+                district: try XCTUnwrap(AnnouncementDistricts.indexOf(s(fl, "district"))),
+                status: s(fl, "status") == "active" ? .active : .withdrawn,
+                approvedAt: l(fl, "approved_at"), expiresAt: l(fl, "expires_at"), text: s(fl, "text"))
+            let payload = try AnnouncementCodec.encode(a)
+            XCTAssertEqual(s(v, "payload_hex"), Hex.encode(payload), "\(name) payload")
+            XCTAssertEqual(a, AnnouncementCodec.decode(h(s(v, "payload_hex"))), "\(name) decode")
+            XCTAssertEqual(s(v, "frame_hex"), Hex.encode(try FrameCodec.encode(frameOf(v, payload))), "\(name) frame")
+            XCTAssertEqual(s(fl, "key"), a.keyHex, "\(name) key")
+            XCTAssertLessThanOrEqual(s(v, "frame_hex").count / 2, 182, "\(name) fits one write")
+            XCTAssertEqual(FrameTypes.announcement, i(obj(v, "frame"), "type"))
+        }
+        XCTAssertEqual(AnnouncementCodec.maxPayload, i(obj(root, "sizes"), "announcement_max_payload"))
+        XCTAssertEqual(AnnouncementCodec.ttlSec, l(root, "announcement_ttl_s"))
+    }
+
+    func testAnnouncementPayloadsEveryDecoderMustReject() {
+        let bad = root["must_reject_announcement_payloads"] as! [String: String]
+        XCTAssertGreaterThanOrEqual(bad.count, 8)
+        for (name, hexv) in bad { XCTAssertNil(AnnouncementCodec.decode(h(hexv)), "must reject \(name)") }
+    }
+
+    func testAnnouncementIndexTablesMatchTheVectors() {
+        let langs = root["announcement_lang_codes"] as! [String: NSNumber]
+        XCTAssertEqual(Lang.allCases.count, langs.count)
+        for l in Lang.allCases { XCTAssertEqual(l.code, langs[l.tag]?.intValue, l.tag) }
+        let districts = root["announcement_district_codes"] as! [String: NSNumber]
+        XCTAssertEqual(AnnouncementDistricts.ids.count, districts.count)
+        for (idx, id) in AnnouncementDistricts.ids.enumerated() { XCTAssertEqual(idx, districts[id]?.intValue, id) }
+    }
+
     func testBroadcastRecipientAllFfIsBroadcast() throws {
         let f = Frame(type: FrameTypes.ack, ttl: 3, timestampMs: 5, senderId: [UInt8](repeating: 1, count: 8),
                       recipientId: [UInt8](repeating: 0xFF, count: 8), payload: [1])

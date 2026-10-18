@@ -67,6 +67,7 @@ public final class MeshEngine: @unchecked Sendable {
         func onAckForMe(_ ack: Ack, frame: Frame) { engine?.gossipAckForMe(ack) }
         func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) { engine?.gossipLocHint(hint, frame, fromLink) }
         func onBroadcast(_ broadcast: Broadcast, frame: Frame, fromLink: String?) { engine?.gossipBroadcast(broadcast, frame, fromLink) }
+        func onAnnouncement(_ announcement: Announcement, frame: Frame, fromLink: String?) { engine?.gossipAnnouncement(announcement, frame, fromLink) }
         func onPeerHello(linkId: String, hello: Hello) { engine?.gossipPeerHello(linkId, hello) }
         func gatewayChanged(_ internet: Bool, _ outcome: SyncOutcome?) { engine?.gatewayChanged(internet: internet, outcome: outcome) }
     }
@@ -79,7 +80,8 @@ public final class MeshEngine: @unchecked Sendable {
     ///     queue, so it must be thread-safe (see `LatestFix`). The default never has a fix, so no hint is ever sent.
     ///   - requestFix: asks the platform to start a short location listen when a hint is wanted and there is no fix.
     public init(repository: MeshRepository, transport: any MeshTransport, syncClient: SyncClient = SyncClient(),
-                hintFix: @escaping @Sendable () -> RelayFix? = { nil }, requestFix: @escaping @Sendable () -> Void = {}) {
+                hintFix: @escaping @Sendable () -> RelayFix? = { nil }, requestFix: @escaping @Sendable () -> Void = {},
+                district: @escaping @Sendable () -> String? = { nil }) {
         let bridge = Bridge()
         self.bridge = bridge
         self.repo = repository
@@ -107,7 +109,7 @@ public final class MeshEngine: @unchecked Sendable {
         let syncer = GatewaySyncer(
             node: node, store: repository.packetStore, state: repository.gatewayState, client: syncClient,
             config: { let s = settings.current; return SyncConfig(baseUrl: s.backendUrl, deviceKey: s.deviceKey) },
-            log: { repo.log($0) })
+            log: { repo.log($0) }, district: district)
         self.syncer = syncer
         self.gateway = GatewayManager(
             node: node, syncer: syncer, scheduler: DispatchQueueScheduler(queue: DispatchQueue(label: "relay-gateway")),
@@ -336,6 +338,15 @@ public final class MeshEngine: @unchecked Sendable {
     fileprivate func gossipBroadcast(_ b: Broadcast, _ frame: Frame, _ fromLink: String?) {
         repo.log("BROADCAST \(b.idHex) \(b.kind) \(b.disaster.key) issued=\(b.issuedAt) from=\(fromLink ?? "local") ttl=\(frame.ttl)")
         repo.disasters.apply(b)
+        publish()
+    }
+
+    /// Called (on the engine queue) when an ANNOUNCEMENT is stored for the first time; the app reloads its cards and notifies.
+    public var onAnnouncement: (@Sendable (Announcement) -> Void)?
+
+    fileprivate func gossipAnnouncement(_ a: Announcement, _ frame: Frame, _ fromLink: String?) {
+        repo.log("ANNOUNCEMENT \(a.idHex) \(a.lang.tag) \(a.status) district=\(a.district) from=\(fromLink ?? "local") ttl=\(frame.ttl)")
+        onAnnouncement?(a)
         publish()
     }
 

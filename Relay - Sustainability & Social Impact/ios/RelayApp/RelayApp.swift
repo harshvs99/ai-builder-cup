@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import BackgroundTasks
+import RelayKit
 
 @main
 struct RelayApp: App {
@@ -13,6 +15,25 @@ struct RelayApp: App {
         let model = AppModel()
         model.start()
         _model = State(initialValue: model)
+        // Best-effort background refresh of the Ready pack (contract section 3.3): iOS decides when, about every 6 h at best.
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.readyTaskId, using: nil) { task in
+            guard let task = task as? BGAppRefreshTask else { return }
+            Self.scheduleReadyRefresh()
+            let work = Task { @MainActor in
+                _ = await model.ready.refresh(.background)
+                task.setTaskCompleted(success: true)
+            }
+            task.expirationHandler = { work.cancel() }
+        }
+        Self.scheduleReadyRefresh()
+    }
+
+    static let readyTaskId = "org.relay.ios.ready-refresh"
+
+    static func scheduleReadyRefresh() {
+        let req = BGAppRefreshTaskRequest(identifier: readyTaskId)
+        req.earliestBeginDate = Date(timeIntervalSinceNow: 6 * 3600)
+        try? BGTaskScheduler.shared.submit(req)
     }
 
     var body: some Scene {
@@ -22,7 +43,7 @@ struct RelayApp: App {
                 .task { model.start() } // idempotent
                 .onChange(of: scenePhase, initial: true) { _, phase in model.setScenePhase(phase) }
                 // The on-device model is the biggest thing the app can hold in RAM: free it when hidden or when iOS asks.
-                .onChange(of: scenePhase) { _, phase in if phase == .background { Task { await GemmaRunner.shared.onBackgrounded() } } }
+                .onChange(of: scenePhase) { _, phase in if phase == .background { Self.scheduleReadyRefresh(); Task { await GemmaRunner.shared.onBackgrounded() } } }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                     Task { await GemmaRunner.shared.onMemoryWarning() }
                 }

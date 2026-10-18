@@ -46,6 +46,10 @@
 	<string>$(RELAY_BACKEND_URL)</string>
 	<key>RelayDeviceKey</key>
 	<string>$(RELAY_DEVICE_KEY)</string>
+	<key>RelayDemoShelters</key>
+	<string>$(RELAY_DEMO_SHELTERS)</string>
+	<key>RelayEnabledLangs</key>
+	<string>$(RELAY_ENABLED_LANGS)</string>
 	<key>RelayHelpLocateDefault</key>
 	<string>$(RELAY_HELP_LOCATE_DEFAULT)</string>
 	<key>RelayLockConnection</key>
@@ -55,10 +59,15 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>org.relay.ios.ready-refresh</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
+		<string>fetch</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

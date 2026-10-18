@@ -25,6 +25,7 @@ TYPE_HELLO = 0x72
 TYPE_INVENTORY = 0x73
 TYPE_LOC_HINT = 0x74
 TYPE_BROADCAST = 0x75
+TYPE_ANNOUNCEMENT = 0x76
 
 FLAG_HAS_RECIPIENT = 0x01
 FLAG_HAS_SIGNATURE = 0x02
@@ -91,6 +92,7 @@ _ACK_FIXED = struct.Struct(">B8s8s8sIBH")  # 32 bytes (+1 length byte for text)
 _HELLO = struct.Struct(">B8sBBH")
 _LOC_HINT = struct.Struct(">B8s8siiBbI")  # 31 bytes (SPEC 5.5)
 _BROADCAST = struct.Struct(">B8sBBIiiH")  # 25 bytes (SPEC 5.6)
+_ANNOUNCEMENT_FIXED = struct.Struct(">B8sBBBII")  # 20 bytes, then the length-prefixed text (SPEC 5.7)
 _FRAME_HEAD = struct.Struct(">BBBQBH")
 
 
@@ -640,3 +642,65 @@ def decode_broadcast(payload: bytes) -> Broadcast:
     if not _coords_ok(lat_e5, lon_e5):
         raise CodecError("coordinates out of range")
     return Broadcast(bid, BROADCAST_KINDS[kind], DISASTER_CODES[disaster], issued_at, lat_e5, lon_e5, radius)
+
+
+# --------------------------------------------------------------------------------------
+# ANNOUNCEMENT (SPEC 5.7): a duty officer's words, translated and approved, to every phone in a district
+# --------------------------------------------------------------------------------------
+
+MAX_ANNOUNCEMENT_TEXT = 139  # payload 20 + 1 + 139 = 160 bytes, frame 22 + 160 = 182
+ANNOUNCEMENT_ACTIVE = 0
+ANNOUNCEMENT_WITHDRAWN = 1
+DISTRICT_CODES = ("puri", "delhi")  # wire index of a district; append only, never renumber (checked against districts.py in tests)
+
+
+@dataclass(frozen=True)
+class Announcement:
+    announcement_id: bytes
+    lang: int  # index in LANG_CODES
+    district: int  # index in DISTRICT_CODES (a decoder keeps any value: a phone only shows its own district)
+    status: int  # ANNOUNCEMENT_ACTIVE | ANNOUNCEMENT_WITHDRAWN
+    approved_at: int  # unix seconds
+    expires_at: int  # unix seconds, 0 = none
+    text: str
+
+    @property
+    def key(self) -> bytes:
+        return announcement_key(self.announcement_id, self.lang, self.status)
+
+
+def announcement_key(announcement_id: bytes, lang: int, status: int) -> bytes:
+    """Dedupe key (SPEC 5.7): first 8 bytes of SHA-256(announcement_id || lang || status)."""
+    _need_bytes("announcement_id", announcement_id, 8)
+    return hashlib.sha256(announcement_id + bytes([lang, status])).digest()[:8]
+
+
+def encode_announcement(a: Announcement) -> bytes:
+    _need_bytes("announcement_id", a.announcement_id, 8)
+    if not (isinstance(a.lang, int) and not isinstance(a.lang, bool) and 0 <= a.lang < len(LANG_CODES)):
+        raise CodecError("lang out of range")
+    _u("district", a.district, 8)
+    if a.status not in (ANNOUNCEMENT_ACTIVE, ANNOUNCEMENT_WITHDRAWN) or isinstance(a.status, bool):
+        raise CodecError("status out of range")
+    _u("approved_at", a.approved_at, 32)
+    _u("expires_at", a.expires_at, 32)
+    return _ANNOUNCEMENT_FIXED.pack(
+        PROTOCOL_VERSION, a.announcement_id, a.lang, a.district, a.status, a.approved_at, a.expires_at
+    ) + _lp(a.text, MAX_ANNOUNCEMENT_TEXT)
+
+
+def decode_announcement(payload: bytes) -> Announcement:
+    payload = _check_bytes_input(payload)
+    if len(payload) < _ANNOUNCEMENT_FIXED.size + 1:
+        raise CodecError("ANNOUNCEMENT payload too short")
+    ver, aid, lang, district, status, approved_at, expires_at = _ANNOUNCEMENT_FIXED.unpack_from(payload, 0)
+    if ver != PROTOCOL_VERSION:
+        raise CodecError("unsupported ANNOUNCEMENT payload version")
+    if lang >= len(LANG_CODES):
+        raise CodecError("lang out of range")
+    if status not in (ANNOUNCEMENT_ACTIVE, ANNOUNCEMENT_WITHDRAWN):
+        raise CodecError("status out of range")
+    text, off = _read_lp(payload, _ANNOUNCEMENT_FIXED.size, MAX_ANNOUNCEMENT_TEXT)
+    if off != len(payload):
+        raise CodecError("trailing bytes in ANNOUNCEMENT payload")
+    return Announcement(aid, lang, district, status, approved_at, expires_at, text)

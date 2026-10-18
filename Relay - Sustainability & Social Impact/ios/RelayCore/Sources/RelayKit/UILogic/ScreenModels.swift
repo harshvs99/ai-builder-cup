@@ -22,28 +22,17 @@ public struct LanguageScreenModel: Equatable, Sendable {
     public let title: String
     public let subtitle: String
     public let continueLabel: String
-    public let addLanguageLabel: String
+    /// Only the languages the build and the backend both switch on (`Settings.offeredLanguages`): English and Hindi by default.
     public let rows: [Row]
-    /// Languages added earlier (settings.extraLanguages); they stay on the list even when another is selected.
-    public let addedLangs: [Lang]
 
-    /// Languages every first run starts with; any other language is added by the user ("Add a language").
-    public static let defaultLangs: [Lang] = [.en, .hi]
-
-    /// First-run list: the default languages, those the user added, and the selected one.
-    public var shownRows: [Row] { rows.filter { Self.defaultLangs.contains($0.lang) || addedLangs.contains($0.lang) || $0.isSelected } }
-    /// What "Add a language" reveals: everything not already shown.
-    public var addableRows: [Row] { rows.filter { r in !shownRows.contains { $0.lang == r.lang } } }
-
-    public static func make(selected: Lang, added: [Lang] = [], strings s: Strings) -> LanguageScreenModel {
+    public static func make(selected: Lang, offered: [Lang] = LanguageCatalog.buildDefault, strings s: Strings) -> LanguageScreenModel {
         LanguageScreenModel(
             appName: s.home.title, title: s.home.chooseTitle, subtitle: s.home.chooseSubtitle,
-            continueLabel: s.common.continueAction, addLanguageLabel: s.home.addLanguage,
-            rows: AppLanguages.all.map {
+            continueLabel: s.common.continueAction,
+            rows: AppLanguages.offered(offered).map {
                 Row(lang: $0.lang, nativeName: $0.nativeName, englishName: $0.englishName, isSelected: $0.lang == selected,
                     speakLabel: s.home.speakLanguage($0.englishName), greeting: s.home.greeting($0.lang))
-            },
-            addedLangs: added
+            }
         )
     }
 

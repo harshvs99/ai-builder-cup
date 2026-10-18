@@ -303,7 +303,7 @@ public struct SettingsModel: Equatable, Sendable {
     public static func make(settings: Settings, permissions p: PermissionStates, strings: Strings) -> SettingsModel {
         let s = strings.network
         return SettingsModel(
-            languageName: AppLanguages.of(settings.language).nativeName,
+            languageName: AppLanguages.of(settings.effectiveLanguage).nativeName,
             areaValue: settings.areaLabel.trimmed.isEmpty ? s.areaNotSet : settings.areaLabel,
             gatewayName: GatewayChoice.name(settings.gatewayMode, s),
             permissions: [

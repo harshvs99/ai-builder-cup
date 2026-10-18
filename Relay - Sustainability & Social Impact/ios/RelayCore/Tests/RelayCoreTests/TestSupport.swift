@@ -116,6 +116,7 @@ final class TestNet {
         var acksSeen: [Ack] = []
         var locHints: [LocHint] = []
         var broadcasts: [Broadcast] = []
+        var announcements: [Announcement] = []
         var sentFrames: [(String, [UInt8])] = []
         var onNeedHook: (Need) -> Void = { _ in }
         var node: GossipNode!
@@ -147,6 +148,7 @@ final class TestNet {
         func onAckSeen(_ ack: Ack, frame: Frame) { acksSeen.append(ack) }
         func onLocHint(_ hint: LocHint, frame: Frame, fromLink: String?) { locHints.append(hint) }
         func onBroadcast(_ broadcast: Broadcast, frame: Frame, fromLink: String?) { broadcasts.append(broadcast) }
+        func onAnnouncement(_ announcement: Announcement, frame: Frame, fromLink: String?) { announcements.append(announcement) }
     }
 
     func node(_ name: String) -> N {

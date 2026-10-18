@@ -5,6 +5,8 @@ import org.relay.core.frame.FrameCodec
 import org.relay.core.frame.FrameTypes
 import org.relay.core.ids.Hex
 import org.relay.core.payload.Ack
+import org.relay.core.payload.Announcement
+import org.relay.core.payload.AnnouncementCodec
 import org.relay.core.payload.AckCodec
 import org.relay.core.payload.Broadcast
 import org.relay.core.payload.BroadcastCodec
@@ -142,6 +144,19 @@ class GossipNode(
         }
     }
 
+    /** An ANNOUNCEMENT frame this node holds, with when it first stored it (the 10-minute language fallback counts from there). */
+    class HeldAnnouncement(val announcement: Announcement, val frame: Frame, val receivedAtMs: Long)
+
+    /** Control-room announcements (SPEC 5.7) still inside their life, as stored (carried) by this node. */
+    fun storedAnnouncements(): List<HeldAnnouncement> = synchronized(lock) {
+        val nowSec = clock.nowMs() / 1000
+        store.all().filter { it.type == FrameTypes.ANNOUNCEMENT }.mapNotNull { p ->
+            val f = FrameCodec.decode(p.raw) ?: return@mapNotNull null
+            val a = AnnouncementCodec.decode(f.payload) ?: return@mapNotNull null
+            if (a.isLive(nowSec)) HeldAnnouncement(a, f, p.expiryBasisMs) else null
+        }
+    }
+
     fun storedAcks(): List<Pair<Ack, Frame>> = synchronized(lock) {
         store.all().filter { it.type == FrameTypes.ACK }.mapNotNull { p ->
             val f = FrameCodec.decode(p.raw) ?: return@mapNotNull null
@@ -181,7 +196,7 @@ class GossipNode(
         }
     }
 
-    /** Drop NEED/ACK/LOC_HINT frames older than 72 h and BROADCAST frames older than 24 h from the store. Seen-set keys stay until LRU eviction. */
+    /** Drop NEED/ACK/LOC_HINT/ANNOUNCEMENT frames older than 72 h and BROADCAST frames older than 24 h from the store. Seen-set keys stay until LRU eviction. */
     fun expire() = locked { out -> expireLocked(out) }
 
     fun originateNeed(need: Need): Frame {
@@ -250,6 +265,25 @@ class GossipNode(
         return if (fresh) frame else null
     }
 
+    /**
+     * Originate an ANNOUNCEMENT (SPEC 5.7) into the mesh: a gateway does this for every payload `/v1/sync` returns. Returns null when
+     * this node already holds it (its dedupe key is in the seen-set) or it is outside its life, so repeating a list is free.
+     */
+    fun originateAnnouncement(a: Announcement): Frame? {
+        if (!a.isLive(clock.nowMs() / 1000)) return null
+        val frame = Frame(
+            type = FrameTypes.ANNOUNCEMENT, ttl = INITIAL_TTL, timestampMs = clock.nowMs(),
+            senderId = nodeId, payload = AnnouncementCodec.encode(a),
+        )
+        val raw = FrameCodec.encode(frame)
+        var fresh = false
+        locked { out ->
+            fresh = !isKnown(a.keyHex)
+            acceptAnnouncement(out, a, frame, raw, fromLink = null)
+        }
+        return if (fresh) frame else null
+    }
+
     /** Entry point for every whole frame received on [linkId]. Never throws on malformed input. */
     fun onFrame(linkId: String, bytes: ByteArray) {
         try {
@@ -304,6 +338,14 @@ class GossipNode(
                 // Outside its life: neither stored nor relayed, so a stale declaration cannot circulate for ever.
                 if (!b.isLive(now / 1000)) { out.log("dropped expired broadcast ${b.idHex}"); return@locked }
                 acceptBroadcast(out, b, frame, bytes, linkId)
+            }
+            FrameTypes.ANNOUNCEMENT -> {
+                if (!knownVersion) return@locked acceptOpaque(out, frame, bytes, linkId)
+                val a = AnnouncementCodec.decode(frame.payload)
+                if (a == null) { reject(); return@locked }
+                // Past its end or older than 72 h: neither stored nor relayed. An unknown district is still relayed (SPEC 5.7).
+                if (!a.isLive(now / 1000)) { out.log("dropped expired announcement ${a.idHex}"); return@locked }
+                acceptAnnouncement(out, a, frame, bytes, linkId)
             }
             FrameTypes.HELLO -> {
                 val hello = HelloCodec.decode(frame.payload)
@@ -374,6 +416,17 @@ class GossipNode(
         scheduleFlood(out, frame, raw, key, fromLink)
     }
 
+    private fun acceptAnnouncement(out: Out, a: Announcement, frame: Frame, raw: ByteArray, fromLink: String?) {
+        val key = a.keyHex
+        fromLink?.let { links[it]?.peerKeys?.add(key) }
+        if (isKnown(key)) { stats = stats.copy(duplicates = stats.duplicates + 1); return }
+        markSeen(key)
+        store.put(StoredPacket(key, FrameTypes.ANNOUNCEMENT, raw, clock.nowMs()))
+        stats = stats.copy(announcementsDelivered = stats.announcementsDelivered + 1)
+        out.actions += { listener.onAnnouncement(a, frame, fromLink) }
+        scheduleFlood(out, frame, raw, key, fromLink)
+    }
+
     /** Unknown type or payload version: relay once, never store, never deliver. */
     private fun acceptOpaque(out: Out, frame: Frame, raw: ByteArray, fromLink: String) {
         val key = "o" + Hex.encode(OpaqueKey.of(frame))
@@ -441,7 +494,8 @@ class GossipNode(
      */
     private fun pushBatch(out: Out, linkId: String, st: LinkState) {
         val candidates = store.all().filter {
-            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK || it.type == FrameTypes.LOC_HINT || it.type == FrameTypes.BROADCAST) &&
+            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK || it.type == FrameTypes.LOC_HINT || it.type == FrameTypes.BROADCAST ||
+                it.type == FrameTypes.ANNOUNCEMENT) &&
                 !st.peerKeys.contains(it.key)
         }
         if (candidates.isEmpty()) return

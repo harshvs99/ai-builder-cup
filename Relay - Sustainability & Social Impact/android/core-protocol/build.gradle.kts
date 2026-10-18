@@ -19,6 +19,10 @@ kotlin {
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
 
 dependencies {
+    // Parsing of the backend's JSON (languages, Ready pack and plan). On Android org.json is part of the platform, so it is
+    // compile-only here; JVM tests and the simulator bring the real artifact.
+    compileOnly(libs.org.json)
+    testImplementation(libs.org.json)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.serialization.json)
 }

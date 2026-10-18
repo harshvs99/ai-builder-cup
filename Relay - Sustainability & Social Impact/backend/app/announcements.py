@@ -15,12 +15,11 @@ check call fails, every translation is "needs_review" with issues "not checked".
 untrusted data (it is typed by a person): it goes into prompts only as a JSON string. A human edit
 re-runs the deterministic checks and is rejected if they fail.
 
-Next: mesh delivery (NOT implemented, no protocol/codec change here). Proposal: a ANNOUNCEMENT frame
-(type id TBD) carrying announcement id (8 bytes), district id, lang code, and the text, at most ~180
-bytes UTF-8 per frame. One frame per approved language; a phone relays all of them but stores and
-shows only the one for its own language. Gateways fetch ``/v1/announcements/active`` and inject the
-frames. Devanagari and Odia cost 3 bytes per character, so a long message needs a short form
-(~60 characters) for the mesh, with the full text left to the HTTP route.
+Mesh delivery (SPEC 5.7): at approval each announcement gets an ``announcement_id`` (8 random bytes, the same
+for every language) and a ``mesh_text`` per approved language, at most 139 bytes of UTF-8 so the ANNOUNCEMENT
+frame fits one 182-byte write (a longer text is cut and ends in "…"; the full text stays on the HTTP route).
+Approving and withdrawing each take a sequence number (``approved_seq``, ``withdrawn_seq``); ``sync_payloads``
+turns those into the ACTIVE / WITHDRAWN payloads a gateway fetches with its ``announcement_cursor``.
 """
 
 from __future__ import annotations
@@ -28,12 +27,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 from collections import Counter
 from typing import Any
 
 from pydantic import BaseModel, create_model
 
-from . import districts, languages
+from . import codec, districts, languages
 from .textgen import TextGen, call_json
 
 log = logging.getLogger("relay.announcement")
@@ -46,11 +46,28 @@ def active_langs() -> tuple[str, ...]:
     (``languages``; en and hi by default). Read on every call so RELAY_LANGS changes apply."""
     return tuple(c for c in ALL_LANGS if languages.is_enabled(c))
 
+MESH_TTL_S = 72 * 3600  # an announcement is dropped from sync (and from phones) 72 h after approval
+MAX_SYNC_PAYLOADS = 50
+ELLIPSIS = "…"
 MAX_TEXT_CHARS = 600
 MAX_ISSUES_CHARS = 300
 CALL_TIMEOUT_S = 30.0
 
 _TIME = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
+
+
+def mesh_text(text: str, limit: int = codec.MAX_ANNOUNCEMENT_TEXT) -> str:
+    """``text`` as the mesh frame carries it: at most ``limit`` UTF-8 bytes, cut on a character boundary at the
+    last space when one is near, ending in "…" when anything was cut."""
+    text = " ".join(text.split())
+    if len(text.encode("utf-8")) <= limit:
+        return text
+    room = limit - len(ELLIPSIS.encode("utf-8"))
+    cut = codec.truncate_utf8(text, room).decode("utf-8")
+    space = cut.rfind(" ")
+    if space >= len(cut) * 2 // 3:  # a word boundary close to the end reads better than a split word
+        cut = cut[:space]
+    return cut.rstrip() + ELLIPSIS
 
 
 def norm_district(value: Any) -> str:
@@ -256,4 +273,62 @@ def apply_approval(
             raise ValueError(f"{lang}: fails the checks against the source")
     if not chosen:
         raise ValueError("no language to approve")
-    return {"translations": trans, "approved_langs": [lang for lang in active if lang in chosen]}
+    approved = [lang for lang in active if lang in chosen]
+    return {
+        "translations": trans, "approved_langs": approved, "announcement_id": secrets.token_hex(8),
+        "mesh_texts": {lang: mesh_text(trans[lang]["text"]) for lang in approved},
+    }
+
+
+def _payload(row: dict[str, Any], lang: str, status: int) -> bytes | None:
+    """The ANNOUNCEMENT payload for one language of ``row``; None when it cannot be put on the wire (a language
+    without a wire code, a district without one, or a row approved before mesh delivery existed)."""
+    if not row.get("announcement_id") or lang not in codec.LANG_CODES or row["district"] not in codec.DISTRICT_CODES:
+        return None
+    text = (row.get("mesh_texts") or {}).get(lang)
+    if text is None:
+        return None
+    return codec.encode_announcement(codec.Announcement(
+        bytes.fromhex(row["announcement_id"]), codec.LANG_CODES.index(lang), codec.DISTRICT_CODES.index(row["district"]),
+        status, int(row["approved_at"]), 0, text,
+    ))
+
+
+def latest_seq(rows: list[dict[str, Any]]) -> int:
+    return max((max(r.get("approved_seq") or 0, r.get("withdrawn_seq") or 0) for r in rows), default=0)
+
+
+def next_seq(rows: list[dict[str, Any]], now_ms: int) -> int:
+    """A sequence number above every one handed out so far; milliseconds, so it also survives a store reset."""
+    return max(now_ms, latest_seq(rows) + 1)
+
+
+def sync_payloads(
+    rows: list[dict[str, Any]], cursor: int, now: float, district: str | None = None, limit: int = MAX_SYNC_PAYLOADS,
+) -> tuple[list[bytes], int]:
+    """ANNOUNCEMENT payloads for ``/v1/sync``: every event (approval, withdrawal) with a sequence number above
+    ``cursor``, oldest first, at most ``limit``, and the cursor to send next time. A cursor above the newest
+    sequence number means the store was reset and counts as 0. Events older than 72 h are left out."""
+    if cursor > latest_seq(rows):
+        cursor = 0
+    events: list[tuple[int, dict[str, Any], int]] = []
+    for r in rows:
+        if district and r["district"] != district:
+            continue
+        if not r.get("announcement_id") or now - (r.get("approved_at") or 0) > MESH_TTL_S:
+            continue
+        if (r.get("approved_seq") or 0) > cursor and r["status"] == "approved":
+            events.append((r["approved_seq"], r, codec.ANNOUNCEMENT_ACTIVE))
+        if (r.get("withdrawn_seq") or 0) > cursor:  # a withdrawal supersedes the approval, so only it is sent
+            events.append((r["withdrawn_seq"], r, codec.ANNOUNCEMENT_WITHDRAWN))
+    events.sort(key=lambda e: e[0])
+    out: list[bytes] = []
+    next_cursor = cursor
+    for seq, r, status in events:
+        langs = [lang for lang in r["approved_langs"] if languages.is_enabled(lang)]
+        frames = [p for p in (_payload(r, lang, status) for lang in langs) if p is not None]
+        if out and len(out) + len(frames) > limit:
+            break  # whole events only: a cursor in the middle of one event's languages would lose the rest
+        out.extend(frames)
+        next_cursor = seq
+    return out, next_cursor

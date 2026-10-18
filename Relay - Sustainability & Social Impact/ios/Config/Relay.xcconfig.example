@@ -26,3 +26,11 @@ RELAY_LOCK_CONNECTION = NO
 // NO in village builds so that sharing a position is strictly opt-in. Empty or undefined means YES. A choice the user
 // made in Settings is kept either way.
 RELAY_HELP_LOCATE_DEFAULT = YES
+
+// Languages this build can offer (Android: -Prelay.enabledLangs). The picker also needs the language on in the backend's
+// /v1/languages. Odia, Filipino and Waray stay hidden until a community reviewer signs them off: RELAY_ENABLED_LANGS = en,hi,or
+RELAY_ENABLED_LANGS = en,hi
+
+// A demo shelter list (placeholders no officer verified) shows only in demo builds (every Debug build is one), with a "Demo" badge.
+// For a Release build set YES (Android: -Prelay.demoShelters=true). Empty/NO = only officer-published lists.
+RELAY_DEMO_SHELTERS = NO

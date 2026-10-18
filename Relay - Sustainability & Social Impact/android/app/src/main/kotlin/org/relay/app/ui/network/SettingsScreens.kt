@@ -83,6 +83,8 @@ fun SettingsScreen(nav: RelayNav) {
         onUpdate = { f -> MeshRepository.settings.update(f) },
         onOpenSystemSettings = nav.setup.openAppSettings,
         onDeveloper = nav::openDeveloper,
+        onHousehold = nav::openHousehold,
+        onReady = nav::openReady,
     )
 }
 
@@ -94,6 +96,8 @@ internal fun SettingsContent(
     onUpdate: ((Settings) -> Settings) -> Unit,
     onOpenSystemSettings: () -> Unit,
     onDeveloper: () -> Unit,
+    onHousehold: () -> Unit = {},
+    onReady: () -> Unit = {},
 ) {
     val s = strings.network
     var languageSheet by remember { mutableStateOf(false) }
@@ -111,7 +115,7 @@ internal fun SettingsContent(
         )
 
         Group(s.groupLanguageVoice) {
-            SettingNavRow(s.language, { languageSheet = true }, value = AppLanguages.of(settings.language).nativeName)
+            SettingNavRow(s.language, { languageSheet = true }, value = AppLanguages.of(settings.effectiveLanguage).nativeName)
             SettingSwitchRow(s.readAloud, settings.readAloud, { v -> onUpdate { it.copy(readAloud = v) } })
             LabelledChoice(s.voiceSpeed) {
                 SegmentedChoice(
@@ -148,13 +152,11 @@ internal fun SettingsContent(
         }
 
         Group(s.groupBeforeDisaster) {
-            Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column {
-                    Text(s.householdPlan, style = MaterialTheme.typography.bodyLarge)
-                    Text(s.householdPlanHelp, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                PillButton(s.setUp, { comingSoon = true }, style = PillStyle.Tonal)
-            }
+            SettingNavRow(
+                strings.ready.settingsHousehold, onHousehold, supporting = strings.ready.settingsHouseholdHelp,
+                value = if (settings.householdSet) strings.common.people(settings.household.people) else null,
+            )
+            SettingNavRow(strings.ready.settingsReady, onReady)
         }
 
         // Last and small: today's developer settings, unchanged.
@@ -164,7 +166,7 @@ internal fun SettingsContent(
         Spacer(Modifier.height(8.dp))
     }
 
-    if (languageSheet) LanguageSheet(settings.language, s.chooseLanguage, onPick = { l ->
+    if (languageSheet) LanguageSheet(settings.effectiveLanguage, settings.offeredLanguages, s.chooseLanguage, onPick = { l ->
         onUpdate { it.withLanguage(l) }
         languageSheet = false
     }, onDismiss = { languageSheet = false })
@@ -216,12 +218,12 @@ private fun PermissionRow(title: String, word: PermissionWord, strings: Strings,
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LanguageSheet(current: Lang, title: String, onPick: (Lang) -> Unit, onDismiss: () -> Unit) {
+private fun LanguageSheet(current: Lang, offered: List<Lang>, title: String, onPick: (Lang) -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 8.dp).semantics { heading() })
             Column(Modifier.selectableGroup()) {
-                AppLanguages.all.forEach { e ->
+                AppLanguages.offered(offered).forEach { e ->
                     RadioRow(selected = e.lang == current, onClick = { onPick(e.lang) }) {
                         Text(e.nativeName, style = MaterialTheme.typography.bodyLarge)
                         Text(e.englishName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

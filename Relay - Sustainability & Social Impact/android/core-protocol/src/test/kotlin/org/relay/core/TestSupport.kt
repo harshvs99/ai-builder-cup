@@ -11,6 +11,7 @@ import org.relay.core.gossip.Scheduler
 import org.relay.core.ids.Hex
 import org.relay.core.ids.NodeId
 import org.relay.core.payload.Ack
+import org.relay.core.payload.Announcement
 import org.relay.core.payload.Broadcast
 import org.relay.core.payload.AckStatus
 import org.relay.core.payload.Category
@@ -65,6 +66,7 @@ class TestNet(seed: Long = 1) {
         val acksSeen = ArrayList<Ack>()
         val locHints = ArrayList<LocHint>()
         val broadcasts = ArrayList<Broadcast>()
+        val announcements = ArrayList<Announcement>()
         val sentFrames = ArrayList<Pair<String, ByteArray>>()
         var onNeedHook: (Need) -> Unit = {}
         val node = GossipNode(id, this, clock, scheduler, random = Random(rnd.nextLong()), listener = this)
@@ -87,6 +89,7 @@ class TestNet(seed: Long = 1) {
         override fun onAckSeen(ack: Ack, frame: Frame) { acksSeen += ack }
         override fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) { locHints += hint }
         override fun onBroadcast(broadcast: Broadcast, frame: Frame, fromLink: String?) { broadcasts += broadcast }
+        override fun onAnnouncement(announcement: Announcement, frame: Frame, fromLink: String?) { announcements += announcement }
     }
 
     fun node(name: String): N = nodes.getOrPut(name) { N(name) }

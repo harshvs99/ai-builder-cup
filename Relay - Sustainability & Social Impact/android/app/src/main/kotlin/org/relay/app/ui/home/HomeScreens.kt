@@ -59,7 +59,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import org.relay.app.MeshRepository
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Close
 import org.relay.app.LocalSpeaker
+import org.relay.app.announce.AnnouncementRepository
+import org.relay.core.announce.AnnouncementCard
+import org.relay.app.ready.ReadyRepository
+import org.relay.core.ready.ReadyView
+import org.relay.core.ready.ReadyWarning
 import org.relay.app.VillagerStatus
 import org.relay.app.rememberPermissions
 import org.relay.app.store.MyNeed
@@ -94,9 +102,6 @@ internal fun rememberNow(): State<Long> = produceState(System.currentTimeMillis(
 // ---------------------------------------------------------------------------------------------------------------
 // 1. Choose your language
 
-/** Languages every first run starts with; any other language is added by the user. */
-private val DEFAULT_LANGS = setOf(Lang.EN, Lang.HI)
-
 /** First run: pick the app language (the app switches at once), then Continue goes to Home. */
 @Composable
 fun LanguageScreen(nav: RelayNav) {
@@ -105,8 +110,8 @@ fun LanguageScreen(nav: RelayNav) {
     var voiceMessage by remember { mutableStateOf<String?>(null) }
     val s = LocalStrings.current
     LanguageContent(
-        selected = settings.language,
-        added = settings.extraLanguages,
+        selected = settings.effectiveLanguage,
+        offered = settings.offeredLanguages,
         voiceMessage = voiceMessage,
         onSelect = { l -> MeshRepository.settings.update { it.withLanguage(l) } },
         onSpeak = { l ->
@@ -124,17 +129,15 @@ fun LanguageScreen(nav: RelayNav) {
 @Composable
 private fun LanguageContent(
     selected: Lang,
-    added: List<Lang>,
+    offered: List<Lang>,
     voiceMessage: String?,
     onSelect: (Lang) -> Unit,
     onSpeak: (Lang) -> Unit,
     onContinue: () -> Unit,
 ) {
     val s = LocalStrings.current
-    var showAddable by remember { mutableStateOf(false) }
-    // English and Hindi always, plus languages the user added and the selected one; the rest sit under "Add a language".
-    val shown = AppLanguages.all.filter { it.lang in DEFAULT_LANGS || it.lang in added || it.lang == selected }
-    val addable = AppLanguages.all.filter { e -> shown.none { it.lang == e.lang } }
+    // Only languages the build and the backend both switch on (English and Hindi by default).
+    val shown = AppLanguages.offered(offered)
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp),
@@ -145,13 +148,13 @@ private fun LanguageContent(
             Text(s.home.chooseSubtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             SectionCard(contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp, horizontal = 8.dp)) {
-                (shown + if (showAddable) addable else emptyList()).forEach { e ->
+                shown.forEach { e ->
                     Row(
                         Modifier.fillMaxWidth()
                             .clip(MaterialTheme.shapes.small)
                             .selectable(
                                 selected = e.lang == selected, role = Role.RadioButton,
-                                onClick = { showAddable = false; onSelect(e.lang) },
+                                onClick = { onSelect(e.lang) },
                             )
                             .padding(start = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -163,13 +166,6 @@ private fun LanguageContent(
                             Text(e.englishName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         SpeakIconButton(s.home.speakLanguage(e.englishName), { onSpeak(e.lang) })
-                    }
-                }
-                if (!showAddable && addable.isNotEmpty()) {
-                    TextButton(onClick = { showAddable = true }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(s.home.addLanguage, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -184,6 +180,50 @@ private fun LanguageContent(
 
 // ---------------------------------------------------------------------------------------------------------------
 // 2. Home
+
+/** "Message from the control room": the text already in the person's language, a speaker button and a dismiss button. */
+@Composable
+private fun AnnouncementCardView(c: AnnouncementCard, onDismiss: (String) -> Unit, onSpeak: (AnnouncementCard) -> Unit) {
+    val r = LocalStrings.current.ready
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.secondaryContainer).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(r.announcementTitle, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.weight(1f).semantics { heading() })
+            IconButton(onClick = { onDismiss(c.announcementId) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = r.dismissAnnouncement, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+        Text(c.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(end = 12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onSpeak(c) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = r.hearAnnouncement, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+    }
+}
+
+/** The Home banner of an active warning: severity colour, headline, "Landfall in about N h" and a "Get ready" button. */
+@Composable
+private fun ReadyBanner(w: ReadyWarning, onGetReady: () -> Unit) {
+    val r = LocalStrings.current.ready
+    val level = ReadyView.level(w)
+    val (container, onContainer) = org.relay.app.ui.ready.levelColors(level)
+    val hours = ReadyView.landfallHours(w, System.currentTimeMillis() / 1000)
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(container).padding(16.dp)
+            .semantics(mergeDescendants = true) { contentDescription = r.bannerDescription(level, w.headline, hours) },
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(r.levelWord(level), style = MaterialTheme.typography.labelLarge, color = onContainer)
+        Text(w.headline, style = MaterialTheme.typography.titleMedium, color = onContainer)
+        if (hours != null) Text(r.landfallIn(hours), style = MaterialTheme.typography.bodyMedium, color = onContainer)
+        TextButton(onClick = onGetReady, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(r.getReady, style = MaterialTheme.typography.titleMedium, color = onContainer)
+        }
+    }
+}
 
 /** Bluetooth permission is explained once per app run, then asked; later visits to Home only start the mesh. */
 private var bluetoothExplainedThisRun = false
@@ -219,7 +259,28 @@ fun HomeScreen(nav: RelayNav) {
         )
     }
 
+    val ready by ReadyRepository.snapshot.collectAsStateWithLifecycle()
+    val held by AnnouncementRepository.held.collectAsStateWithLifecycle()
+    val http by AnnouncementRepository.http.collectAsStateWithLifecycle()
+    val dismissed by AnnouncementRepository.dismissed.collectAsStateWithLifecycle()
+    // recomputed every 30 s with `now`: the 10-minute English fallback and the 72 h end need no event to fire
+    val announcements = remember(held, http, dismissed, now, ready.district, settings.effectiveLanguage) { AnnouncementRepository.cards(System.currentTimeMillis()) }
+    val speaker = LocalSpeaker.current
+    val spokenIds = remember { mutableSetOf<String>() }
+    LaunchedEffect(announcements.map { it.announcementId }) {
+        // "Speak new messages from the control room aloud" (Settings → read aloud): once per message
+        if (settings.readAloud) announcements.firstOrNull { it.announcementId !in spokenIds }?.let { c ->
+            spokenIds += c.announcementId
+            speaker?.speak(c.text, c.lang)
+        }
+    }
     HomeContent(
+        announcements = announcements,
+        onDismissAnnouncement = { AnnouncementRepository.dismiss(it) },
+        onSpeakAnnouncement = { c -> speaker?.speak(c.text, c.lang) },
+        banner = ReadyView.activeWarning(ready.pack, System.currentTimeMillis() / 1000),
+        onGetReady = { nav.openReady() },
+        onShelters = { nav.openShelters() },
         area = settings.areaLabel.trim(),
         villager = villager,
         now = now,
@@ -237,6 +298,12 @@ fun HomeScreen(nav: RelayNav) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeContent(
+    announcements: List<AnnouncementCard>,
+    onDismissAnnouncement: (String) -> Unit,
+    onSpeakAnnouncement: (AnnouncementCard) -> Unit,
+    banner: ReadyWarning?,
+    onGetReady: () -> Unit,
+    onShelters: () -> Unit,
     area: String,
     villager: VillagerStatus,
     now: Long,
@@ -274,6 +341,12 @@ private fun HomeContent(
             }
         }
 
+        // Messages from the control room (newest first, at most 3, dismissible)
+        announcements.forEach { c -> key(c.announcementId) { AnnouncementCardView(c, onDismissAnnouncement, onSpeakAnnouncement) } }
+
+        // Cyclone warning banner (only while the stored pack has an active warning)
+        if (banner != null) ReadyBanner(banner, onGetReady)
+
         // Status card -> Network
         val title = c.villagerTitle(villager)
         val line = c.villagerLine(villager, now)
@@ -288,6 +361,17 @@ private fun HomeContent(
                     if (villager.kind == VillagerStatus.Kind.BLUETOOTH_OFF) {
                         TextButton(onClick = onTurnOnBluetooth) { Text(c.turnOn, style = MaterialTheme.typography.labelLarge) }
                     }
+                }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // Shelters (the nearest safe place; works from the stored list)
+        SectionCard(onClick = onShelters, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "${s.ready.sheltersRow}. ${s.ready.sheltersRowHelp}" }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.ready.sheltersRow, style = MaterialTheme.typography.titleMedium)
+                    Text(s.ready.sheltersRowHelp, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -409,6 +493,7 @@ private val demoStatus = VillagerStatus(VillagerStatus.Kind.REACHABLE, VillagerS
 
 @Composable
 private fun HomeDemo() = HomeContent(
+    announcements = emptyList(), onDismissAnnouncement = {}, onSpeakAnnouncement = {}, banner = null, onGetReady = {}, onShelters = {},
     area = "Ward 4, Puri district", villager = demoStatus, now = System.currentTimeMillis(), recent = demoNeeds.take(2),
     onStatusClick = {}, onTurnOnBluetooth = {}, onMic = {}, onType = {}, onSeeAll = {}, onOpenRequest = {}, onDeleteRequest = {},
 )
@@ -435,8 +520,8 @@ private fun RequestsEmptyPreview() = RelayPreview { RequestsContent(emptyList(),
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun LanguagePreview() = RelayPreview { LanguageContent(Lang.HI, emptyList(), "No Waray voice is installed on this phone.", {}, {}, {}) }
+private fun LanguagePreview() = RelayPreview { LanguageContent(Lang.HI, listOf(Lang.EN, Lang.HI), "No Hindi voice is installed on this phone.", {}, {}, {}) }
 
 @Preview(showBackground = true, heightDp = 900)
 @Composable
-private fun LanguageDarkPreview() = RelayPreview(dark = true) { LanguageContent(Lang.EN, listOf(Lang.OR), null, {}, {}, {}) }
+private fun LanguageDarkPreview() = RelayPreview(dark = true) { LanguageContent(Lang.EN, listOf(Lang.EN, Lang.HI), null, {}, {}, {}) }

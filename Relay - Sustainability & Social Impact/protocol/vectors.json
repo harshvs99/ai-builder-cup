@@ -517,7 +517,8 @@
     "need_v2_max_payload": 121,
     "need_v3_max_payload": 123,
     "loc_hint_payload": 31,
-    "broadcast_payload": 25
+    "broadcast_payload": 25,
+    "announcement_max_payload": 160
   },
   "answer_bank": [
     {
@@ -852,5 +853,145 @@
     "lat_out_of_range": "01a1a2a3a4a5a6a7a801006ab13b8000895441000000000000",
     "lon_out_of_range": "01a1a2a3a4a5a6a7a801006ab13b8000000000feed577f0000"
   },
-  "broadcast_ttl_s": 86400
+  "broadcast_ttl_s": 86400,
+  "announcement_vectors": [
+    {
+      "name": "announcement_en_active",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "en",
+        "district": "puri",
+        "status": "active",
+        "approved_at": 1790000000,
+        "expires_at": 0,
+        "text": "Cyclone shelters in Puri are open. Move now.",
+        "key": "d85f3ebec7a4b49f"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000223,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+      "frame_hex": "017607000001a0c4506cdf000041d4d4d4d4d4d4d4d4015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e"
+    },
+    {
+      "name": "announcement_hi_active_with_expiry",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "hi",
+        "district": "puri",
+        "status": "active",
+        "approved_at": 1790000000,
+        "expires_at": 1790086400,
+        "text": "पुरी में चक्रवात शरण स्थल खुले हैं। अभी जाइए।",
+        "key": "b7692563b86ff916"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000233,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610100006ab13b806ab28d0077e0a4aae0a581e0a4b0e0a58020e0a4aee0a587e0a48220e0a49ae0a495e0a58de0a4b0e0a4b5e0a4bee0a4a420e0a4b6e0a4b0e0a4a320e0a4b8e0a58de0a4a5e0a4b220e0a496e0a581e0a4b2e0a58720e0a4b9e0a588e0a482e0a5a420e0a485e0a4ade0a58020e0a49ce0a4bee0a487e0a48fe0a5a4",
+      "frame_hex": "017607000001a0c4506ce900008cd4d4d4d4d4d4d4d4015a5b5c5d5e5f60610100006ab13b806ab28d0077e0a4aae0a581e0a4b0e0a58020e0a4aee0a587e0a48220e0a49ae0a495e0a58de0a4b0e0a4b5e0a4bee0a4a420e0a4b6e0a4b0e0a4a320e0a4b8e0a58de0a4a5e0a4b220e0a496e0a581e0a4b2e0a58720e0a4b9e0a588e0a482e0a5a420e0a485e0a4ade0a58020e0a49ce0a4bee0a487e0a48fe0a5a4"
+    },
+    {
+      "name": "announcement_en_max_size_delhi",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "ffffffffffffff01",
+        "lang": "en",
+        "district": "delhi",
+        "status": "active",
+        "approved_at": 4294967295,
+        "expires_at": 4294967295,
+        "text": "Water supply stops from 14:00 today. Store water now. Water supply stops from 14:00 today. Store water now. Water supply stops from 14:00 t",
+        "key": "5682be328c729095"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 4,
+        "timestamp_ms": 1790000000243,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "01ffffffffffffff01000100ffffffffffffffff8b576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a30302074",
+      "frame_hex": "017604000001a0c4506cf30000a0a1a1a1a1a1a1a1a101ffffffffffffff01000100ffffffffffffffff8b576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a30302074"
+    },
+    {
+      "name": "announcement_en_withdrawn",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "en",
+        "district": "puri",
+        "status": "withdrawn",
+        "approved_at": 1790000000,
+        "expires_at": 0,
+        "text": "Cyclone shelters in Puri are open. Move now.",
+        "key": "3bc94bcb0152f640"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000253,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610000016ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+      "frame_hex": "017607000001a0c4506cfd000041d4d4d4d4d4d4d4d4015a5b5c5d5e5f60610000016ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e"
+    },
+    {
+      "name": "announcement_hi_withdrawn_empty_text",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "hi",
+        "district": "delhi",
+        "status": "withdrawn",
+        "approved_at": 1790000000,
+        "expires_at": 0,
+        "text": "",
+        "key": "aaa9f52977051bb6"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000263,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610101016ab13b800000000000",
+      "frame_hex": "017607000001a0c4506d07000015b2b2b2b2b2b2b2b2015a5b5c5d5e5f60610101016ab13b800000000000"
+    }
+  ],
+  "must_reject_announcement_payloads": {
+    "version_2": "025a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+    "too_short": "015a5b5c5d5e5f60610000006ab13b8000000000",
+    "trailing_byte": "015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e00",
+    "text_length_past_end": "015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f77",
+    "text_length_over_139": "015a5b5c5d5e5f60610000006ab13b80000000008c6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+    "lang_six": "015a5b5c5d5e5f60610600006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+    "status_two": "015a5b5c5d5e5f60610000026ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+    "invalid_utf8": "015a5b5c5d5e5f60610000006ab13b800000000002c328"
+  },
+  "announcement_lang_codes": {
+    "en": 0,
+    "hi": 1,
+    "or": 2,
+    "tl": 3,
+    "war": 4,
+    "ceb": 5
+  },
+  "announcement_district_codes": {
+    "puri": 0,
+    "delhi": 1
+  },
+  "announcement_ttl_s": 259200
 }

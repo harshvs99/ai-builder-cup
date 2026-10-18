@@ -83,7 +83,7 @@ struct TriageScreen: View {
 
     private var ctl: AskFlowController { nav.ensureFlow() }
     private var triage: TriageController { ctl.triage }
-    private var lang: Lang { model.settings.language }
+    private var lang: Lang { model.settings.effectiveLanguage }
     private var ui: TriageUi { triage.ui }
     private var voiceAvailable: Bool { model.isVoiceInputAvailable(for: lang) }
 

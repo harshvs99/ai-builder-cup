@@ -143,7 +143,53 @@ function propose(only) {  // one ticket, as the real API
 
 // Announcements: fake translations ("[hi] ...") so the review table has something to show.
 const announcements = [];
-const BC_LANGS = ['en', 'hi', 'or', 'tl', 'war'];
+let annSeq = 0;
+const nextSeq = () => (annSeq = Math.max(Date.now(), annSeq + 1));
+const LANG_CODES = ['en', 'hi', 'or', 'tl', 'war', 'ceb'];
+const DISTRICT_CODES = ['puri', 'delhi'];
+const LANG_REGISTRY = [['en', 'English', 'English', true], ['hi', 'Hindi', 'हिन्दी', true], ['or', 'Odia', 'ଓଡ଼ିଆ', false], ['tl', 'Filipino (Tagalog)', 'Filipino', false],
+  ['war', 'Waray', 'Winaray', false], ['ceb', 'Cebuano', 'Cebuano', false]];
+const ENABLED = (process.env.RELAY_LANGS ?? 'en,hi').split(',').map((c) => c.trim());
+const utf8 = (t) => Buffer.byteLength(t, 'utf8');
+// at most 139 UTF-8 bytes, cut on a character boundary, ending in "…" when cut (mirrors backend announcements.mesh_text)
+function meshText(text) {
+  text = text.split(/\s+/).filter(Boolean).join(' ');
+  if (utf8(text) <= 139) return text;
+  let cut = '';
+  for (const ch of text) { if (utf8(cut + ch) > 136) break; cut += ch; }
+  const sp = cut.lastIndexOf(' ');
+  if (sp >= (cut.length * 2) / 3) cut = cut.slice(0, sp);
+  return cut.trimEnd() + '…';
+}
+// SPEC 5.7 ANNOUNCEMENT payload
+function annPayload(row, lang, status) {
+  const text = Buffer.from(row.mesh_texts[lang], 'utf8');
+  const b = Buffer.alloc(20 + 1 + text.length);
+  b.writeUInt8(1, 0); Buffer.from(row.announcement_id, 'hex').copy(b, 1);
+  b.writeUInt8(LANG_CODES.indexOf(lang), 9); b.writeUInt8(DISTRICT_CODES.indexOf(row.district), 10); b.writeUInt8(status, 11);
+  b.writeUInt32BE(row.approved_at, 12); b.writeUInt32BE(0, 16); b.writeUInt8(text.length, 20); text.copy(b, 21);
+  return b.toString('base64');
+}
+// mirrors backend announcements.sync_payloads
+function annSync(cursor, district) {
+  const latest = Math.max(0, ...announcements.map((r) => Math.max(r.approved_seq ?? 0, r.withdrawn_seq ?? 0)));
+  if (cursor > latest) cursor = 0;
+  const events = [];
+  for (const r of announcements) {
+    if (!r.announcement_id || (district && r.district !== district) || now() - r.approved_at > 72 * 3600) continue;
+    if ((r.approved_seq ?? 0) > cursor && r.status === 'approved') events.push([r.approved_seq, r, 0]);
+    if ((r.withdrawn_seq ?? 0) > cursor) events.push([r.withdrawn_seq, r, 1]);
+  }
+  events.sort((a, b) => a[0] - b[0]);
+  const out = []; let next = cursor;
+  for (const [seq, r, status] of events) {
+    const frames = r.approved_langs.filter((l) => ENABLED.includes(l)).map((l) => annPayload(r, l, status));
+    if (out.length && out.length + frames.length > 50) break;
+    out.push(...frames); next = seq;
+  }
+  return [out, next];
+}
+const BC_LANGS = ['en', 'hi', 'or', 'tl', 'war'].filter((l) => ENABLED.includes(l)); // like the backend: enabled languages only
 const digits = (t) => (t.match(/\d+/g) ?? []).map(Number).sort((a, b) => a - b).join(',');
 function bcDraft(text, sourceLang) {
   const tr = {};
@@ -152,7 +198,7 @@ function bcDraft(text, sourceLang) {
     tr[l] = { text: t, back_translation: text, faithful: true, issues: '', checks_passed: true, status: 'ok' };
   }
   // one language is made to look suspicious so the needs-review path can be tried
-  tr.war = { ...tr.war, text: `[war] ${text} 99`, faithful: false, checks_passed: false, status: 'needs_review', issues: 'numbers differ from the source' };
+  if (tr.war) tr.war = { ...tr.war, text: `[war] ${text} 99`, faithful: false, checks_passed: false, status: 'needs_review', issues: 'numbers differ from the source' };
   return tr;
 }
 function readBody(req, cb) {
@@ -307,6 +353,30 @@ const SHELTERS = {
   ],
 };
 const shelterView = (s) => ({ ...s, name_en: s.name, demo: true });
+const nearestDistrict = (lat, lon) => {
+  if (lat == null || lon == null || lat === '' || lon === '' || Number.isNaN(Number(lat)) || Number.isNaN(Number(lon))) return null;
+  const C = { puri: [19.81, 85.83], delhi: [28.614, 77.209] };
+  const dist = (id) => (Number(lat) - C[id][0]) ** 2 + ((Number(lon) - C[id][1]) * Math.cos((Number(lat) * Math.PI) / 180)) ** 2;
+  return DISTRICT_IDS.reduce((a, b) => (dist(b) < dist(a) ? b : a));
+};
+const activeWarning = (d) => [...warnings.values()].filter((w) => w.district === d && warningView(w).active).sort((a, b) => b.id - a.id)[0] ?? null;
+const CHECKLIST = ['ID papers, medicines and a torch in one bag', '3 days of drinking water and dry food', 'Phone and power bank charged',
+  'Switch off electricity and gas before you leave', 'Know your shelter and the road to it'];
+// The pack as GET /v1/ready/pack serves it. A published shelter list wins over the demo one (shelters_source "published").
+function readyPack(d, lang) {
+  const list = [...shelterLists.values()].find((l) => l.district === d && l.status === 'published');
+  const shelters = list
+    ? list.entries.filter((e) => e.verified && e.lat != null && e.lon != null).map((e) => ({ id: e.id, name: e.name_local || e.name, name_en: e.name, kind: e.kind,
+        lat: e.lat, lon: e.lon, capacity: e.capacity, facilities: [], block: e.block, demo: false }))
+    : SHELTERS[d].map(shelterView);
+  const w = activeWarning(d);
+  const content = { district: d, lang, warning: w ? { id: w.id, source: w.source, severity: w.severity, headline: w.headline, issued_at: w.issued_at,
+      expected_landfall_at: w.expected_landfall_at, expires_at: w.expires_at } : null,
+    shelters, shelters_source: list ? 'published' : 'demo', shelters_published_at: list?.published_at ?? null, checklist: CHECKLIST, checklist_lang: 'en' };
+  // djb2 over the content: changes exactly when the warning, the shelters or the checklist do
+  let h = 5381; for (const c of JSON.stringify(content)) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0;
+  return { ...content, generated_at: now(), version: h.toString(16).padStart(8, '0') + '00000000' };
+}
 // Shelter lists: discover returns 3 fake entries (one without coordinates); publish makes them the district's list.
 /** @type {Map<number, any>} */
 const shelterLists = new Map();
@@ -408,9 +478,15 @@ function readyRoute(req, res, path, url) {
     w.cancelled_at ??= now();
     return send(res, 200, warningView(w));
   }
-  if (req.method === 'POST' && path === '/v1/ready/plan/preview') {
+  if (req.method === 'GET' && path === '/v1/ready/pack') {
+    const d = url.searchParams.get('district') ?? nearestDistrict(url.searchParams.get('lat'), url.searchParams.get('lon'));
+    if (!d) return send(res, 422, { detail: 'give district, or lat and lon' });
+    if (!SHELTERS[d]) return send(res, 404, { detail: `unknown district '${d}'` });
+    return send(res, 200, readyPack(d, url.searchParams.get('lang') ?? 'en'));
+  }
+  if (req.method === 'POST' && (path === '/v1/ready/plan/preview' || path === '/v1/ready/plan')) {
     return readBody(req, (b) => {
-      const district = b?.district ?? 'puri';
+      const district = b?.district ?? nearestDistrict(b?.lat, b?.lon) ?? 'puri';
       if (!SHELTERS[district]) return send(res, 404, { detail: 'unknown district' });
       const h = b.household ?? {};
       const near = SHELTERS[district].filter((s) => s.kind !== 'hospital').slice(0, 2);
@@ -424,7 +500,8 @@ function readyRoute(req, res, path, url) {
         'Charge your phone and power bank.',
         'Before you leave, switch off electricity and gas.',
       ];
-      send(res, 200, { plan_id: hex(16), lang: b.lang ?? 'en', steps_lang: 'en', district, steps, source: 'template', warning_id: null,
+      const w = activeWarning(district);
+      send(res, 200, { plan_id: hex(16), lang: b.lang ?? 'en', steps_lang: 'en', district, steps, source: 'template', warning_id: w?.id ?? null,
         nearest_shelters: near.map((s, i) => ({ id: s.id, name: s.name, distance_km: 0.6 + i * 0.9 })), audio_url: null });
     });
   }
@@ -494,6 +571,39 @@ const server = http.createServer((req, res) => {
     for (const t of tickets.values()) if (t.status === 'OPEN') open_by_category[t.category] = (open_by_category[t.category] ?? 0) + 1;
     return send(res, 200, { open_by_category, gateways_online: GATEWAYS.length - 1, tickets: tickets.size });
   }
+  if (req.method === 'GET' && path === '/v1/languages') {
+    return send(res, 200, LANG_REGISTRY.map(([code, english_name, native_name, reviewed]) => ({ code, english_name, native_name, enabled: ENABLED.includes(code), reviewed })));
+  }
+  if (req.method === 'GET' && path === '/v1/announcements/active') {
+    const d = url.searchParams.get('district') ?? '';
+    if (!DISTRICT_IDS.includes(d)) return send(res, 422, { detail: `district must be one of ${JSON.stringify(DISTRICT_IDS)}` });
+    return send(res, 200, { announcements: announcements.filter((r) => r.district === d && r.status === 'approved').reverse().map((r) => ({
+      id: r.id, announcement_id: r.announcement_id, district: r.district, source_lang: r.source_lang, created_at: r.created_at, approved_at: r.approved_at,
+      texts: Object.fromEntries(r.approved_langs.filter((l) => ENABLED.includes(l)).map((l) => [l, r.translations[l].text])) })) });
+  }
+  if (req.method === 'GET' && path === '/v1/public/shelters') {
+    const d = url.searchParams.get('district') ?? '';
+    if (!DISTRICT_IDS.includes(d)) return send(res, 404, { detail: `unknown district '${d}'` });
+    const list = [...shelterLists.values()].find((l) => l.district === d && l.status === 'published');
+    const items = list ? list.entries.filter((e) => e.verified && e.lat != null && e.lon != null) : [];
+    if (!items.length) return send(res, 404, { detail: `no published shelter list for ${d}` });
+    return send(res, 200, { district: d, published_at: list.published_at,
+      shelters: items.map((e) => ({ id: e.id, name: e.name, name_local: e.name_local, kind: e.kind, address: e.address, lat: e.lat, lon: e.lon, capacity: e.capacity, source_url: e.source_url })),
+      source_note: 'Mock: verified by the control room; confirm with local officials before travelling.' });
+  }
+  if (req.method === 'POST' && path === '/v1/sync') {
+    return readBody(req, (b) => {
+      if (!b || !/^[0-9a-f]{16}$/i.test(b.gateway_node ?? '')) return send(res, 422, { detail: 'gateway_node must be 16 hex characters' });
+      gatewaySeen.set(b.gateway_node.toLowerCase(), now());
+      // The mock does not decode NEED frames: it only counts them. ACKs come from tickets in real backends.
+      const out = { accepted: 0, duplicates: 0, rejected: (b.frames ?? []).length, acks: [], ack_cursor: b.ack_cursor ?? 0 };
+      if (b.district !== undefined || b.announcement_cursor !== undefined) {
+        const [payloads, cursor] = annSync(b.announcement_cursor ?? 0, DISTRICT_IDS.includes(b.district) ? b.district : undefined);
+        out.announcements = payloads; out.announcement_cursor = cursor;
+      }
+      send(res, 200, out);
+    });
+  }
   if (path === '/v1/announcements' && req.method === 'GET') return send(res, 200, { announcements: [...announcements].reverse() });
   if (path === '/v1/announcements' && req.method === 'POST') {
     return readBody(req, (b) => {
@@ -509,7 +619,11 @@ const server = http.createServer((req, res) => {
   if (bm && req.method === 'POST') {
     const row = announcements.find((x) => x.id === Number(bm[1]));
     if (!row) return send(res, 404, { detail: 'announcement not found' });
-    if (bm[2] === 'withdraw') { row.status = 'withdrawn'; return send(res, 200, row); }
+    if (bm[2] === 'withdraw') {
+      if (row.status === 'approved') row.withdrawn_seq = nextSeq();
+      row.status = 'withdrawn';
+      return send(res, 200, row);
+    }
     return readBody(req, (b) => {
       if (row.status !== 'draft') return send(res, 409, { detail: `announcement is ${row.status}, not a draft` });
       const edits = b?.edits ?? {};
@@ -521,6 +635,9 @@ const server = http.createServer((req, res) => {
       row.approved_langs = BC_LANGS.filter((l) => langs.includes(l) || l in edits);
       row.status = 'approved';
       row.approved_at = now();
+      row.announcement_id = hex(16);
+      row.mesh_texts = Object.fromEntries(row.approved_langs.map((l) => [l, meshText(row.translations[l].text)]));
+      row.approved_seq = nextSeq();
       send(res, 200, row);
     });
   }

@@ -1,6 +1,6 @@
 # Relay apps, contract v2: languages, Ready mode, shelters, announcements
 
-Status: **ready to build**. Audience: the engineer (or agent) who implements this in `android/` and `ios/`.
+Status: **built on `apps/contract-v2`, device acceptance (section 7) pending**. Audience: the engineer (or agent) who implements this in `android/` and `ios/`.
 The backend side is done on branch `claude/inspiring-johnson-ljk8c1` unless a section says otherwise.
 The existing specs still hold: [android-redesign.md](android-redesign.md) (screens, copy, visual system),
 [ios-build-plan.md](ios-build-plan.md) (iOS differences), [protocol/SPEC.md](../../protocol/SPEC.md) (wire format).
@@ -166,7 +166,7 @@ size field
   when no frame in the UI language exists for that `announcement_id` after 10 minutes, the `en` one.
 - **Display:** a "Message from the control room" card at the top of Home (newest first, max 3, dismissible), a
   notification on first receipt, a speaker button (on-device TTS). WITHDRAWN removes the card and shows nothing.
-- `protocol/SPEC.md` gets a §5.6 for this frame and `protocol/vectors.json` gets vectors (backend task, §8).
+- `protocol/SPEC.md` §5.7 specifies this frame and `protocol/vectors.json` gets vectors (backend task, §8).
 
 ## 6. What stays the same
 
@@ -191,7 +191,7 @@ screens. Gemma is not part of this contract (rule-based intake stays).
 
 ## 8. Backend work this contract still needs
 
-1. ANNOUNCEMENT mesh delivery: `announcement_id` and `mesh_text` (≤ 139 bytes) per approved language at approval, the
+1. **Done on `apps/contract-v2`.** ANNOUNCEMENT mesh delivery: `announcement_id` and `mesh_text` (≤ 139 bytes) per approved language at approval, the
    `/v1/sync` `district` / `announcement_cursor` / `announcements` fields, SPEC §5.7, codec and golden vectors.
 2. `GET /v1/languages`, and English + Hindi as the only enabled languages (in progress).
 3. Published shelter lists, `shelters_source` in the pack and `GET /v1/public/shelters` (in progress).
