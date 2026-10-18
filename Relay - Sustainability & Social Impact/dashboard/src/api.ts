@@ -1,6 +1,6 @@
 import { loadOperatorKey } from './lib/operatorKey';
 import type {
-  Broadcast, CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, Sitrep, Stats, Team, Ticket,
+  Broadcast, CapImportResult, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, ShelterEntry, ShelterList, ShelterPublishResult, Sitrep, Stats, Team, Ticket,
 } from './types';
 
 export class ApiError extends Error {
@@ -127,6 +127,23 @@ export function createClient(base: string, operatorKey?: string | null) {
     async listShelters(district: string, signal?: AbortSignal): Promise<ReadyShelter[]> {
       const body = await request<{ shelters?: ReadyShelter[] }>(`/v1/ready/shelters?district=${encodeURIComponent(district)}`, { signal });
       return Array.isArray(body?.shelters) ? body.shelters : [];
+    },
+    async listShelterLists(district: string, signal?: AbortSignal): Promise<ShelterList[]> {
+      const body = await request<{ lists?: ShelterList[] }>(`/v1/ready/shelter-lists?district=${encodeURIComponent(district)}`, { signal });
+      return Array.isArray(body?.lists) ? body.lists : [];
+    },
+    /** Gemini + Google Search drafts the district's official shelter list (slow: up to a minute). */
+    discoverShelters(district: string): Promise<ShelterList> {
+      return request<ShelterList>('/v1/ready/shelter-lists/discover', post({ district }));
+    },
+    createShelterList(district: string, entries: Partial<ShelterEntry>[] = []): Promise<ShelterList> {
+      return request<ShelterList>('/v1/ready/shelter-lists', post({ district, entries }));
+    },
+    saveShelterList(id: number, entries: ShelterEntry[]): Promise<ShelterList> {
+      return request<ShelterList>(`/v1/ready/shelter-lists/${id}`, { ...post({ entries }), method: 'PATCH' });
+    },
+    publishShelterList(id: number, note = ''): Promise<ShelterPublishResult> {
+      return request<ShelterPublishResult>(`/v1/ready/shelter-lists/${id}/publish`, post({ note }));
     },
     previewPlan(body: PlanRequest): Promise<ReadyPlan> {
       return request<ReadyPlan>('/v1/ready/plan/preview', post(body));

@@ -55,6 +55,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GEMINI_MODEL` | `gemini-3.8-flash` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `gemini-pro-latest` | model that writes the sitrep prose; when its call fails the sitrep retries on `GEMINI_MODEL`, then falls back to templates |
 | `BROADCAST_GEMINI_MODEL` | `GEMINI_MODEL` | model that translates broadcasts into the five app languages and, in a separate call, checks each translation against the source |
+| `SHELTER_GEMINI_MODEL` | `gemini-3.8-flash` | model for the Google Search-grounded shelter list discovery (`POST /v1/ready/shelter-lists/discover`, 60 s timeout); no Gemini credentials = 503, enter the list by hand |
 | `READY_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the Ready-mode household plan (text validated, else template); no Gemini credentials = templates |
 | `RELAY_TTS_MODEL` | unset | enables server-side speech for Ready plans (e.g. `gemini-2.5-flash-preview-tts`, API key or Vertex). Unset = `audio_url` is null and phones use on-device TTS. `RELAY_TTS_VOICE` (default `Kore`) picks the prebuilt voice |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
@@ -203,7 +204,22 @@ Phones still have signal before landfall, so this is a plain HTTPS fetch that ph
 - `GET /v1/ready/plan/{plan_id}/audio` (device key): `audio/wav` (16-bit mono 24 kHz) when `RELAY_TTS_MODEL` is set; otherwise 404
   and phones read the plan with on-device TextToSpeech. Odia and Filipino are preview languages in Gemini TTS and Waray is likely
   unsupported (no `audio_url`, device TTS).
-- **The shelter lists are placeholders.** `app/data/shelters_puri.json` and `shelters_delhi.json` are invented, every entry has
+- **Shelter lists (Discover, verify, publish)** (`app/shelters.py`), all operator unless noted:
+  `POST /v1/ready/shelter-lists/discover` `{district}` asks Gemini with the Google Search tool for the district disaster management
+  authority's shelter list and stores a **draft** (502 if the model call fails, 503 without Gemini credentials);
+  `POST /v1/ready/shelter-lists` `{district, entries}` makes a draft by hand; `GET /v1/ready/shelter-lists?district=`;
+  `PATCH /v1/ready/shelter-lists/{id}` `{entries}` replaces a draft's entries (re-validated; officers set lat/lon, kind, capacity, `verified`);
+  `POST /v1/ready/shelter-lists/{id}/publish` (422 unless an entry is verified and has in-district coordinates; only those are published,
+  the rest are returned in `skipped`; the district's previous published list is archived).
+  `GET /v1/public/shelters?district=` (**no auth**) is the published, verified list `{district, published_at, shelters[], source_note}` (404 before any publish).
+  Once a list is published, `ready.shelters_for` (pack, plans, `GET /v1/ready/shelters`) uses it instead of the demo files; the pack carries
+  `shelters_source` ("published" | "demo") and `shelters_published_at`.
+  Model output is untrusted: coordinates outside the district box are dropped, links not among the grounding sources are flagged
+  `source_unconfirmed`, duplicates dropped, every entry starts `verified: false`. **Search Suggestions** (`search_suggestions_html`) must be
+  displayed wherever grounded results are shown (the dashboard renders them in a sandboxed iframe). Search-grounded results must be reviewed
+  against the authority's own document before publishing; the officer who ticks Verified is accountable. Check the Gemini API terms on
+  storing and redistributing grounded results: published entries are meant to be the district's own verified data. Google Maps grounding is not used.
+- **The shelter lists in `app/data` are placeholders.** `app/data/shelters_puri.json` and `shelters_delhi.json` are invented, every entry has
   `"demo": true`. Replace them with the official lists (OSDMA multipurpose cyclone shelter list for Puri, DDMA for Delhi) before a pilot.
   The Hindi and Odia plan and checklist texts are first drafts pending native-speaker review.
 

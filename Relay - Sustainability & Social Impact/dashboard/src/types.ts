@@ -260,3 +260,49 @@ export interface ReadyPlan {
   nearest_shelters: { id: string; name: string; distance_km: number }[];
   audio_url: string | null;
 }
+
+export type ShelterEntryKind = ShelterKind | 'other';
+
+/** One row of a shelter list draft (backend `app/shelters.py`). The model's text is data; `issues` come from the server's checks. */
+export interface ShelterEntry {
+  id: string;
+  name: string;
+  name_local: string | null;
+  kind: ShelterEntryKind;
+  address: string;
+  block: string | null;
+  capacity: number | null;
+  lat: number | null;
+  lon: number | null;
+  coords_from: 'source' | 'estimate' | 'officer' | 'none';
+  source_url: string | null;
+  verified: boolean;
+  issues: string[];
+}
+
+export interface ShelterSource {
+  uri: string;
+  title: string;
+}
+
+export interface ShelterList {
+  id: number;
+  district: string;
+  status: 'draft' | 'published' | 'archived';
+  created_at: number;
+  entries: ShelterEntry[];
+  sources: ShelterSource[];
+  /** Google's rendered Search Suggestions; must be shown wherever grounded results are shown. */
+  search_suggestions_html: string;
+  model: string | null;
+  notes: string[];
+  origin: 'gemini' | 'manual';
+  published_at: number | null;
+  published_by_note: string | null;
+}
+
+export interface ShelterPublishResult {
+  list: ShelterList;
+  published: number;
+  skipped: { id: string; name: string; reason: string }[];
+}

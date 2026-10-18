@@ -294,6 +294,21 @@ class Store(Protocol):
         """Set ``cancelled_at`` (kept if already set) and return the warning; None when unknown."""
         ...
 
+    # ------------------------------------------------------------------ shelter lists (see app/shelters.py)
+    def add_shelter_list(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Store a shelter list (without ``id``, which is assigned: 1, 2, ...) and return it."""
+        ...
+
+    def get_shelter_list(self, list_id: int) -> dict[str, Any] | None: ...
+
+    def update_shelter_list(self, list_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge top-level ``fields`` into the list; returns it, or None if it does not exist."""
+        ...
+
+    def list_shelter_lists(self, district: str | None = None) -> list[dict[str, Any]]:
+        """Newest first, optionally only one district's."""
+        ...
+
     # ------------------------------------------------------------------ acks
     def clamp_ack_cursor(self, cursor: int) -> int:
         """A cursor beyond the newest ack sequence means the store was reset: treat as 0."""

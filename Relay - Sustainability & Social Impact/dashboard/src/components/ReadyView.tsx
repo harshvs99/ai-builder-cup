@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useReady } from '../hooks';
 import { KIND_LABEL, PLAN_LANGS, SEVERITY_LABEL, localInputToUnix, whenLabel } from '../lib/ready';
+import { ShelterListPanel } from './ShelterListPanel';
 import type { CapImportResult, Household, NewWarning, ReadyPlan, ReadyWarning, WarningSeverity, WarningSource } from '../types';
 
 const SOURCES: WarningSource[] = ['IMD', 'PAGASA', 'NDMA', 'manual'];
@@ -242,6 +243,10 @@ export function ReadyView({ scope, districtId }: { scope: string; districtId: st
                 </tbody>
               </table>
             )}
+          </div>
+          <div className="card">
+            <h2>Shelter list</h2>
+            <ShelterListPanel districtId={districtId} />
           </div>
           <div className="card">
             <h2>Preview a household plan</h2>

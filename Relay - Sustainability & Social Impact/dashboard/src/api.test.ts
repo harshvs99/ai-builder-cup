@@ -54,6 +54,23 @@ describe('api client', () => {
     expect(f.mock.calls[3]?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Operator-Key': 'k1' } });
   });
 
+  it('talks to the shelter list endpoints', async () => {
+    const f = vi.fn().mockImplementation(async () => json({ lists: [], id: 3, published: 1, skipped: [] }));
+    vi.stubGlobal('fetch', f);
+    const c = createClient('http://x', 'k1');
+    expect(await c.listShelterLists('puri')).toEqual([]);
+    await c.discoverShelters('puri');
+    await c.saveShelterList(3, []);
+    await c.publishShelterList(3, 'checked');
+    expect(f.mock.calls.map((x) => [x[0], x[1]?.method])).toEqual([
+      ['http://x/v1/ready/shelter-lists?district=puri', undefined],
+      ['http://x/v1/ready/shelter-lists/discover', 'POST'],
+      ['http://x/v1/ready/shelter-lists/3', 'PATCH'],
+      ['http://x/v1/ready/shelter-lists/3/publish', 'POST'],
+    ]);
+    expect(f.mock.calls[2]?.[1]?.headers).toMatchObject({ 'X-Operator-Key': 'k1' });
+  });
+
   it('wraps network failures as ApiError(status 0)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     const err = await createClient('http://x').getStats().catch((e) => e);
