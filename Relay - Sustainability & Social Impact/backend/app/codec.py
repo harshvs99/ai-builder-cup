@@ -1,4 +1,4 @@
-"""Relay mesh wire codec (protocol/SPEC.md v1, sections 3 and 5).
+"""Relay mesh wire codec (protocol/SPEC.md, sections 3 and 5; NEED payload v1 and v2).
 
 Strict by design: every decoder raises ``CodecError`` (and nothing else) on any input that
 the spec says to drop. Callers at a trust boundary (``/v1/sync``) catch ``CodecError`` and
@@ -15,6 +15,8 @@ import struct
 from dataclasses import dataclass
 
 PROTOCOL_VERSION = 1
+NEED_VERSION_ANSWERS = 2  # NEED payload_version 2 = v1 layout + 3 answer bytes (SPEC 5.1)
+ANSWER_SLOTS = 3
 
 TYPE_NEED = 0x70
 TYPE_ACK = 0x71
@@ -49,6 +51,21 @@ MAX_LANDMARK = 24
 MAX_SUMMARY = 40
 MAX_ACK_TEXT = 112
 
+# Intake question bank (SPEC 5.1): id -> (key, {answer key: wire value}). Mirrors the Kotlin QuestionBank;
+# both are checked against ``answer_bank`` in protocol/vectors.json. Ids and values are never renumbered.
+_YNU = {"unknown": 0, "yes": 1, "no": 2}
+QUESTION_BANK: dict[int, tuple[str, dict[str, int]]] = {
+    1: ("conscious", _YNU),
+    2: ("road_reachable", _YNU),
+    3: ("water_rising", _YNU),
+    4: ("roof_or_ground", {"unknown": 0, "roof": 1, "ground": 2}),
+    5: ("children_or_elderly", _YNU),
+    6: ("how_long", {"unknown": 0, "today": 1, "1-2 days": 2, "3+ days": 3}),
+    7: ("house_damaged", _YNU),
+    8: ("last_seen_today", _YNU),
+}
+_QUESTION_IDS = {key: qid for qid, (key, _) in QUESTION_BANK.items()}
+
 _NEED_FIXED = struct.Struct(">B8s8sIBBBBiiBB")  # 35 bytes
 _ACK_FIXED = struct.Struct(">B8s8s8sIBH")  # 32 bytes (+1 length byte for text)
 _HELLO = struct.Struct(">B8sBBH")
@@ -81,6 +98,26 @@ def truncate_utf8(s: str, limit: int) -> bytes:
             return b
         except UnicodeDecodeError:
             b = b[:-1]
+
+
+def answers_to_json(answers: tuple[tuple[int, int], ...]) -> dict[str, str]:
+    """(question id, value) pairs -> {question key: answer key}, e.g. {"conscious": "no"}."""
+    out: dict[str, str] = {}
+    for qid, value in answers:
+        key, options = QUESTION_BANK[qid]
+        out[key] = next(k for k, v in options.items() if v == value)
+    return out
+
+
+def answers_from_json(d: dict[str, str]) -> tuple[tuple[int, int], ...]:
+    """Inverse of ``answers_to_json``; raises CodecError for a key or value outside the bank."""
+    out = []
+    for key, answer in d.items():
+        qid = _QUESTION_IDS.get(key)
+        if qid is None or answer not in QUESTION_BANK[qid][1]:
+            raise CodecError(f"unknown answer {key}={answer!r}")
+        out.append((qid, QUESTION_BANK[qid][1][answer]))
+    return tuple(out)
 
 
 def _lp(s: str, limit: int) -> bytes:
@@ -226,6 +263,8 @@ class Need:
     item: str
     landmark: str
     summary: str
+    # (question id, answer value) pairs, at most 3; empty = encoded as a v1 payload
+    answers: tuple[tuple[int, int], ...] = ()
 
     @classmethod
     def make(cls, *, lat: float, lon: float, **kw) -> "Need":
@@ -257,14 +296,23 @@ def encode_need(n: Need) -> bytes:
         raise CodecError("loc_acc out of range")
     if not (isinstance(n.lang, int) and 0 <= n.lang <= 5):
         raise CodecError("lang out of range")
+    answers = tuple(n.answers)
+    if len(answers) > ANSWER_SLOTS:
+        raise CodecError("too many answers")
+    for qid, value in answers:
+        if qid not in QUESTION_BANK or value not in QUESTION_BANK[qid][1].values():
+            raise CodecError("unknown question id or answer value")
+    if len({q for q, _ in answers}) != len(answers):
+        raise CodecError("duplicate question id")
     return (
         _NEED_FIXED.pack(
-            PROTOCOL_VERSION, n.msg_id, n.origin_node, n.created_at, n.category, n.urgency,
+            NEED_VERSION_ANSWERS if answers else PROTOCOL_VERSION, n.msg_id, n.origin_node, n.created_at, n.category, n.urgency,
             n.people, n.vuln_flags, n.lat_e5, n.lon_e5, n.loc_acc, n.lang,
         )
         + _lp(n.item, MAX_ITEM)
         + _lp(n.landmark, MAX_LANDMARK)
         + _lp(n.summary, MAX_SUMMARY)
+        + (bytes([(q << 3) | v for q, v in answers] + [0] * (ANSWER_SLOTS - len(answers))) if answers else b"")
     )
 
 
@@ -274,7 +322,7 @@ def decode_need(payload: bytes) -> Need:
         raise CodecError("NEED payload too short")
     (ver, msg_id, origin, created_at, category, urgency, people, vuln, lat_e5, lon_e5,
      loc_acc, lang) = _NEED_FIXED.unpack_from(payload, 0)
-    if ver != PROTOCOL_VERSION:
+    if ver not in (PROTOCOL_VERSION, NEED_VERSION_ANSWERS):
         raise CodecError("unsupported NEED payload version")
     if category > 6 or urgency > 3 or loc_acc > 5 or lang > 5:
         raise CodecError("enum field out of range")
@@ -282,10 +330,27 @@ def decode_need(payload: bytes) -> Need:
     item, off = _read_lp(payload, off, MAX_ITEM)
     landmark, off = _read_lp(payload, off, MAX_LANDMARK)
     summary, off = _read_lp(payload, off, MAX_SUMMARY)
+    answers: list[tuple[int, int]] = []
+    if ver == NEED_VERSION_ANSWERS:
+        if len(payload) - off != ANSWER_SLOTS:
+            raise CodecError("v2 NEED needs exactly 3 answer bytes")
+        empty = False
+        for b in payload[off:off + ANSWER_SLOTS]:
+            off += 1
+            if b == 0:
+                empty = True
+                continue
+            qid, value = b >> 3, b & 7
+            if empty or qid not in QUESTION_BANK or value not in QUESTION_BANK[qid][1].values() \
+                    or any(q == qid for q, _ in answers):
+                raise CodecError("invalid answer byte")
+            answers.append((qid, value))
+        if not answers:
+            raise CodecError("v2 NEED without answers")
     if off != len(payload):
         raise CodecError("trailing bytes in NEED payload")
     return Need(msg_id, origin, created_at, category, urgency, people, vuln, lat_e5, lon_e5,
-                loc_acc, lang, item, landmark, summary)
+                loc_acc, lang, item, landmark, summary, tuple(answers))
 
 
 # --------------------------------------------------------------------------------------

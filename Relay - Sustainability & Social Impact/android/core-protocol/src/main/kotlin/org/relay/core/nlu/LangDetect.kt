@@ -21,7 +21,8 @@ internal object LangDetect {
         "achhanti", "achhu", "pakhare", "nikate", "ku", "kana", "kemiti", "sahajya", "sahayya", "ausadha", "aushadha",
         "oushadha", "bhasi", "banya", "phasi", "phasichhanti", "phasichanti", "ghara", "gote", "duita", "jane", "pua",
         "jhia", "bapa", "bou", "aji", "bhoka", "khaibaku", "kheibaku", "paibaku", "diantu", "bachantu", "gala",
-        "bhasigala", "pani", "ra", "nahi", "nahin", "bipad", "kichhi")
+        "bhasigala", "pani", "ra", "nahi", "nahin", "bipad", "kichhi", "pina", "dina", "hela", "pilamane", "bhokila",
+        "bhokilaa", "nikhoj", "upare", "aashray", "ashray", "chhata", "badhuchhi", "kamudichhi", "sapa", "pua", "phasiachhu")
     private val tlStrong = set("po", "kailangan", "namin", "tulong", "malapit", "nasa", "hindi", "ako", "pakitulong", "naipit",
         "nakulong", "baha", "sugatan", "gamot", "pagkain", "kasi", "dito", "ng", "mga", "ay", "paki", "ang", "walang",
         "lola", "lolo", "nanay", "tatay", "bata", "buntis", "kami", "sa", "may", "na", "tubig", "gutom", "ospital",

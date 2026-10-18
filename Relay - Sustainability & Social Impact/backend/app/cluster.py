@@ -20,7 +20,7 @@ import math
 import re
 from typing import Any
 
-from .codec import CATEGORY_NAMES, LANG_CODES, Need
+from .codec import CATEGORY_NAMES, LANG_CODES, Need, answers_to_json
 
 MAX_DISTANCE_M = 200.0
 MAX_AGE_WINDOW_S = 6 * 3600
@@ -61,7 +61,7 @@ def find_match(candidates: list[dict[str, Any]], need: Need) -> dict[str, Any] |
 
 
 def new_ticket_fields(need: Need, hops: int, reported_at: int, now: int) -> dict[str, Any]:
-    return {
+    fields = {
         "category": CATEGORY_NAMES[need.category],
         "item": need.item,
         "landmark": need.landmark,
@@ -78,6 +78,9 @@ def new_ticket_fields(need: Need, hops: int, reported_at: int, now: int) -> dict
         "created_at": now,
         "updated_at": now,
     }
+    if need.answers:
+        fields["answers"] = answers_to_json(need.answers)
+    return fields
 
 
 def merge_fields(ticket: dict[str, Any], need: Need, hops: int, reported_at: int, now: int) -> dict[str, Any]:
@@ -101,4 +104,9 @@ def merge_fields(ticket: dict[str, Any], need: Need, hops: int, reported_at: int
         upd["summary"] = need.summary
     elif not ticket["summary"] and need.summary:
         upd["summary"] = need.summary
+    # intake answers: the first report's stand; a later report only fills questions the ticket lacks
+    have = ticket.get("answers") or {}
+    extra = {k: v for k, v in answers_to_json(need.answers).items() if k not in have}
+    if extra:
+        upd["answers"] = {**have, **extra}
     return upd

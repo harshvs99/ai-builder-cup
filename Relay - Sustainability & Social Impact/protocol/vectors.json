@@ -145,6 +145,153 @@
       },
       "payload_hex": "deadbeef",
       "frame_hex": "017e05000001a0c4506c7b020004a1a1a1a1a1a1a1a1deadbeef000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    },
+    {
+      "name": "need_v2_two_answers",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "0102030405060708",
+        "origin_node": "a1a1a1a1a1a1a1a1",
+        "created_at": 1790000100,
+        "category": 0,
+        "urgency": 3,
+        "people": 2,
+        "vuln_flags": 8,
+        "lat": 20.296123,
+        "lon": 85.824509,
+        "loc_acc": 1,
+        "lang": 1,
+        "item": "doctor",
+        "landmark": "school",
+        "summary": "father unconscious, needs doctor",
+        "lat_e5": 2029612,
+        "lon_e5": 8582451,
+        "answers": [
+          {
+            "id": 1,
+            "question": "conscious",
+            "value": 2,
+            "answer": "no"
+          },
+          {
+            "id": 2,
+            "question": "road_reachable",
+            "value": 1,
+            "answer": "yes"
+          }
+        ]
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 7,
+        "timestamp_ms": 1790000000143,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a1100",
+      "frame_hex": "017007000001a0c4506c8f000055a1a1a1a1a1a1a1a1020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a1100"
+    },
+    {
+      "name": "need_v2_three_answers",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "a0a1a2a3a4a5a6a7",
+        "origin_node": "b2b2b2b2b2b2b2b2",
+        "created_at": 1790000200,
+        "category": 2,
+        "urgency": 1,
+        "people": 12,
+        "vuln_flags": 3,
+        "lat": -5e-06,
+        "lon": 179.999995,
+        "loc_acc": 3,
+        "lang": 2,
+        "item": "ପାଣି",
+        "landmark": "ସ୍କୁଲ",
+        "summary": "no drinking water",
+        "lat_e5": -1,
+        "lon_e5": 18000000,
+        "answers": [
+          {
+            "id": 5,
+            "question": "children_or_elderly",
+            "value": 1,
+            "answer": "yes"
+          },
+          {
+            "id": 6,
+            "question": "how_long",
+            "value": 3,
+            "answer": "3+ days"
+          },
+          {
+            "id": 7,
+            "question": "house_damaged",
+            "value": 2,
+            "answer": "no"
+          }
+        ]
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 5,
+        "timestamp_ms": 1790000000153,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "02a0a1a2a3a4a5a6a7b2b2b2b2b2b2b2b26ab13c4802010c03ffffffff0112a88003020ce0acaae0acbee0aca3e0acbf0fe0acb8e0ad8de0ac95e0ad81e0acb2116e6f206472696e6b696e6720776174657229333a",
+      "frame_hex": "017005000001a0c4506c99000055b2b2b2b2b2b2b2b202a0a1a2a3a4a5a6a7b2b2b2b2b2b2b2b26ab13c4802010c03ffffffff0112a88003020ce0acaae0acbee0aca3e0acbf0fe0acb8e0ad8de0ac95e0ad81e0acb2116e6f206472696e6b696e6720776174657229333a"
+    },
+    {
+      "name": "need_v2_max_size",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "ffffffffffffffff",
+        "origin_node": "b2b2b2b2b2b2b2b2",
+        "created_at": 4294967295,
+        "category": 6,
+        "urgency": 3,
+        "people": 255,
+        "vuln_flags": 255,
+        "lat": 21.0,
+        "lon": 86.0,
+        "loc_acc": 5,
+        "lang": 5,
+        "item": "iiiiiiiiiiiiiiii",
+        "landmark": "llllllllllllllllllllllll",
+        "summary": "ssssssssssssssssssssssssssssssssssssssss",
+        "lat_e5": 2100000,
+        "lon_e5": 8600000,
+        "answers": [
+          {
+            "id": 8,
+            "question": "last_seen_today",
+            "value": 1,
+            "answer": "yes"
+          },
+          {
+            "id": 7,
+            "question": "house_damaged",
+            "value": 2,
+            "answer": "no"
+          },
+          {
+            "id": 1,
+            "question": "conscious",
+            "value": 0,
+            "answer": "unknown"
+          }
+        ]
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 7,
+        "timestamp_ms": 1790000000163,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "02ffffffffffffffffb2b2b2b2b2b2b2b2ffffffff0603ffff00200b20008339c005051069696969696969696969696969696969186c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c2873737373737373737373737373737373737373737373737373737373737373737373737373737373413a08",
+      "frame_hex": "017007000001a0c4506ca3000079b2b2b2b2b2b2b2b202ffffffffffffffffb2b2b2b2b2b2b2b2ffffffff0603ffff00200b20008339c005051069696969696969696969696969696969186c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c2873737373737373737373737373737373737373737373737373737373737373737373737373737373413a08"
     }
   ],
   "must_reject_frames": {
@@ -157,6 +304,168 @@
   "sizes": {
     "need1_payload": 81,
     "need2_payload": 118,
-    "ack1_payload": 131
+    "ack1_payload": 131,
+    "need_v2_max_payload": 121
+  },
+  "answer_bank": [
+    {
+      "id": 1,
+      "key": "conscious",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "yes"
+        },
+        {
+          "value": 2,
+          "key": "no"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "key": "road_reachable",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "yes"
+        },
+        {
+          "value": 2,
+          "key": "no"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "key": "water_rising",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "yes"
+        },
+        {
+          "value": 2,
+          "key": "no"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "key": "roof_or_ground",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "roof"
+        },
+        {
+          "value": 2,
+          "key": "ground"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "key": "children_or_elderly",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "yes"
+        },
+        {
+          "value": 2,
+          "key": "no"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "key": "how_long",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "today"
+        },
+        {
+          "value": 2,
+          "key": "1-2 days"
+        },
+        {
+          "value": 3,
+          "key": "3+ days"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "key": "house_damaged",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "yes"
+        },
+        {
+          "value": 2,
+          "key": "no"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "key": "last_seen_today",
+      "options": [
+        {
+          "value": 0,
+          "key": "unknown"
+        },
+        {
+          "value": 1,
+          "key": "yes"
+        },
+        {
+          "value": 2,
+          "key": "no"
+        }
+      ]
+    }
+  ],
+  "must_reject_need_payloads": {
+    "v2_unknown_question_id": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f72f90000",
+    "v2_value_out_of_range_for_question": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720b0000",
+    "v2_duplicate_question": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f72090a00",
+    "v2_answer_after_empty_slot": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f72000900",
+    "v2_no_answers": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f72000000",
+    "v2_missing_answer_byte": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a11",
+    "v2_four_answer_bytes": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a110000",
+    "v1_with_answer_bytes": "010102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a0000",
+    "version_3": "030102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a1100"
   }
 }

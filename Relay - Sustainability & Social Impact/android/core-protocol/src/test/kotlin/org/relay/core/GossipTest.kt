@@ -259,7 +259,7 @@ class GossipTest {
         val h = SoloHarness()
         h.node.linkUp("L1"); h.node.linkUp("L2"); h.clearSent()
         val need = sampleNeed(NodeId.random())
-        val p = NeedCodec.encode(need).also { it[0] = 2 }
+        val p = NeedCodec.encode(need).also { it[0] = 3 }
         val raw = FrameCodec.encode(Frame(type = FrameTypes.NEED, ttl = 4, timestampMs = T0, senderId = need.originNode, payload = p))
         h.node.onFrame("L1", raw); h.runTasks()
         assertTrue(h.needs.isEmpty())

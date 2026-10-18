@@ -1,9 +1,16 @@
 package org.relay.core.payload
 
 import org.relay.core.ids.Hex
+import org.relay.core.intake.QuestionBank
 import java.nio.ByteBuffer
 
-/** NEED payload (SPEC 5.1). */
+/** One answered intake question (SPEC 5.1): [questionId] and [value] are the [QuestionBank] wire values. */
+data class NeedAnswer(val questionId: Int, val value: Int) {
+    /** Wire byte: question id in the high 5 bits, answer value in the low 3. Never 0 for a valid answer. */
+    val wireByte: Int get() = (questionId shl 3) or value
+}
+
+/** NEED payload (SPEC 5.1). Encoded as payload_version 1, or 2 when [answers] is not empty. */
 data class Need(
     val msgId: ByteArray,
     val originNode: ByteArray,
@@ -23,6 +30,8 @@ data class Need(
     val item: String,
     val landmark: String,
     val summary: String,
+    /** At most [QuestionBank.MAX_ANSWERS], distinct question ids; empty = a v1 payload on the wire. */
+    val answers: List<NeedAnswer> = emptyList(),
 ) {
     val lat: Double get() = Geo.fromE5(latE5)
     val lon: Double get() = Geo.fromE5(lonE5)
@@ -36,7 +45,7 @@ data class Need(
             createdAt == other.createdAt && category == other.category && urgency == other.urgency &&
             people == other.people && vulnFlags == other.vulnFlags && latE5 == other.latE5 &&
             lonE5 == other.lonE5 && locAcc == other.locAcc && lang == other.lang &&
-            item == other.item && landmark == other.landmark && summary == other.summary
+            item == other.item && landmark == other.landmark && summary == other.summary && answers == other.answers
     }
 
     override fun hashCode(): Int {
@@ -54,18 +63,23 @@ data class Need(
         h = 31 * h + item.hashCode()
         h = 31 * h + landmark.hashCode()
         h = 31 * h + summary.hashCode()
+        h = 31 * h + answers.hashCode()
         return h
     }
 }
 
 object NeedCodec {
     const val VERSION = 1
+    /** v1 layout followed by exactly [ANSWER_BYTES] answer bytes. */
+    const val VERSION_WITH_ANSWERS = 2
+    const val ANSWER_BYTES = 3
     const val MAX_ITEM = 16
     const val MAX_LANDMARK = 24
     const val MAX_SUMMARY = 40
     const val FIXED_SIZE = 35
     /** Fixed part + 3 length bytes + 80 string bytes. */
     const val MAX_PAYLOAD = FIXED_SIZE + 3 + MAX_ITEM + MAX_LANDMARK + MAX_SUMMARY
+    const val MAX_PAYLOAD_V2 = MAX_PAYLOAD + ANSWER_BYTES
 
     /**
      * Encode a NEED. Strings are truncated on a code point boundary to their limits. Throws
@@ -79,11 +93,15 @@ object NeedCodec {
         require(need.people in 0..255) { "people out of range" }
         require(need.vulnFlags in 0..255) { "vuln_flags out of range" }
         require(need.locAcc in 0..5) { "loc_acc out of range" }
+        require(need.answers.size <= ANSWER_BYTES) { "at most $ANSWER_BYTES answers" }
+        require(need.answers.all { QuestionBank.isValid(it.questionId, it.value) }) { "unknown question id or answer value" }
+        require(need.answers.map { it.questionId }.toSet().size == need.answers.size) { "duplicate question id" }
+        val v2 = need.answers.isNotEmpty()
         val item = Utf8.truncateToBytes(need.item, MAX_ITEM)
         val landmark = Utf8.truncateToBytes(need.landmark, MAX_LANDMARK)
         val summary = Utf8.truncateToBytes(need.summary, MAX_SUMMARY)
-        val buf = ByteBuffer.allocate(FIXED_SIZE + 3 + item.size + landmark.size + summary.size)
-        buf.put(VERSION.toByte())
+        val buf = ByteBuffer.allocate(FIXED_SIZE + 3 + item.size + landmark.size + summary.size + (if (v2) ANSWER_BYTES else 0))
+        buf.put((if (v2) VERSION_WITH_ANSWERS else VERSION).toByte())
         buf.put(need.msgId)
         buf.put(need.originNode)
         buf.putInt(need.createdAt.toInt())
@@ -98,14 +116,16 @@ object NeedCodec {
         buf.put(item.size.toByte()); buf.put(item)
         buf.put(landmark.size.toByte()); buf.put(landmark)
         buf.put(summary.size.toByte()); buf.put(summary)
+        if (v2) for (i in 0 until ANSWER_BYTES) buf.put((need.answers.getOrNull(i)?.wireByte ?: 0).toByte())
         return buf.array()
     }
 
-    /** Null if invalid (SPEC 5.1 validation) or `payload_version != 1`. Never throws. */
+    /** Null if invalid (SPEC 5.1 validation) or `payload_version` is not 1 or 2. Never throws. */
     fun decode(p: ByteArray): Need? {
         try {
-            if (p.size < FIXED_SIZE + 3 || p.size > MAX_PAYLOAD) return null
-            if ((p[0].toInt() and 0xFF) != VERSION) return null
+            if (p.size < FIXED_SIZE + 3 || p.size > MAX_PAYLOAD_V2) return null
+            val version = p[0].toInt() and 0xFF
+            if (version != VERSION && version != VERSION_WITH_ANSWERS) return null
             val buf = ByteBuffer.wrap(p)
             buf.position(1)
             val msgId = ByteArray(8).also { buf.get(it) }
@@ -124,9 +144,23 @@ object NeedCodec {
             val item = readString(p, buf, MAX_ITEM) ?: return null
             val landmark = readString(p, buf, MAX_LANDMARK) ?: return null
             val summary = readString(p, buf, MAX_SUMMARY) ?: return null
+            val answers = ArrayList<NeedAnswer>()
+            if (version == VERSION_WITH_ANSWERS) {
+                if (buf.remaining() != ANSWER_BYTES) return null
+                var empty = false
+                for (i in 0 until ANSWER_BYTES) {
+                    val b = buf.get().toInt() and 0xFF
+                    if (b == 0) { empty = true; continue }
+                    if (empty) return null // occupied slot after an empty one: not canonical
+                    val a = NeedAnswer(b ushr 3, b and 7)
+                    if (!QuestionBank.isValid(a.questionId, a.value) || answers.any { it.questionId == a.questionId }) return null
+                    answers += a
+                }
+                if (answers.isEmpty()) return null // v2 means "has answers"; encoders emit v1 otherwise
+            }
             if (buf.hasRemaining()) return null
             return Need(msgId, origin, createdAt, category, urgency, people, vuln, lat, lon, locAcc,
-                lang, item, landmark, summary)
+                lang, item, landmark, summary, answers)
         } catch (e: RuntimeException) {
             return null
         }

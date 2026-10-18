@@ -5,7 +5,8 @@ import org.relay.core.payload.VulnFlag
 
 /**
  * One thing a requester can be asking for / reporting. [context] concepts (flood, roof) only decide
- * the category when nothing more specific matched.
+ * the category when nothing more specific matched. When several concepts of the winning category match, the
+ * item label comes from the most urgent [request] concept ("send a doctor"), else from the most urgent concept.
  */
 internal class Concept(
     val id: String,
@@ -15,6 +16,8 @@ internal class Concept(
     val phrase: String,
     val flags: Set<VulnFlag> = emptySet(),
     val context: Boolean = false,
+    /** True for something a person asks to be sent (medicine, water, an ambulance), as opposed to a condition. */
+    val request: Boolean = false,
     val lex: Lex,
 )
 
@@ -39,7 +42,7 @@ internal object Lexicons {
     fun defaultItem(c: Category): String = when (c) {
         Category.MEDICAL -> "medical help"
         Category.RESCUE -> "rescue"
-        Category.WATER -> "drinking water"
+        Category.WATER -> "water"
         Category.FOOD -> "food"
         Category.SHELTER -> "shelter"
         Category.MISSING_PERSON -> "missing person"
@@ -49,9 +52,9 @@ internal object Lexicons {
     // Order = tie-break priority within equal (urgency, category).
     val concepts: List<Concept> = listOf(
         // ---------------- MEDICAL, life threatening (3)
-        Concept("insulin", Category.MEDICAL, 3, "insulin", "needs insulin", lex = Lex(
+        Concept("insulin", Category.MEDICAL, 3, "insulin", "needs insulin", request = true, lex = Lex(
             "insulin*", "इंसुलिन*", "इन्सुलिन*", "ଇନସୁଲିନ*", "ইনসুলিন*")),
-        Concept("oxygen", Category.MEDICAL, 3, "oxygen", "needs oxygen", lex = Lex(
+        Concept("oxygen", Category.MEDICAL, 3, "oxygen", "needs oxygen", request = true, lex = Lex(
             "oxygen*", "oxigen*", "oksijen*", "ऑक्सीजन*", "ओक्सीजन*", "ଅକ୍ସିଜେନ*")),
         Concept("not_breathing", Category.MEDICAL, 3, "first aid", "not breathing", lex = Lex(
             "~not\\s+breathing", "~(?:can'?t|cannot|unable\\s+to)\\s+breathe", "stopped breathing", "no breath",
@@ -81,22 +84,23 @@ internal object Lexicons {
             "malunod*", "nalumos*", "malumos*", "lumos*")),
         Concept("trapped", Category.RESCUE, 3, "rescue", "trapped", trapped, lex = Lex(
             "trapped", "entrapped", "buried", "under debris", "under rubble", "under the debris",
-            "under the rubble", "malba*", "मलबा*", "मलबे*", "naipit*", "nakulong*", "~na-?trap\\w*", "natrap*")),
+            "under the rubble", "malba*", "मलबा*", "मलबे*", "naipit*", "nakulong*", "~na-?trap\\w*", "natrap*",
+            "दबे", "दबी", "दबा", "~दब\\s+(?:गया|गई|गए|गये)", "~dab\\s+(?:gaya|gayi|gaye)", "~dabe\\s+(?:hain|hue|huye)")),
         // ---------------- MEDICAL, default (2)
-        Concept("medicine", Category.MEDICAL, 2, "medicine", "needs medicine", lex = Lex(
+        Concept("medicine", Category.MEDICAL, 2, "medicine", "needs medicine", request = true, lex = Lex(
             "medicine*", "medication*", "medicin*", "pills", "tablet*", "capsule*", "dawai*", "dawa", "dava",
             "davai*", "dawaai*", "दवा*", "दवाई*", "औषध*", "ଔଷଧ*", "ଔଷଦ*", "ausadh*", "aushadh*", "oushadh*",
             "ousadh*", "gamot*", "tambal*", "panambal*", "medisina*")),
-        Concept("doctor", Category.MEDICAL, 2, "doctor", "needs doctor", lex = Lex(
+        Concept("doctor", Category.MEDICAL, 2, "doctor", "needs doctor", request = true, lex = Lex(
             "doctor*", "doktor*", "duktor*", "nurse*", "paramedic*", "डॉक्टर*", "डाक्टर*", "ଡାକ୍ତର*", "daktar*",
             "dakter*", "dactor*")),
-        Concept("ambulance", Category.MEDICAL, 2, "ambulance", "needs ambulance", lex = Lex(
+        Concept("ambulance", Category.MEDICAL, 2, "ambulance", "needs ambulance", request = true, lex = Lex(
             "ambulance*", "ambulans*", "एम्बुलेंस*", "एंबुलेंस*", "ଆମ୍ବୁଲାନ୍ସ*")),
         Concept("injured", Category.MEDICAL, 2, "first aid", "injured", injured, lex = Lex(
             "injur*", "hurt", "wound*", "fractur*", "~broken\\s+(?:leg|arm|bone|hand|foot|back)", "chot*", "चोट*",
             "ghayal*", "घायल*", "zakhmi*", "ଆହତ*", "ahat*", "aghat*", "ଆଘାତ*", "sugat*", "nasugat*", "samad*",
             "nasamad*", "nasamd*", "first aid")),
-        Concept("pregnant", Category.MEDICAL, 2, "medical help", "pregnant", pregnant, lex = Lex(
+        Concept("pregnant", Category.MEDICAL, 2, "medical help", "pregnant", pregnant, context = true, lex = Lex(
             "pregnan*", "garbhavati*", "garbhwati*", "garbhini*", "गर्भवती*", "गर्भ*", "ଗର୍ଭବତୀ*", "ଗର୍ଭ*",
             "buntis*", "mabdos*")),
         Concept("fever", Category.MEDICAL, 2, "medicine", "fever", lex = Lex(
@@ -113,38 +117,48 @@ internal object Lexicons {
             "stuck", "stranded", "marooned", "~(?:can'?t|cannot)\\s+(?:get|come)\\s+out", "~can'?t\\s+leave",
             "fase", "phase", "phanse*", "fanse*", "fasa", "phansa", "fans*", "phans*", "फंस*", "फँस*", "फसे", "फसा",
             "फस", "ଫସି*", "phasi*")),
-        Concept("collapsed", Category.RESCUE, 2, "rescue", "building collapsed", lex = Lex(
+        Concept("collapsed", Category.RESCUE, 2, "rescue", "building collapsed", context = true, lex = Lex(
             "collapse*", "gir gaya", "gir gayi", "gir gaye", "~ghar\\s+gir\\w*", "ढह*", "गिर गया", "गिर गई",
             "गिर गये", "गिर गए", "bhangi*", "ଭାଙ୍ଗି*", "gumuho*", "guho*", "bumagsak*", "nagiba*", "nahugno*",
             "wasak*", "nawasak*")),
-        Concept("boat", Category.RESCUE, 2, "boat", "needs boat", lex = Lex(
+        Concept("boat", Category.RESCUE, 2, "boat", "needs boat", context = true, lex = Lex(
             "boat*", "bangka*", "naav*", "nav", "नाव*", "नौका*", "ନାଆ*", "ନୌକା*")),
-        Concept("rescue", Category.RESCUE, 2, "rescue", "needs rescue", lex = Lex(
+        Concept("rescue", Category.RESCUE, 2, "rescue", "needs rescue", request = true, lex = Lex(
             "rescue*", "save us", "save me", "helicopter*", "chopper*", "bachao*", "bachaao*", "bacha lo",
             "bachaiye", "बचाओ*", "बचा लो", "बचाइए", "बचाव*", "ବଞ୍ଚାଅ*", "ବଞ୍ଚାନ୍ତୁ*", "bachantu*", "banchao*",
-            "saklolo*", "sagip*", "luwas*")),
+            "saklolo*", "sagip*", "luwas*", "ଉଦ୍ଧାର*", "uddhar*", "~(?:jaldi\\s+)?nikal(?:o|iye|na)", "~निकाल(?:ो|िए|ना)")),
         // ---------------- WATER / FOOD / SHELTER / MISSING (1)
         Concept("missing", Category.MISSING_PERSON, 1, "missing person", "missing person", lex = Lex(
             "missing", "~lost\\s+(?:my\\s+|our\\s+)?(?:child|son|daughter|mother|father|brother|sister|wife|husband|family|baby|grand\\w+)",
             "gayab*", "lapata*", "laapata*", "लापता*", "गायब*", "nikhoj*", "ନିଖୋଜ*", "ନିରୁଦ୍ଦେଶ*", "nawawala*",
-            "nawala*", "hindi mahanap", "hinahanap*", "nawara*", "gipangita*")),
-        Concept("water", Category.WATER, 1, "drinking water", "needs water", lex = Lex(
+            "nawala*", "hindi mahanap", "hinahanap*", "nawara*", "gipangita*",
+            "~(?:looking|searching)\\s+for\\s+(?:my|our)\\s+(?:\\w+\\s+)?(?:child|son|daughter|mother|father|brother|sister|wife|husband|family|baby|grand\\w+|mom|dad|parents?|uncle|aunt|boy|girl|kid\\w*)",
+            "~(?:can'?t|cannot|unable\\s+to)\\s+find\\s+(?:my|our|him|her|them)", "~went\\s+missing", "wander*",
+            "~kho\\s+(?:gaya|gayi|gaye)", "khoya", "खो गया", "खो गई", "खो गये", "खो गए", "खोया", "खोई",
+            "ढूँढ*", "ढूंढ*", "ढूढ*", "dhundh*", "~(?:nahi|nahin)\\s+laut\\w*", "~(?:नहीं|नही)\\s+लौट\\w*",
+            "~वापस\\s+(?:नहीं|नही)", "ଖୋଜି*", "ଖୋଜୁ*")),
+        Concept("water", Category.WATER, 1, "water", "needs water", request = true, lex = Lex(
             "~water(?!\\s+(?:is\\s+)?(?:rising|entering|level|coming|came|inside|up|everywhere|logging))",
             "drinking water", "thirst*", "pyaas*", "pyas*", "प्यास*", "~पानी(?!\\s+(?:भर|बढ|घुस|आ))",
-            "~pa+ni(?!\\s+(?:bhar|badh|ghus|aa|aaya|aya))", "पेयजल", "ପାଣି", "tubig*", "inom*", "uhaw*", "inumon*")),
-        Concept("milk", Category.FOOD, 1, "milk", "needs milk", lex = Lex(
+            "~pa+ni(?!\\s+(?:bhar|badh|ghus|aa|aaya|aya))", "पेयजल", "~ପାଣି(?!\\s+(?:ବଢ|ଭର|ପଶ|ଆସ))", "ପାନୀୟ ଜଳ", "pina pani", "tubig*", "inom*", "uhaw*", "inumon*")),
+        Concept("milk", Category.FOOD, 1, "milk", "needs milk", request = true, lex = Lex(
             "milk", "doodh*", "दूध*", "ଦୁଧ*", "gatas*")),
-        Concept("food", Category.FOOD, 1, "food", "needs food", lex = Lex(
+        Concept("food", Category.FOOD, 1, "food", "needs food", request = true, lex = Lex(
             "food*", "hungry", "hunger*", "starv*", "khana*", "khaana*", "khaane*", "खाना*", "खाने*", "भूख*",
             "bhookh*", "bhukh*", "ଖାଦ୍ୟ*", "ଖାଇବା*", "ଭୋକ*", "bhoka*", "khadya*", "khaddya*", "khaibaku*",
             "kheibaku*", "ration*", "rice", "chawal*", "चावल*", "biscuit*", "pagkain*", "gutom*", "nagugutom*",
             "nagutom*", "kaon*", "pagkaon*", "ginutom*")),
-        Concept("blanket", Category.SHELTER, 1, "blanket", "needs blankets", lex = Lex(
+        Concept("blanket", Category.SHELTER, 1, "blanket", "needs blankets", request = true, lex = Lex(
             "blanket*", "kambal*", "कंबल*", "कम्बल*", "kumot*", "clothes")),
-        Concept("shelter", Category.SHELTER, 1, "shelter", "needs shelter", lex = Lex(
+        Concept("shelter", Category.SHELTER, 1, "shelter", "needs shelter", request = true, lex = Lex(
             "shelter*", "homeless", "no home", "~(?:home|house)\\s+(?:is\\s+|was\\s+|got\\s+)?(?:washed|destroyed|gone|damaged)",
             "evacuat*", "relief camp", "tent*", "ashray*", "aashray*", "asra", "aasra", "आश्रय*", "आसरा*", "टेंट*",
-            "ଆଶ୍ରୟ*", "tirahan*", "silungan*", "masisilungan*", "kanlungan*")),
+            "ଆଶ୍ରୟ*", "tirahan*", "silungan*", "masisilungan*", "kanlungan*", "aashray*", "ghar chahiye",
+            "~(?:place|somewhere|nowhere|room|roof)\\s+to\\s+(?:stay|sleep|live)", "~(?:no|nowhere)\\s+to\\s+(?:stay|sleep|go)",
+            "~sleeping\\s+(?:on\\s+the\\s+)?(?:road|street|open|outside|ground)", "~(?:sleeping|sleep)\\s+in\\s+the\\s+open",
+            "~रहने\\s+(?:की|के\\s+लिए)\\s+(?:कोई\\s+)?(?:जगह|ठिकाना|जगा)", "~खुले\\s+में\\s+(?:सो|रह)\\S*",
+            "~(?:rehne|rahne)\\s+(?:ki|ke\\s+liye)\\s+(?:koi\\s+)?(?:jagah|jagha|thikana)", "~khule\\s+mein\\s+(?:so|rah)\\w*",
+            "~ରହିବା\\s*(?:ପାଇଁ|ସ୍ଥାନ|ଜାଗା)\\S*", "ଘର ଦରକାର")),
         // ---------------- context only
         Concept("roof", Category.RESCUE, 2, "rescue", "on roof", context = true, lex = Lex(
             "roof*", "rooftop*", "chhat*", "chhath", "छत*", "ଛାତ*", "bubong*", "atop*")),
@@ -152,7 +166,12 @@ internal object Lexicons {
             "flood*", "baadh*", "baarh*", "बाढ*", "ବନ୍ୟା*", "banya*", "baha*", "pagbaha*", "binaha*", "lunop*",
             "cyclone*", "typhoon*", "bagyo*", "tsunami*",
             "~water\\s+(?:is\\s+)?(?:rising|entering|coming|came|inside|everywhere)", "~(?:pani|paani)\\s+(?:bhar|badh|ghus)\\w*",
-            "~पानी\\s+(?:भर|बढ|घुस)\\w*")),
+            "~पानी\\s+(?:भर|बढ|घुस)\\w*", "~ପାଣି\\s+(?:ବଢ|ଭର|ପଶ|ଆସ)\\S*", "~(?:pani|paani)\\s+(?:badh|bhar|pasi)\\w*")),
+        // phones and light: no category of their own on the wire, so OTHER with a plain item
+        Concept("powerbank", Category.OTHER, 1, "power bank", "needs power bank", request = true, lex = Lex(
+            "~power\\s?bank\\S*", "charger*", "~पावर\\s?बैंक\\S*", "चार्जर*")),
+        Concept("torch", Category.OTHER, 1, "torch", "needs torch", request = true, lex = Lex(
+            "torch*", "flashlight*", "candle*", "टॉर्च*", "मोमबत्ती*", "ଟର୍ଚ୍ଚ*")),
     )
 
     val flagLexicons: List<Pair<VulnFlag, Lex>> = listOf(
@@ -196,18 +215,32 @@ internal object Lexicons {
         return best
     }
 
+    // ---- supplies the requester says they already have ("we have food but no water", "पानी है लेकिन खाना नहीं है")
+    private val availableRegex = Regex(
+        "(?<!n't )(?<!not )(?<!never )(?<!$W)(?:have|has|got)\\s+(?:some\\s+|enough\\s+|plenty\\s+of\\s+|a\\s+little\\s+)?" +
+            "(?:drinking\\s+|clean\\s+)?(?:water|food|milk|medicines?|blankets?|rice)(?!$W)(?!\\s+(?:in|inside|entering|rising|everywhere|up|coming|came|level))" +
+            "|(?<!$W)(?:पानी|खाना|खाने|दवा|दवाई|राशन|दूध|pani|paani|khana|khaana|dawai|dawa|rashan|doodh|ପାଣି|ଖାଦ୍ୟ|ଔଷଧ)" +
+            "\\s*(?:to\\s+|toh\\s+|bhi\\s+|तो\\s+|भी\\s+)?(?:hai|hain|है|हैं|achhi|ଅଛି)(?!\\s+(?:nahi|nahin|नहीं|नही))(?!$W)"
+    )
+
+    /** Blanks out "we have X" / "X है" statements so a supply the person already has is not read as a need. */
+    fun stripAvailable(text: String): String = availableRegex.replace(text, " ")
+
     // ---- ages
+    private val AGE_UNITS = "years?|yrs?|yr|y/o|saal|sal|वर्ष|साल|बरस|ବର୍ଷ|taon|anyos|taong|tuig|katuigan"
     private val ageRegex = Regex(
-        "(\\p{Nd}{1,3})\\s*-?\\s*(?:years?|yrs?|yr|y/o|saal|sal|वर्ष|साल|बरस|ବର୍ଷ|taon|anyos|taong|tuig|katuigan)(?:[ -]old)?(?!$W)" +
-            "|(?<!$W)(?:age|aged|umar|umra|उम्र|ବୟସ|edad)\\s*(?:of\\s*)?(\\p{Nd}{1,3})(?!$W)"
+        "(?<!$W)(\\p{Nd}{1,3}|${People.numAlt})\\s*-?\\s*(?:$AGE_UNITS)(?:[ -]old)?(?!$W)" +
+            "|(?<!$W)(?:age|aged|umar|umra|उम्र|ବୟସ|edad)\\s*(?:of\\s*)?(\\p{Nd}{1,3}|${People.numAlt})(?!$W)" +
+            // "my father is seventy": a spelled-out decade after is/aged, no unit needed
+            "|(?<!$W)(?:is|aged)\\s+(${People.decadeAlt})(?!\\s*(?:people|persons|of\\s+us))(?!$W)"
     )
 
     /** Removes "80 years old"-style phrases; returns the remaining text and the ages found. */
     fun stripAges(text: String): Pair<String, List<Int>> {
         val ages = ArrayList<Int>()
         val stripped = ageRegex.replace(text) { m ->
-            val g = m.groupValues[1].ifEmpty { m.groupValues[2] }
-            ages += digits(g)
+            val g = m.groupValues.drop(1).firstOrNull { it.isNotEmpty() } ?: ""
+            ages += People.valueOf(g)
             " "
         }
         return stripped to ages

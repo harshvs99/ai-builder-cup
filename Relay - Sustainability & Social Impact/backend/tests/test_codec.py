@@ -19,6 +19,7 @@ def _need_from_fields(f) -> codec.Need:
         msg_id=f["msg_id"], origin_node=f["origin_node"], created_at=f["created_at"], category=f["category"],
         urgency=f["urgency"], people=f["people"], vuln_flags=f["vuln_flags"], lat=f["lat"], lon=f["lon"],
         loc_acc=f["loc_acc"], lang=f["lang"], item=f["item"], landmark=f["landmark"], summary=f["summary"],
+        answers=tuple((a["id"], a["value"]) for a in f.get("answers", [])),
     )
 
 
@@ -76,6 +77,8 @@ def test_golden_vector_encode_decode(v):
         assert n.item == f.get("item_decoded", f["item"])
         assert n.landmark == f.get("landmark_decoded", f["landmark"])
         assert n.summary == f.get("summary_decoded", f["summary"])
+        assert n.answers == tuple((a["id"], a["value"]) for a in f.get("answers", []))
+        assert codec.answers_to_json(n.answers) == {a["question"]: a["answer"] for a in f.get("answers", [])}
     elif kind == "ACK":
         a = codec.decode_ack(fr.payload)
         assert a.ack_id.hex() == f["ack_id"] and a.ref_msg_id.hex() == f["ref_msg_id"]
@@ -97,6 +100,53 @@ def test_reference_sizes():
     assert len(bytes.fromhex(_vec("need_insulin_odisha")["payload_hex"])) == s["need1_payload"]
     assert len(bytes.fromhex(_vec("need_truncation_negative_coords")["payload_hex"])) == s["need2_payload"]
     assert len(bytes.fromhex(_vec("ack_received_directed")["payload_hex"])) == s["ack1_payload"]
+    assert len(bytes.fromhex(_vec("need_v2_max_size")["payload_hex"])) == s["need_v2_max_payload"] == 121
+
+
+def test_v1_vectors_stay_v1_and_answer_vectors_are_v2():
+    for v in VECTORS["vectors"]:
+        if v["kind"] == "NEED":
+            assert bytes.fromhex(v["payload_hex"])[0] == (2 if "answers" in v["fields"] else 1), v["name"]
+
+
+def test_question_bank_matches_shared_table():
+    bank = VECTORS["answer_bank"]
+    assert len(bank) == len(codec.QUESTION_BANK)
+    for q in bank:
+        key, options = codec.QUESTION_BANK[q["id"]]
+        assert key == q["key"] and options == {o["key"]: o["value"] for o in q["options"]}
+
+
+@pytest.mark.parametrize("name,hexstr", list(VECTORS["must_reject_need_payloads"].items()))
+def test_must_reject_need_payloads(name, hexstr):
+    with pytest.raises(CodecError):
+        codec.decode_need(bytes.fromhex(hexstr))
+
+
+def test_encoder_emits_v1_without_answers_and_v2_with():
+    n = _need_from_fields(_vec("need_v2_two_answers")["fields"])
+    v2 = codec.encode_need(n)
+    v1 = codec.encode_need(codec.Need(**{**n.__dict__, "answers": ()}))
+    assert v2[0] == 2 and v1[0] == 1 and len(v2) == len(v1) + 3
+    assert codec.decode_need(v1).answers == ()
+
+
+@pytest.mark.parametrize("answers", [
+    ((1, 3),), ((9, 0),), ((0, 0),), ((1, 1), (1, 2)), ((1, 0), (2, 0), (3, 0), (4, 0)),
+])
+def test_encoder_rejects_bad_answers(answers):
+    n = _need_from_fields(_vec("need_v2_two_answers")["fields"])
+    with pytest.raises(CodecError):
+        codec.encode_need(codec.Need(**{**n.__dict__, "answers": answers}))
+
+
+def test_answers_json_roundtrip_and_validation():
+    assert codec.answers_to_json(((1, 2), (6, 3))) == {"conscious": "no", "how_long": "3+ days"}
+    assert codec.answers_from_json({"conscious": "no", "how_long": "3+ days"}) == ((1, 2), (6, 3))
+    with pytest.raises(CodecError):
+        codec.answers_from_json({"conscious": "maybe"})
+    with pytest.raises(CodecError):
+        codec.answers_from_json({"nope": "yes"})
 
 
 @pytest.mark.parametrize("name,hexstr", list(VECTORS["must_reject_frames"].items()))
