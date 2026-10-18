@@ -63,15 +63,21 @@ class AskViewModel(private val engine: IntakeEngine = RuleIntake) : ViewModel() 
 
     private fun edit(f: (AskDraft) -> AskDraft) = _state.update { it.copy(draft = f(it.draft)) }
 
-    /** A tap on a category chip sets it; tapping the chosen one again hands the decision back to extraction. */
+    /**
+     * A tap on a category chip adds it (several can be chosen); tapping a chosen one removes it, and removing the
+     * last hands the decision back to extraction.
+     */
     fun toggleCategory(c: Category) = _state.update { s ->
-        val d = s.draft
-        if (d.category == c && IntakeField.CATEGORY in d.edited) {
-            val cleared = AskLogic.setCategory(d, null)
-            s.copy(draft = AskLogic.applyIntake(cleared, engine.extract(s.transcript, lastLang)))
-        } else {
-            s.copy(draft = AskLogic.setCategory(d, c))
-        }
+        val next = AskLogic.toggleCategory(s.draft, c)
+        if (next.category == null) s.copy(draft = AskLogic.applyIntake(next, engine.extract(s.transcript, lastLang)))
+        else s.copy(draft = next)
+    }
+
+    /** A tap on an exact category in the Need editor (water and food are separate there); a sibling is swapped. */
+    fun pickCategory(c: Category) = _state.update { s ->
+        val next = AskLogic.pickCategory(s.draft, c)
+        if (next.category == null) s.copy(draft = AskLogic.applyIntake(next, engine.extract(s.transcript, lastLang)))
+        else s.copy(draft = next)
     }
 
     fun setCategory(c: Category) = edit { AskLogic.setCategory(it, c) }
@@ -84,13 +90,26 @@ class AskViewModel(private val engine: IntakeEngine = RuleIntake) : ViewModel() 
     fun setAnswer(questionId: Int, value: Int) = edit { AskLogic.setAnswer(it, questionId, value) }
 
     /**
-     * The wire NEED for the current draft. [fix] is (lat, lon, loc_acc) or null for "no location" (zeros, loc_acc 0).
+     * One wire NEED per chosen category (a single one when only one or none is chosen); each gets a fresh id from
+     * [newMsgId]. The caller submits them in order through MeshRepository.
+     */
+    fun buildNeeds(
+        newMsgId: () -> ByteArray, originNode: ByteArray, createdAtSec: Long, lang: Lang, fix: Triple<Double, Double, Int>?,
+    ): List<Need> = AskLogic.perCategory(_state.value.draft).map { d ->
+        buildNeed(d, newMsgId(), originNode, createdAtSec, lang, fix)
+    }
+
+    /**
+     * The wire NEED for the current draft's primary category. [fix] is (lat, lon, loc_acc) or null for "no location" (zeros, loc_acc 0).
      * The caller submits it through MeshRepository.
      */
     fun buildNeed(
         msgId: ByteArray, originNode: ByteArray, createdAtSec: Long, lang: Lang, fix: Triple<Double, Double, Int>?,
+    ): Need = buildNeed(_state.value.draft.pruned(), msgId, originNode, createdAtSec, lang, fix)
+
+    private fun buildNeed(
+        d: AskDraft, msgId: ByteArray, originNode: ByteArray, createdAtSec: Long, lang: Lang, fix: Triple<Double, Double, Int>?,
     ): Need {
-        val d = _state.value.draft.pruned()
         return Need(
             msgId = msgId, originNode = originNode, createdAt = createdAtSec,
             category = d.category ?: Category.OTHER, urgency = d.urgency, people = d.people,

@@ -274,15 +274,15 @@ fun AskContent(
                 Text(s.ask.orTapWhat, style = MaterialTheme.typography.titleMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     AskLogic.mainCategories.forEach { c ->
-                        CategoryChip(s.common.categoryName(c), c, draft.category == c) { onToggleCategory(c) }
+                        CategoryChip(AskLogic.chipLabel(s.common, c), c, AskLogic.isChosen(draft, c)) { onToggleCategory(c) }
                     }
-                    val moreSelected = draft.category in AskLogic.moreCategories
+                    val moreSelected = draft.categories.any { it in AskLogic.moreCategories }
                     SimpleChip(s.common.somethingElse, moreSelected || showMore) { showMore = !showMore }
                 }
-                if (showMore || draft.category in AskLogic.moreCategories) {
+                if (showMore || draft.categories.any { it in AskLogic.moreCategories }) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         AskLogic.moreCategories.forEach { c ->
-                            CategoryChip(s.common.categoryName(c), c, draft.category == c) { onToggleCategory(c) }
+                            CategoryChip(AskLogic.chipLabel(s.common, c), c, AskLogic.isChosen(draft, c)) { onToggleCategory(c) }
                         }
                     }
                 }

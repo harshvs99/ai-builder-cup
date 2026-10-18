@@ -174,7 +174,7 @@ class AskLogicTest {
         vm.toggleCategory(Category.WATER)
         val n = vm.buildNeed(ByteArray(8), ByteArray(8), 1L, Lang.EN, null)
         assertEquals(Category.WATER, n.category)
-        assertEquals("water", n.item)
+        assertEquals("food and water", n.item)
         // Nothing chosen at all still builds (category Other).
         assertEquals(Category.OTHER, AskViewModel().buildNeed(ByteArray(8), ByteArray(8), 1L, Lang.EN, null).category)
     }
@@ -184,13 +184,96 @@ class AskLogicTest {
         vm.onTranscript("need wat", Lang.EN)
         vm.onTranscript("need water", Lang.EN)
         assertEquals(Category.WATER, vm.state.value.draft.category)
-        vm.toggleCategory(Category.FOOD)
+        vm.toggleCategory(Category.MEDICAL)
         vm.onTranscript("need water for 5 people", Lang.EN)
-        assertEquals(Category.FOOD, vm.state.value.draft.category)
+        assertEquals(listOf(Category.WATER, Category.MEDICAL), vm.state.value.draft.categories)
         assertEquals(5, vm.state.value.draft.people)
-        // Tapping the chosen chip again returns the decision to extraction.
+        // Tapping a chosen chip again removes it.
+        vm.toggleCategory(Category.MEDICAL)
+        assertEquals(listOf(Category.WATER), vm.state.value.draft.categories)
+    }
+
+    @Test fun waterAndFoodAreOneChipAndOneTicket() {
+        val vm = AskViewModel()
+        vm.toggleCategory(Category.WATER)
         vm.toggleCategory(Category.FOOD)
-        assertEquals(Category.WATER, vm.state.value.draft.category)
+        assertEquals(emptyList<Category>(), vm.state.value.draft.categories)
+        vm.toggleCategory(Category.FOOD)
+        assertEquals(listOf(Category.FOOD), vm.state.value.draft.categories)
+        vm.toggleCategory(Category.WATER)
+        assertEquals(emptyList<Category>(), vm.state.value.draft.categories)
+        vm.toggleCategory(Category.WATER)
+        val n = vm.buildNeeds({ ByteArray(8) }, ByteArray(8), 1L, Lang.EN, null)
+        assertEquals(1, n.size)
+        assertEquals("food and water", n[0].item)
+        assertEquals(Category.WATER, n[0].category)
+    }
+
+    @Test fun tappingAnUnderstoodChipConfirmsItInsteadOfDroppingIt() {
+        val vm = AskViewModel()
+        vm.onTranscript("need water", Lang.EN)
+        vm.toggleCategory(Category.WATER)
+        assertEquals(listOf(Category.WATER), vm.state.value.draft.categories)
+        assertTrue(IntakeField.CATEGORY in vm.state.value.draft.edited)
+        vm.toggleCategory(Category.WATER)
+        vm.onTranscript("need water", Lang.EN)
+        assertEquals(listOf(Category.WATER), vm.state.value.draft.categories)
+    }
+
+    @Test fun editorCanCorrectFoodToWaterAndItSticks() {
+        val vm = AskViewModel()
+        vm.onTranscript("we need rice for 4 people", Lang.EN)
+        assertEquals(Category.FOOD, vm.state.value.draft.category)
+        assertTrue(vm.state.value.draft.item.isNotEmpty())
+        vm.pickCategory(Category.WATER)
+        assertEquals(listOf(Category.WATER), vm.state.value.draft.categories)
+        assertEquals("", vm.state.value.draft.item)
+        vm.onTranscript("we need rice for 4 people near the school", Lang.EN)
+        assertEquals(listOf(Category.WATER), vm.state.value.draft.categories)
+        assertEquals("", vm.state.value.draft.item)
+        val need = vm.buildNeed(ByteArray(8), ByteArray(8), 1L, Lang.EN, null)
+        assertEquals(Category.WATER, need.category)
+        assertEquals("food and water", need.item)
+    }
+
+    @Test fun removingThePrimaryPromotesTheNext() {
+        val vm = AskViewModel()
+        vm.toggleCategory(Category.RESCUE)
+        vm.toggleCategory(Category.MEDICAL)
+        vm.toggleCategory(Category.RESCUE)
+        assertEquals(listOf(Category.MEDICAL), vm.state.value.draft.categories)
+    }
+
+    @Test fun severalGroupsBuildOneNeedEachSharingTheRest() {
+        val vm = AskViewModel()
+        vm.toggleCategory(Category.WATER)
+        vm.toggleCategory(Category.MEDICAL)
+        vm.toggleCategory(Category.RESCUE)
+        vm.setPeople(4); vm.setLandmark("school"); vm.setUrgency(3); vm.setItem("insulin")
+        var n = 0
+        val needs = vm.buildNeeds({ ByteArray(8) { (++n).toByte() } }, ByteArray(8), 1L, Lang.EN, null)
+        assertEquals(listOf(Category.WATER, Category.MEDICAL, Category.RESCUE), needs.map { it.category })
+        assertEquals(3, needs.map { it.msgIdHex }.toSet().size)
+        assertEquals(listOf("insulin", "medicine", "rescue"), needs.map { it.item })
+        assertTrue(needs.all { it.people == 4 && it.landmark == "school" && it.urgency == 3 })
+        needs.forEach { assertEquals(it, NeedCodec.decode(NeedCodec.encode(it))) }
+    }
+
+    @Test fun oneOrNoCategoryStillBuildsExactlyOneNeed() {
+        val vm = AskViewModel()
+        assertEquals(1, vm.buildNeeds({ ByteArray(8) }, ByteArray(8), 1L, Lang.EN, null).size)
+        vm.toggleCategory(Category.WATER)
+        assertEquals(1, vm.buildNeeds({ ByteArray(8) }, ByteArray(8), 1L, Lang.EN, null).size)
+    }
+
+    @Test fun answersGoOnlyToTheCategoryTheirQuestionBelongsTo() {
+        val vm = AskViewModel()
+        vm.toggleCategory(Category.RESCUE)
+        vm.toggleCategory(Category.MEDICAL)
+        vm.setAnswer(3, 1)
+        val needs = vm.buildNeeds({ ByteArray(8) }, ByteArray(8), 1L, Lang.EN, null)
+        assertEquals(listOf(NeedAnswer(3, 1)), needs[0].answers)
+        assertTrue(needs[1].answers.isEmpty())
     }
 
     @Test fun prefillAppliesOnceAndSurvivesExtraction() {

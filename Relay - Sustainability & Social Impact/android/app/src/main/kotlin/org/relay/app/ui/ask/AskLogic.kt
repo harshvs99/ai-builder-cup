@@ -18,6 +18,11 @@ import org.relay.core.payload.VulnFlag
  */
 data class AskDraft(
     val category: Category? = null,
+    /**
+     * Further categories the person also needs (water *and* food). Each goes out as its own NEED, sharing the people,
+     * flags, landmark, note and urgency; [category] stays the one the item and follow-up answers belong to.
+     */
+    val extraCategories: List<Category> = emptyList(),
     val item: String = "",
     val people: Int = 1,
     val vulnFlags: Set<VulnFlag> = emptySet(),
@@ -28,6 +33,9 @@ data class AskDraft(
     val answers: Map<Int, Int> = emptyMap(),
     val edited: Set<IntakeField> = emptySet(),
 ) {
+    /** Every chosen category, the primary first. */
+    val categories: List<Category> get() = listOfNotNull(category) + extraCategories
+
     /** Follow-up questions for the current category, from the bank (never written by a model). */
     val questionIds: List<Int> get() = QuestionBank.select(category ?: Category.OTHER, vulnFlags)
 }
@@ -39,8 +47,25 @@ object AskLogic {
     const val MAX_PEOPLE = 255
 
     /** Category chips of step 1, in display order; Missing person and Other sit behind "Something else". */
-    val mainCategories = listOf(Category.WATER, Category.FOOD, Category.MEDICAL, Category.RESCUE, Category.SHELTER)
+    // Water and food share one chip (WATER stands for the group): the same supply team answers both, so they are one
+    // ticket. A chip is a group of wire categories, and at most one per group is chosen.
+    val mainCategories = listOf(Category.WATER, Category.MEDICAL, Category.RESCUE, Category.SHELTER)
     val moreCategories = listOf(Category.MISSING_PERSON, Category.OTHER)
+
+    /** The chips of the Need editor on Check and send: every category on its own. */
+    val editorCategories = listOf(
+        Category.WATER, Category.FOOD, Category.MEDICAL, Category.RESCUE, Category.SHELTER, Category.MISSING_PERSON, Category.OTHER,
+    )
+
+    /** The wire categories one chip stands for. */
+    fun group(c: Category): List<Category> = if (c == Category.WATER || c == Category.FOOD) listOf(Category.WATER, Category.FOOD) else listOf(c)
+
+    /** Chip text: "Water / Food" for the supply group, else the category's name. */
+    fun chipLabel(common: CommonStrings, c: Category): String =
+        group(c).let { g -> if (g.size > 1) g.joinToString(" / ") { common.categoryName(it) } else common.categoryName(c) }
+
+    /** True when the draft has a category of the chip's group. */
+    fun isChosen(d: AskDraft, chip: Category): Boolean = d.categories.any { it in group(chip) }
 
     /** Display order of vulnerability flags (children first, as in the design). */
     val flagOrder = listOf(VulnFlag.CHILD, VulnFlag.ELDERLY, VulnFlag.PREGNANT, VulnFlag.INJURED, VulnFlag.TRAPPED)
@@ -75,7 +100,10 @@ object AskLogic {
         fun free(f: IntakeField) = f !in draft.edited
         return draft.copy(
             category = if (free(IntakeField.CATEGORY)) n.category.takeIf { it != Category.OTHER } else draft.category,
-            item = if (free(IntakeField.ITEM)) fit(n.item.trim(), MAX_ITEM) else draft.item,
+            // An item extracted for another category than the person chose (rice, for a chosen "water") is not theirs.
+            item = if (free(IntakeField.ITEM)) {
+                if (free(IntakeField.CATEGORY) || draft.category == null || n.category == draft.category) fit(n.item.trim(), MAX_ITEM) else ""
+            } else draft.item,
             people = if (free(IntakeField.PEOPLE)) n.people.coerceIn(1, MAX_PEOPLE) else draft.people,
             vulnFlags = if (free(IntakeField.VULN)) n.vulnFlags else draft.vulnFlags,
             landmark = if (free(IntakeField.LANDMARK)) fit(n.landmark.trim(), MAX_LANDMARK) else draft.landmark,
@@ -93,8 +121,60 @@ object AskLogic {
 
     /** Set the category by hand; null clears the choice so extraction decides again. */
     fun setCategory(d: AskDraft, c: Category?): AskDraft =
-        if (c == null) d.copy(category = null, edited = d.edited - IntakeField.CATEGORY).pruned()
-        else d.copy(category = c, edited = d.edited + IntakeField.CATEGORY).pruned()
+        if (c == null) d.copy(category = null, extraCategories = emptyList(), edited = d.edited - IntakeField.CATEGORY).pruned()
+        else d.copy(category = c, extraCategories = emptyList(), edited = d.edited + IntakeField.CATEGORY).pruned()
+            .let { retargeted(d, it) }
+
+    /**
+     * Tap on a merged chip (New request): adds its group to the chosen set, or removes it when already chosen. Tapping
+     * a category that extraction guessed only confirms it (so it stays); removing the primary promotes the next one;
+     * removing the last hands the decision back to extraction (category null, not edited).
+     */
+    fun toggleCategory(d: AskDraft, c: Category): AskDraft = change(d, c, exact = false)
+
+    /**
+     * Tap on an exact category (Check and send, where water and food are separate chips): like [toggleCategory], but
+     * a sibling in the same group is swapped for [c], so "food" can be corrected to "water".
+     */
+    fun pickCategory(d: AskDraft, c: Category): AskDraft = change(d, c, exact = true)
+
+    private fun change(d: AskDraft, c: Category, exact: Boolean): AskDraft {
+        val chosen = d.categories.firstOrNull { it in group(c) }
+        val n = when {
+            chosen == null ->
+                (if (d.category == null) d.copy(category = c) else d.copy(extraCategories = d.extraCategories + c))
+                    .copy(edited = d.edited + IntakeField.CATEGORY)
+            exact && chosen != c -> (
+                if (d.category == chosen) d.copy(category = c)
+                else d.copy(extraCategories = d.extraCategories.map { if (it == chosen) c else it })
+                ).copy(edited = d.edited + IntakeField.CATEGORY)
+            chosen in d.extraCategories -> d.copy(extraCategories = d.extraCategories - chosen)
+            IntakeField.CATEGORY !in d.edited -> d.copy(edited = d.edited + IntakeField.CATEGORY)
+            d.extraCategories.isEmpty() -> d.copy(category = null, edited = d.edited - IntakeField.CATEGORY)
+            else -> d.copy(category = d.extraCategories.first(), extraCategories = d.extraCategories.drop(1))
+        }
+        return retargeted(d, n).pruned()
+    }
+
+    /**
+     * An item the rules or a model picked belongs to the category it was picked for ("rice" for food); when the
+     * person moves the primary category and never edited the item, it is dropped so the new category's word shows.
+     */
+    private fun retargeted(old: AskDraft, new: AskDraft): AskDraft =
+        if (new.category != old.category && IntakeField.ITEM !in new.edited) new.copy(item = "") else new
+
+    /**
+     * One draft per chosen category, in order: the primary keeps the item and answers; the others get the category's
+     * own word as item and the shared fields. No category or one gives a single draft.
+     */
+    fun perCategory(d: AskDraft): List<AskDraft> {
+        val cats = d.categories
+        if (cats.size <= 1) return listOf(d.pruned())
+        return cats.mapIndexed { i, c ->
+            val n = d.copy(category = c, extraCategories = emptyList())
+            (if (i == 0) n else n.copy(item = "", answers = emptyMap())).pruned()
+        }
+    }
 
     fun setItem(d: AskDraft, text: String) = d.copy(item = fit(text, MAX_ITEM), edited = d.edited + IntakeField.ITEM)
 
@@ -158,6 +238,7 @@ object AskLogic {
     fun understood(common: CommonStrings, near: (String) -> String, d: AskDraft): List<String> = buildList {
         val need = needWords(common, d)
         if (need.isNotEmpty()) add(need)
+        d.extraCategories.forEach { add(chipLabel(common, it)) }
         if (d.people > 1 || d.vulnFlags.isNotEmpty()) add(
             if (d.vulnFlags.isEmpty()) common.people(d.people) else peopleLine(common, d.people, d.vulnFlags),
         )
@@ -174,7 +255,7 @@ object AskLogic {
 
     /** Item text for the wire: the draft's, or the category's English word so the control room never sees blank. */
     fun wireItem(d: AskDraft): String =
-        fit(d.item.trim().ifEmpty { englishWord.getValue(d.category ?: Category.OTHER) }, MAX_ITEM)
+        fit(d.item.trim().ifEmpty { if (d.category == Category.WATER) "food and water" else englishWord.getValue(d.category ?: Category.OTHER) }, MAX_ITEM)
 
     /** Answers in asking order, at most [QuestionBank.MAX_ANSWERS]; with any, the NEED encodes as v2. */
     fun wireAnswers(d: AskDraft): List<NeedAnswer> =

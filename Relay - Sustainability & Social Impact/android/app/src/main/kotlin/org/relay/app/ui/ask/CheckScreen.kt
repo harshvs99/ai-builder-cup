@@ -190,14 +190,16 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
                     return@launch
                 }
             }
-            val need = vm.buildNeed(
-                msgId = NodeId.random(), originNode = MeshRepository.nodeId, createdAtSec = System.currentTimeMillis() / 1000,
-                lang = lang, fix = current?.let { Triple(it.lat, it.lon, it.locAcc) },
+            // One NEED per chosen category; the first one's detail opens.
+            val needs = vm.buildNeeds(
+                newMsgId = { NodeId.random() }, originNode = MeshRepository.nodeId,
+                createdAtSec = System.currentTimeMillis() / 1000, lang = lang,
+                fix = current?.let { Triple(it.lat, it.lon, it.locAcc) },
             )
-            MeshRepository.submitNeed(need, ctx)
+            needs.forEach { MeshRepository.submitNeed(it, ctx) }
             LocationProvider.stop()
             LocationProvider.reset()
-            nav.finishAskTo(need.msgIdHex)
+            nav.finishAskTo(needs.first().msgIdHex)
         }
     }
 
@@ -224,7 +226,7 @@ fun CheckScreen(nav: RelayNav, flowOwner: ViewModelStoreOwner) {
         openWhereEditor = openWhere, onWhereEditorOpened = { openWhere = false },
         onBack = nav::back,
         onTurnOnLocation = ::turnOnLocation,
-        onSetCategory = vm::setCategory,
+        onSetCategory = vm::pickCategory,
         onSetItem = vm::setItem,
         onSetPeople = vm::setPeople,
         onToggleFlag = vm::toggleFlag,
@@ -293,7 +295,8 @@ fun CheckContent(
             Text(s.ask.isThisRight, style = MaterialTheme.typography.headlineSmall)
 
             SectionCard {
-                EditableRow(s.ask.rowNeed, AskLogic.needWords(common, draft).ifEmpty { s.ask.nothingChosen }, { editor = CheckEditor.NEED })
+                EditableRow(s.ask.rowNeed, (listOf(AskLogic.needWords(common, draft)) + draft.extraCategories.map { AskLogic.chipLabel(common, it) })
+                    .filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { s.ask.nothingChosen }, { editor = CheckEditor.NEED })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 EditableRow(s.ask.rowPeople, AskLogic.peopleLine(common, draft.people, draft.vulnFlags), { editor = CheckEditor.PEOPLE })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -462,8 +465,8 @@ private fun EditorSheet(onDismiss: () -> Unit, doneLabel: String, content: @Comp
 private fun NeedEditor(s: Strings, d: AskDraft, onCategory: (Category) -> Unit, onItem: (String) -> Unit) {
     Text(s.ask.editNeedTitle, style = MaterialTheme.typography.titleLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        (AskLogic.mainCategories + AskLogic.moreCategories).forEach { c ->
-            CategoryChip(s.common.categoryName(c), c, d.category == c) { onCategory(c) }
+        AskLogic.editorCategories.forEach { c ->
+            CategoryChip(s.common.categoryName(c), c, c in d.categories) { onCategory(c) }
         }
     }
     LimitedField(s, s.ask.itemLabel, d.item, AskLogic.MAX_ITEM, onItem)
