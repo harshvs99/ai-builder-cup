@@ -114,6 +114,14 @@ class AskStrings(private val lang: Lang) {
     val editWhereTitle get() = tr(lang, "Where are you?", "आप कहाँ हैं?", "ଆପଣ କେଉଁଠି ଅଛନ୍ତି?", "Nasaan kayo?", "Hain kamo?") // needs native review
     val landmarkLabel get() = tr(lang, "A place nearby (school, temple, shop)", "पास की कोई जगह (स्कूल, मंदिर, दुकान)", "ପାଖର ଏକ ସ୍ଥାନ (ସ୍କୁଲ, ମନ୍ଦିର, ଦୋକାନ)", "Isang lugar na malapit (paaralan, templo, tindahan)", "Usa nga lugar nga harapit (eskwelahan, templo, tindahan)") // needs native review
     val editNoteTitle get() = tr(lang, "Add a short note", "छोटी टिप्पणी जोड़ें", "ଏକ ଛୋଟ ଟିପ୍ପଣୀ ଯୋଗ କରନ୍ତୁ", "Magdagdag ng maikling tala", "Pagdugang hin mubo nga sumat") // needs native review
+    val sentInEnglish get() = tr(lang, "Sent to the control room in English", "कंट्रोल रूम को अंग्रेज़ी में भेजा जाता है", "କଣ୍ଟ୍ରୋଲ ରୁମକୁ ଇଂରାଜୀରେ ପଠାଯାଏ", "Ipapadala sa control room sa English", "Ipadadara ha control room ha English") // needs native review
+    val noteSentInEnglish get() = tr(
+        lang, "This note is sent to the control room in English, as written here.",
+        "यह टिप्पणी कंट्रोल रूम को अंग्रेज़ी में, जैसी यहाँ लिखी है वैसी ही भेजी जाती है।",
+        "ଏହି ଟିପ୍ପଣୀ ଏଠାରେ ଯେପରି ଲେଖା ଅଛି ସେହିପରି ଇଂରାଜୀରେ କଣ୍ଟ୍ରୋଲ ରୁମକୁ ପଠାଯାଏ।",
+        "Ipapadala ang tala na ito sa control room sa English, ayon sa pagkakasulat dito.",
+        "Ipadadara ini nga sumat ha control room ha English, sugad han pagkasulat dinhi.",
+    ) // needs native review
     val noteLabel get() = tr(lang, "Note", "टिप्पणी", "ଟିପ୍ପଣୀ", "Tala", "Sumat") // needs native review
     fun charsLeft(n: Int) = tr(lang, "$n characters left", "$n अक्षर बाकी", "$n ଅକ୍ଷର ବାକି", "$n karakter ang natitira", "$n ka karakter an nahibilin") // needs native review
 }

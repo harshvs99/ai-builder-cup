@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.relay.app.store.MyNeed
+import org.relay.app.ui.components.requestLabel
 import org.relay.app.ui.components.requestTitle
 import org.relay.app.ui.components.requestTrailing
 import org.relay.app.ui.home.RequestLists
@@ -40,6 +41,23 @@ class RequestListsTest {
         assertEquals("Urgent", requestTrailing(need("a", 1), c))
         assertEquals("Closed", requestTrailing(need("a", 1, ack = 3), c))
         assertEquals("Cancelled", requestTrailing(need("a", 1, cancelled = true), c))
+    }
+
+    @Test fun labelLocalizesWireItemOutsideEnglish() {
+        val hi = stringsFor(Lang.HI).common
+        val en = stringsFor(Lang.EN).common
+        // restatement of the category: just the localized category
+        assertEquals("पानी", requestLabel(Category.WATER, "water", false, hi::categoryName))
+        assertEquals("पानी", requestLabel(Category.WATER, "Drinking water", false, hi::categoryName))
+        assertEquals("दवा", requestLabel(Category.MEDICAL, "medicine", false, hi::categoryName))
+        assertEquals("पानी", requestLabel(Category.WATER, "", false, hi::categoryName))
+        // a more specific item keeps the item
+        assertEquals("दवा: insulin", requestLabel(Category.MEDICAL, "insulin", false, hi::categoryName))
+        // English unchanged
+        assertEquals("Water", requestLabel(Category.WATER, "water", true, en::categoryName))
+        assertEquals("Insulin", requestLabel(Category.MEDICAL, "insulin", true, en::categoryName))
+        assertEquals("Water", requestLabel(Category.WATER, " ", true, en::categoryName))
+        assertEquals("पानी · 6 लोग", requestTitle(need("a", 1, item = "water"), hi))
     }
 
     @Test fun homeCategoriesLine() {

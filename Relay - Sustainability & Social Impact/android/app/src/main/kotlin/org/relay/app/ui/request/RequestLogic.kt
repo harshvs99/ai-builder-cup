@@ -2,6 +2,7 @@ package org.relay.app.ui.request
 
 import org.relay.app.store.MyNeed
 import org.relay.app.store.RequestTimeline
+import org.relay.app.ui.components.requestTitle
 import org.relay.app.ui.i18n.CommonStrings
 import org.relay.app.ui.i18n.Strings
 import org.relay.core.payload.AckStatus
@@ -13,8 +14,7 @@ object RequestLogic {
         if (need.ticketNo >= 0) "#${need.ticketNo}" else "R-" + need.msgIdHex.take(4).uppercase()
 
     /** "Drinking water · 6 people": the item (or category name), then the head count. */
-    fun title(need: MyNeed, common: CommonStrings): String =
-        need.item.ifBlank { common.categoryName(need.category) } + " · " + common.people(need.people)
+    fun title(need: MyNeed, common: CommonStrings): String = requestTitle(need, common)
 
     /** Plain-text summary for the share sheet, in the app language of [s]. */
     fun shareText(need: MyNeed, s: Strings, area: String, now: Long): String {

@@ -44,7 +44,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -194,6 +197,15 @@ fun AskContent(
     val canContinue = AskLogic.hasContent(draft, state.transcript) && !busy
     var showMore by rememberSaveable { mutableStateOf(false) }
     val listening = voice is VoiceUi.Listening
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // Typing mode (opened in it, or switched to it) puts the cursor in the field with the keyboard up.
+    LaunchedEffect(state.typing) {
+        if (state.typing) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         StepTopAppBar(s.ask.newRequestTitle, onBack = onBack, stepText = s.ask.stepCounter(1, 3))
@@ -211,7 +223,7 @@ fun AskContent(
                     OutlinedTextField(
                         value = state.transcript,
                         onValueChange = onTranscript,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                         label = { Text(s.ask.typeHint) },
                         placeholder = { Text(s.ask.typePlaceholder) },
                         minLines = 3,

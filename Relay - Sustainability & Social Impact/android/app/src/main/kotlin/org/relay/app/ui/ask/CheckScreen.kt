@@ -258,7 +258,10 @@ fun CheckContent(
                     } else null,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                EditableRow(s.ask.rowNote, draft.summary.ifBlank { s.ask.noNote }, { editor = CheckEditor.NOTE })
+                EditableRow(
+                    s.ask.rowNote, draft.summary.ifBlank { s.ask.noNote }, { editor = CheckEditor.NOTE },
+                    secondary = if (!common.isEnglish && draft.summary.isNotBlank()) s.ask.sentInEnglish else null,
+                )
             }
 
             val questions = draft.questionIds.mapNotNull { QuestionBank.byId(it) }
@@ -401,6 +404,9 @@ private fun WhereEditor(
 @Composable
 private fun NoteEditor(s: Strings, d: AskDraft, onSummary: (String) -> Unit) {
     Text(s.ask.editNoteTitle, style = MaterialTheme.typography.titleLarge)
+    if (!s.common.isEnglish) {
+        Text(s.ask.noteSentInEnglish, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     LimitedField(s, s.ask.noteLabel, d.summary, AskLogic.MAX_SUMMARY, onSummary, singleLine = false)
 }
 

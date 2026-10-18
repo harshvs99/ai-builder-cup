@@ -97,11 +97,11 @@ internal object Lexicons {
         Concept("ambulance", Category.MEDICAL, 2, "ambulance", "needs ambulance", request = true, lex = Lex(
             "ambulance*", "ambulans*", "एम्बुलेंस*", "एंबुलेंस*", "ଆମ୍ବୁଲାନ୍ସ*")),
         Concept("injured", Category.MEDICAL, 2, "first aid", "injured", injured, lex = Lex(
-            "injur*", "hurt", "wound*", "fractur*", "~broken\\s+(?:leg|arm|bone|hand|foot|back)", "chot*", "चोट*",
+            "injur*", "hurt", "wound*", "fractur*", "~broken\\s+(?:leg|arm|bone|hand|foot|back)", "chot*", "चोट*", "ଚୋଟ*", "ghaayal*", "ghayl*", "zakhm*", "जख्म*", "ज़ख्म*", "जख़्म*",
             "ghayal*", "घायल*", "zakhmi*", "ଆହତ*", "ahat*", "aghat*", "ଆଘାତ*", "sugat*", "nasugat*", "samad*",
             "nasamad*", "nasamd*", "first aid")),
         Concept("pregnant", Category.MEDICAL, 2, "medical help", "pregnant", pregnant, context = true, lex = Lex(
-            "pregnan*", "garbhavati*", "garbhwati*", "garbhini*", "गर्भवती*", "गर्भ*", "ଗର୍ଭବତୀ*", "ଗର୍ଭ*",
+            "pregnan*", "garbhvati*", "garbhawati*", "garbhavti*", "garbhvti*", "garbh*", "garbhavati*", "garbhwati*", "garbhini*", "गर्भवती*", "गर्भ*", "ଗର୍ଭବତୀ*", "ଗର୍ଭ*",
             "buntis*", "mabdos*")),
         Concept("fever", Category.MEDICAL, 2, "medicine", "fever", lex = Lex(
             "fever*", "bukhar*", "bukhaar*", "बुखार*", "ଜ୍ୱର*", "ଜ୍ବର*", "jwar*", "jwara*", "lagnat*",
@@ -115,7 +115,7 @@ internal object Lexicons {
         // ---------------- RESCUE, default (2)
         Concept("stuck", Category.RESCUE, 2, "rescue", "stuck", trapped, lex = Lex(
             "stuck", "stranded", "marooned", "~(?:can'?t|cannot)\\s+(?:get|come)\\s+out", "~can'?t\\s+leave",
-            "fase", "phase", "phanse*", "fanse*", "fasa", "phansa", "fans*", "phans*", "फंस*", "फँस*", "फसे", "फसा",
+            "fase", "phase", "fasse*", "phasse*", "fasey*", "phasey*", "fasi*", "phanse*", "fanse*", "fasa", "phansa", "fans*", "phans*", "फंस*", "फँस*", "फ़ंस*", "फसे", "फसा",
             "फस", "ଫସି*", "phasi*")),
         Concept("collapsed", Category.RESCUE, 2, "rescue", "building collapsed", context = true, lex = Lex(
             "collapse*", "gir gaya", "gir gayi", "gir gaye", "~ghar\\s+gir\\w*", "ढह*", "गिर गया", "गिर गई",
@@ -180,11 +180,12 @@ internal object Lexicons {
             "~old\\s+(?:man|woman|lady|person|people|couple|age|mother|father|parents|folks)",
             "~very\\s+old", "~too\\s+old", "aged",
             "dadi", "dada", "nani", "nana", "दादी*", "दादा*", "नानी*", "नाना*", "बुजुर्ग*", "बूढ*", "बुढ*", "budha*",
-            "budhi*", "budhiya*", "bujurg*", "ବୃଦ୍ଧ*", "ବୁଢ*", "ଜେଜେମା*", "ଜେଜେବାପା*", "jejema*", "jejebapa*",
+            "budhi*", "budhiya*", "bujurg*", "buzurg*", "buzurag*", "bujurag*", "budhe*", "bhudhe*", "boodh*", "bood*",
+            "vriddh*", "vrudh*", "बुज़ुर्ग*", "बूढे*", "वृद्ध*", "ବୃଦ୍ଧ*", "ବୁଢ*", "ଜେଜେମା*", "ଜେଜେବାପା*", "jejema*", "jejebapa*",
             "lola", "lolo", "lolang", "matanda*", "tigulang*", "tigurang*", "gurang*"),
         VulnFlag.CHILD to Lex(
             "child*", "kid", "kids", "baby", "babies", "infant*", "toddler*", "newborn*", "bachcha*", "bachche*",
-            "bacche*", "bachha*", "bachhe*", "bacchon*", "bachchon*", "bachhon*", "बच्च*", "शिशु*", "ଶିଶୁ*", "ପିଲା*",
+            "bacche*", "baccha*", "bachchi*", "bacchi*", "bachi*", "bachha*", "bachhe*", "bacchon*", "bachchon*", "bachhon*", "बच्च*", "शिशु*", "ଶିଶୁ*", "ପିଲା*", "ଛୁଆ*", "chhua*",
             "pila", "pilamane*", "sanggol*", "bata", "batang", "mga bata", "anak*"),
     )
 

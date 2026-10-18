@@ -28,9 +28,31 @@ import org.relay.app.ui.theme.RelayTheme
 import org.relay.core.payload.Category
 import org.relay.core.payload.Lang
 
-/** "Drinking water · 6 people": the item, or the category name when there is none, then the head count. */
+/** Item words that merely restate their category, so the localized category name can stand in for them. */
+private val restatements: Map<Category, Set<String>> = mapOf(
+    Category.WATER to setOf("water", "drinking water", "needs water"),
+    Category.FOOD to setOf("food", "needs food", "rice", "rice and dal"),
+    Category.MEDICAL to setOf("medicine", "medicines", "needs medicine", "medical", "medical help", "needs medical help", "doctor", "needs doctor"),
+    Category.RESCUE to setOf("rescue", "needs rescue", "help"),
+    Category.SHELTER to setOf("shelter", "needs shelter"),
+    Category.MISSING_PERSON to setOf("missing person", "missing"),
+)
+
+/**
+ * The name of what is needed, for titles and share text. English UI: the item (capitalised), else the category.
+ * Other languages: the wire item is English, so show the localized category; when the item says more than the
+ * category does (e.g. "insulin" under MEDICAL) show "<category>: <item>".
+ */
+fun requestLabel(category: Category, item: String, english: Boolean, categoryName: (Category) -> String): String {
+    val shown = item.trim()
+    if (english) return shown.ifBlank { categoryName(category) }.replaceFirstChar { it.uppercase() }
+    val restates = shown.isEmpty() || shown.lowercase() in restatements[category].orEmpty()
+    return if (restates) categoryName(category) else "${categoryName(category)}: $shown"
+}
+
+/** "Drinking water · 6 people" (English) or "पानी · 6 लोग": the label from [requestLabel], then the head count. */
 fun requestTitle(need: MyNeed, c: CommonStrings): String =
-    "${need.item.ifBlank { c.categoryName(need.category) }.replaceFirstChar { it.uppercase() }} · ${c.people(need.people)}"
+    "${requestLabel(need.category, need.item, c.isEnglish, c::categoryName)} · ${c.people(need.people)}"
 
 /** The trailing label: the urgency word while open, "Closed" when resolved, "Cancelled" when cancelled. */
 fun requestTrailing(need: MyNeed, c: CommonStrings): String = when {

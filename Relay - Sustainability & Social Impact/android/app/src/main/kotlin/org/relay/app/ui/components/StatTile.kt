@@ -25,8 +25,10 @@ fun StatTile(
 ) {
     Surface(modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // a word ("Charging") must not dominate like a number does
+            val isNumber = value.firstOrNull()?.isDigit() == true
             Text(
-                value, style = MaterialTheme.typography.headlineMedium,
+                value, style = if (isNumber) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
                 color = if (valueColor == Color.Unspecified) MaterialTheme.colorScheme.onSurface else valueColor,
             )
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

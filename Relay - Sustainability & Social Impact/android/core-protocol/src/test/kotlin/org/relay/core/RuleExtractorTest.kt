@@ -89,6 +89,36 @@ class RuleExtractorTest {
     @Test fun hindiHinglish4() = x("bachcha bhookha hai, khana chahiye, panchayat ke paas").check(
         Category.FOOD, 1, "food", "panchayat office", 1, Lang.HI, setOf(VulnFlag.CHILD))
 
+    // vulnerability-flag vocabulary: common Hindi/Hinglish/Odia spellings
+    private fun flags(text: String) = x(text).vulnFlags
+    @Test fun elderlyWords() {
+        for (w in listOf("buzurg", "bujurg", "budhe", "budhi", "बुजुर्ग", "बूढ़े", "बूढ़ी", "बुज़ुर्ग", "ବୃଦ୍ଧ", "ବୁଢ଼ା", "ବୁଢ଼ୀ")) {
+            assertTrue("ELDERLY for '$w'", VulnFlag.ELDERLY in flags("ghar mein $w hain, pani chahiye $w"))
+        }
+    }
+    @Test fun hindiElderlyWalkthrough() = x("paani chahiye hum 6 log hain bachche aur buzurg school ke paas kal se pump kharab hai").check(
+        Category.WATER, people = 6, flags = setOf(VulnFlag.CHILD, VulnFlag.ELDERLY))
+    @Test fun childWords() {
+        for (w in listOf("bachche", "bacche", "baccha", "bachchi", "बच्चे", "शिशु", "ଶିଶୁ")) {
+            assertTrue("CHILD for '$w'", VulnFlag.CHILD in flags("pani chahiye $w ke liye"))
+        }
+    }
+    @Test fun pregnantWords() {
+        for (w in listOf("garbhvati", "garbhavati", "pregnant", "गर्भवती")) {
+            assertTrue("PREGNANT for '$w'", VulnFlag.PREGNANT in flags("ek $w mahila hai, dawai chahiye"))
+        }
+    }
+    @Test fun injuredWords() {
+        for (w in listOf("ghayal", "chot", "zakhmi", "घायल", "चोट")) {
+            assertTrue("INJURED for '$w'", VulnFlag.INJURED in flags("mere bhai ko $w hai, madad chahiye"))
+        }
+    }
+    @Test fun trappedWords() {
+        for (w in listOf("phanse", "fase", "फंसे", "फँसे")) {
+            assertTrue("TRAPPED for '$w'", VulnFlag.TRAPPED in flags("hum chhat par $w hain, bachao"))
+        }
+    }
+
     // ------------------------------------------------------------------ Odia
     @Test fun odiaScript1() = x("ମୋ ମାଙ୍କୁ ଇନସୁଲିନ ଦରକାର, ସ୍କୁଲ ପାଖରେ").check(
         Category.MEDICAL, 3, "insulin", "school", 1, Lang.OR)

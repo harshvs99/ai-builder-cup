@@ -15,6 +15,7 @@ import java.util.Locale
  * hi, or, tl and war are drafts: every non-English string here needs native review (// needs native review).
  */
 class CommonStrings(private val lang: Lang) {
+    val isEnglish get() = lang == Lang.EN
     // ---- navigation
     val navHome get() = tr(lang, "Home", "होम", "ହୋମ୍", "Home", "Balay") // needs native review
     val navRequests get() = tr(lang, "Requests", "अनुरोध", "ଅନୁରୋଧ", "Mga Kahilingan", "Mga Hangyo") // needs native review
