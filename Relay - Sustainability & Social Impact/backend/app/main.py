@@ -25,6 +25,7 @@ from . import broadcast as broadcasts
 from . import dispatch as dispatching
 from . import districts, languages
 from . import ready as readiness
+from . import shelters as shelter_lists
 from . import sitrep as sitreps
 from . import teams as team_data
 from .embed import Embedder, embedder_from_env
@@ -233,6 +234,25 @@ class PlanRequest(BaseModel):
         return v
 
 
+class ShelterListRequest(BaseModel):
+    """``POST /v1/ready/shelter-lists``: a hand-entered draft. ``PATCH`` takes ``entries`` only."""
+
+    district: str
+    entries: list[dict[str, Any]] = Field(default_factory=list, max_length=shelter_lists.MAX_ENTRIES)
+
+
+class ShelterDiscoverRequest(BaseModel):
+    district: str
+
+
+class ShelterEntriesPatch(BaseModel):
+    entries: list[dict[str, Any]] = Field(max_length=shelter_lists.MAX_ENTRIES)
+
+
+class ShelterPublishRequest(BaseModel):
+    note: str = Field(default="", max_length=200)  # who verified, e.g. "checked against OSDMA PDF dated ..."
+
+
 class InjectRequest(BaseModel):
     needs: list[NeedJson] = Field(max_length=200)
 
@@ -395,13 +415,15 @@ def create_app(
     embedder: Embedder | None = None,
     ready_textgen: TextGen | None = None,
     speech: Speech | None = None,
+    shelter_finder: shelter_lists.ShelterFinder | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
     orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default the Pro alias, Flash fallback);
     ``broadcast_textgen`` translates and checks broadcasts (``BROADCAST_GEMINI_MODEL``); ``ready_textgen`` writes
     the Ready-mode household plan (``READY_GEMINI_MODEL``); all default to Gemini when the environment enables
-    it, else to templates. ``speech`` reads plans aloud (``RELAY_TTS_MODEL``, off by default)."""
+    it, else to templates. ``speech`` reads plans aloud (``RELAY_TTS_MODEL``, off by default).
+    ``shelter_finder`` is the Search-grounded call that drafts a shelter list (``SHELTER_GEMINI_MODEL``)."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
     operator_key = operator_key if operator_key is not None else os.environ.get("RELAY_OPERATOR_KEY", "")
@@ -428,7 +450,8 @@ def create_app(
     ready_textgen = ready_textgen if ready_textgen is not None else textgen_from_env("READY_GEMINI_MODEL")
     speech = speech if speech is not None else speech_from_env()
     store = store if store is not None else open_store(db_path=db_path)
-    plans = readiness.PlanService(ready_textgen, clock)
+    shelter_finder = shelter_finder if shelter_finder is not None else shelter_lists.shelter_finder_from_env()
+    plans = readiness.PlanService(ready_textgen, clock, store)
     pipeline = TriagePipeline(
         store,
         agent if agent is not None else agent_from_env(),
@@ -885,7 +908,82 @@ def create_app(
         """The district's shelter list as phones get it in the pack (the pack itself needs the device key)."""
         d = district_or_404(district)
         lang = check_lang(lang)
-        return {"district": d.id, "shelters": [readiness.shelter_view(s, lang, d) for s in readiness.shelters_for(d)]}
+        return {"district": d.id, "shelters": [readiness.shelter_view(s, lang, d) for s in readiness.shelters_for(d, store)]}
+
+    # ------------------------------------------------------------------ shelter lists (Discover -> Verify -> Publish)
+    shelter_lock = threading.Lock()
+
+    def draft_list_or_error(list_id: int) -> dict[str, Any]:
+        rec = store.get_shelter_list(list_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="shelter list not found")
+        if rec["status"] != "draft":
+            raise HTTPException(status_code=409, detail=f"list is {rec['status']}; only a draft can change")
+        return rec
+
+    @app.post("/v1/ready/shelter-lists/discover", dependencies=operator)
+    def discover_shelters(body: ShelterDiscoverRequest) -> dict[str, Any]:
+        """Gemini + Google Search drafts the district's official shelter list. Every entry starts unverified."""
+        d = district_or_404(body.district)
+        if shelter_finder is None:
+            raise HTTPException(status_code=503, detail="no Gemini credentials: set GEMINI_API_KEY (or Vertex AI) to discover shelters, or enter the list manually")
+        try:
+            rec = shelter_lists.discover(d.id, d.name, shelter_finder, clock())
+        except Exception as e:
+            log.warning("shelter discovery failed: %s: %s", type(e).__name__, e)
+            raise HTTPException(status_code=502, detail=f"shelter discovery failed ({type(e).__name__}); try again or enter the list manually") from e
+        return store.add_shelter_list(rec)
+
+    @app.post("/v1/ready/shelter-lists", dependencies=operator)
+    def create_shelter_list(body: ShelterListRequest) -> dict[str, Any]:
+        d = district_or_404(body.district)
+        entries, notes = shelter_lists.validate_entries(body.entries, d.id, [])
+        return store.add_shelter_list(shelter_lists.new_record(d.id, entries, clock(), notes=notes))
+
+    @app.get("/v1/ready/shelter-lists", dependencies=operator)
+    def list_shelter_lists(district: str | None = None) -> dict[str, Any]:
+        did = district_or_404(district).id if district is not None else None
+        return {"lists": store.list_shelter_lists(did)}
+
+    @app.patch("/v1/ready/shelter-lists/{list_id}", dependencies=operator)
+    def patch_shelter_list(list_id: int, body: ShelterEntriesPatch) -> dict[str, Any]:
+        with shelter_lock:
+            rec = draft_list_or_error(list_id)
+            entries, notes = shelter_lists.validate_entries(body.entries, rec["district"], rec.get("sources", []))
+            return store.update_shelter_list(list_id, {"entries": entries, "notes": notes}) or rec
+
+    @app.post("/v1/ready/shelter-lists/{list_id}/publish", dependencies=operator)
+    def publish_shelter_list(list_id: int, body: ShelterPublishRequest | None = None) -> dict[str, Any]:
+        """Publishes the verified entries that have in-district coordinates; archives the previous list."""
+        with shelter_lock:
+            rec = draft_list_or_error(list_id)
+            ok, skipped = shelter_lists.split_for_publish(rec)
+            if not any(e.get("verified") for e in rec["entries"]):
+                raise HTTPException(status_code=422, detail="verify at least one entry before publishing")
+            if not ok:
+                raise HTTPException(status_code=422, detail="no verified entry has coordinates inside the district; set them on the map first")
+            for old in store.list_shelter_lists(rec["district"]):
+                if old["status"] == "published":
+                    store.update_shelter_list(old["id"], {"status": "archived"})
+            saved = store.update_shelter_list(list_id, {
+                "status": "published", "published_at": int(clock()),
+                "published_by_note": (body.note.strip() if body else "") or None,
+            })
+        return {"list": saved, "published": len(ok), "skipped": skipped}
+
+    @app.get("/v1/public/shelters")
+    def public_shelters(district: str) -> dict[str, Any]:
+        """No auth: anyone can look up the district's published, officer-verified shelters."""
+        d = district_or_404(district)
+        rec = shelter_lists.current_published(store, d.id)
+        items = shelter_lists.published_shelters(rec) if rec else []
+        if not items:
+            raise HTTPException(status_code=404, detail=f"no published shelter list for {d.id}")
+        return {
+            "district": d.id, "published_at": rec["published_at"],
+            "shelters": [{k: v for k, v in s.items() if k != "block"} for s in items],
+            "source_note": "Verified by the control room against the district disaster management authority's list; confirm with local officials before travelling.",
+        }
 
     @app.get("/v1/ready/pack", dependencies=[Depends(require_key)])
     def ready_pack(
@@ -898,7 +996,7 @@ def create_app(
         in ``lang`` where a local name exists, a checklist, and ``version`` (hash of the content)."""
         d = resolve_district(district, lat, lon)
         now = clock()
-        return readiness.build_pack(d, check_lang(lang), district_warning(d.id, now), now)
+        return readiness.build_pack(d, check_lang(lang), district_warning(d.id, now), now, store)
 
     def make_plan(body: PlanRequest) -> dict[str, Any]:
         d = resolve_district(body.district, body.lat, body.lon)

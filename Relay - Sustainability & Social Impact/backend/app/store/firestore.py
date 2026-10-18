@@ -16,6 +16,7 @@ Layout (all top-level collections in the configured database):
   sitreps/{id}          generated sitreps; ``id`` comes from counters/sitrep
   broadcasts/{id}       broadcast drafts and approvals; ``id`` comes from counters/broadcast
   warnings/{id}         ready-mode warnings; ``id`` comes from counters/warning
+  shelter_lists/{id}    shelter lists (draft/published/archived); ``id`` comes from counters/shelter_list
   counters/{name}       ``ticket_no`` and ``ack_seq``: ``value`` is the last number handed out
 
 Atomicity: every multi-document write is one Firestore transaction (reads first, then
@@ -653,6 +654,51 @@ class FirestoreStore:
 
         with self._write_lock:
             return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    # ------------------------------------------------------------------ shelter lists
+    def add_shelter_list(self, record: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, lid = self._next(txn, "shelter_list")
+            saved = {**{k: v for k, v in record.items() if k != "id"}, "id": lid}
+            txn.set(self._col("shelter_lists").document(str(lid)), saved)
+            txn.set(ref, {"value": lid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def get_shelter_list(self, list_id: int) -> dict[str, Any] | None:
+        snap = self._col("shelter_lists").document(str(list_id)).get()
+        return snap.to_dict() if snap.exists else None
+
+    def update_shelter_list(self, list_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        ref = self._col("shelter_lists").document(str(list_id))
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any] | None:
+            snap = ref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            rec = {**snap.to_dict(), **{k: v for k, v in fields.items() if k not in ("id", "district")}}
+            txn.set(ref, rec)
+            return rec
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def list_shelter_lists(self, district: str | None = None) -> list[dict[str, Any]]:
+        # one equality filter (automatic index); newest-first sort in memory
+        q = self._col("shelter_lists")
+        if district is not None:
+            q = self._eq(q, "district", "==", district)
+        docs = [s.to_dict() for s in q.stream()]
+        docs.sort(key=lambda d: d["id"], reverse=True)
+        return docs[:200]
 
     # ------------------------------------------------------------------ acks
     def _newest_ack_seq(self) -> int:

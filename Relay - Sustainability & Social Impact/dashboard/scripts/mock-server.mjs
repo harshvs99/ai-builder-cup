@@ -145,7 +145,7 @@ const sorted = () => [...tickets.values()].sort((a, b) => b.priority_score - a.p
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Relay-Key, X-Operator-Key',
 };
 function send(res, status, body) {
@@ -171,7 +171,67 @@ const SHELTERS = {
   ],
 };
 const shelterView = (s) => ({ ...s, name_en: s.name, demo: true });
+// Shelter lists: discover returns 3 fake entries (one without coordinates); publish makes them the district's list.
+/** @type {Map<number, any>} */
+const shelterLists = new Map();
+let nextShelterList = 1;
+const SUGGESTIONS = '<div class="container"><a class="chip" href="https://www.google.com/search?q=cyclone+shelters" style="font:13px sans-serif;padding:6px 12px;border:1px solid #888;border-radius:16px;text-decoration:none">cyclone shelters list</a></div>';
+const fakeEntry = (id, name, over = {}) => ({ id, name, name_local: null, kind: 'cyclone_shelter', address: 'Mock address', block: null, capacity: 500,
+  lat: null, lon: null, coords_from: 'none', source_url: 'https://example.gov.in/shelters.pdf', verified: false, issues: [], ...over });
+function discoverEntries(district) {
+  const [lat, lon] = district === 'delhi' ? [28.62, 77.22] : [19.81, 85.83];
+  return [
+    fakeEntry('e1', 'Mock Multipurpose Cyclone Shelter', { lat, lon, coords_from: 'source' }),
+    fakeEntry('e2', 'Mock Govt High School', { kind: 'school', lat: lat + 0.02, lon: lon + 0.02, coords_from: 'estimate', issues: ["coordinates are the model's estimate: check them on the map"] }),
+    fakeEntry('e3', 'Mock Relief Camp (no coordinates)', { kind: 'relief_camp', capacity: null, issues: ['no coordinates: set them on the map before publishing'] }),
+  ];
+}
+function shelterRoute(req, res, path, url) {
+  if (req.method === 'GET' && path === '/v1/ready/shelter-lists') {
+    const d = url.searchParams.get('district');
+    return send(res, 200, { lists: [...shelterLists.values()].filter((l) => !d || l.district === d).sort((a, b) => b.id - a.id) });
+  }
+  if (req.method === 'POST' && (path === '/v1/ready/shelter-lists/discover' || path === '/v1/ready/shelter-lists')) {
+    return readBody(req, (b) => {
+      if (!b || !DISTRICT_IDS.includes(b.district)) return send(res, 404, { detail: 'unknown district' });
+      const found = path.endsWith('/discover');
+      const l = { id: nextShelterList++, district: b.district, status: 'draft', created_at: now(),
+        entries: found ? discoverEntries(b.district) : (b.entries ?? []).map((e, i) => fakeEntry(`e${i + 1}`, e.name ?? '', e)),
+        sources: found ? [{ uri: 'https://example.gov.in/shelters.pdf', title: 'example.gov.in' }] : [], search_suggestions_html: found ? SUGGESTIONS : '',
+        model: found ? 'mock' : null, notes: [], origin: found ? 'gemini' : 'manual', published_at: null, published_by_note: null };
+      shelterLists.set(l.id, l);
+      setTimeout(() => send(res, 200, l), found ? 800 : 0);
+    });
+  }
+  const sl = path.match(/^\/v1\/ready\/shelter-lists\/(\d+)(\/publish)?$/);
+  if (sl) {
+    const l = shelterLists.get(Number(sl[1]));
+    if (!l) return send(res, 404, { detail: 'shelter list not found' });
+    if (l.status !== 'draft') return send(res, 409, { detail: `list is ${l.status}; only a draft can change` });
+    if (req.method === 'PATCH' && !sl[2]) {
+      return readBody(req, (b) => {
+        l.entries = (b?.entries ?? []).map((e, i) => fakeEntry(e.id ?? `e${i + 1}`, String(e.name ?? ''), { ...e, issues: e.lat == null ? ['no coordinates: set them on the map before publishing'] : [] }));
+        send(res, 200, l);
+      });
+    }
+    if (req.method === 'POST' && sl[2]) {
+      return readBody(req, (b) => {
+        const ok = l.entries.filter((e) => e.verified && e.lat != null && e.lon != null);
+        if (!l.entries.some((e) => e.verified)) return send(res, 422, { detail: 'verify at least one entry before publishing' });
+        if (ok.length === 0) return send(res, 422, { detail: 'no verified entry has coordinates inside the district; set them on the map first' });
+        for (const o of shelterLists.values()) if (o.district === l.district && o.status === 'published') o.status = 'archived';
+        l.status = 'published';
+        l.published_at = now();
+        l.published_by_note = b?.note || null;
+        const skipped = l.entries.filter((e) => !ok.includes(e)).map((e) => ({ id: e.id, name: e.name, reason: e.verified ? 'no coordinates' : 'not verified' }));
+        send(res, 200, { list: l, published: ok.length, skipped });
+      });
+    }
+  }
+  return false;
+}
 function readyRoute(req, res, path, url) {
+  if (path.startsWith('/v1/ready/shelter-lists') && shelterRoute(req, res, path, url) !== false) return;
   if (req.method === 'GET' && path === '/v1/ready/warnings') {
     const d = url.searchParams.get('district');
     if (d && !DISTRICT_IDS.includes(d)) return send(res, 404, { detail: `unknown district '${d}'` });

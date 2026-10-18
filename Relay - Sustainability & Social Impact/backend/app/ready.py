@@ -1,5 +1,9 @@
 """Ready mode: what a household does *before* landfall, while phones still have signal.
 
+Shelter source. ``shelters_for(district, store)`` returns the district's *published* shelter list when the
+control room has published one (``shelters.py``: generated with Gemini + Search, verified by an officer), else the demo
+files below; the pack says which (``shelters_source`` "published" | "demo", ``shelters_published_at``).
+
 DEMO DATA WARNING. ``data/shelters_puri.json`` and ``data/shelters_delhi.json`` are PLACEHOLDERS. Every
 entry is marked ``"demo": true``: plausible names, coordinates inside the district, invented capacities.
 They are not verified shelters. Before any pilot they must be replaced with the district's official list
@@ -149,8 +153,25 @@ def load_all_shelters() -> dict[str, list[dict[str, Any]]]:
     return out
 
 
-def shelters_for(district: districts.District) -> list[dict[str, Any]]:
-    return load_all_shelters().get(district.id, [])
+def shelters_info(district: districts.District, store: Store | None = None) -> tuple[list[dict[str, Any]], str, int | None]:
+    """``(shelters, source, published_at)``: the district's published, officer-verified list
+    (``shelters.py``) when there is one, else the demo file entries (``source`` "demo")."""
+    if store is not None:
+        from . import shelters as shelter_lists
+
+        rec = shelter_lists.current_published(store, district.id)
+        if rec is not None:
+            items = [
+                {**p, "capacity": p["capacity"], "block": p["block"] or "", "facilities": [], "demo": False}
+                for p in shelter_lists.published_shelters(rec)
+            ]
+            if items:
+                return items, "published", rec.get("published_at")
+    return load_all_shelters().get(district.id, []), "demo", None
+
+
+def shelters_for(district: districts.District, store: Store | None = None) -> list[dict[str, Any]]:
+    return shelters_info(district, store)[0]
 
 
 def use_local_name(lang: str, district: districts.District) -> bool:
@@ -356,13 +377,17 @@ def pack_warning(w: dict[str, Any] | None) -> dict[str, Any] | None:
     return {k: w.get(k) for k in keys}
 
 
-def build_pack(district: districts.District, lang: str, warning: dict[str, Any] | None, now: float) -> dict[str, Any]:
+def build_pack(
+    district: districts.District, lang: str, warning: dict[str, Any] | None, now: float, store: Store | None = None,
+) -> dict[str, Any]:
     """The offline pack. ``version`` hashes everything except ``generated_at``, so it only changes when
     the warning, the shelter list or the checklist does."""
     tl = template_lang(lang)
+    shelters, source, published_at = shelters_info(district, store)
     content = {
         "district": district.id, "lang": lang, "warning": pack_warning(warning),
-        "shelters": [shelter_view(s, lang, district) for s in shelters_for(district)],
+        "shelters": [shelter_view(s, lang, district) for s in shelters],
+        "shelters_source": source, "shelters_published_at": published_at,
         "checklist": CHECKLIST.get(tl) or CONTRIB_CHECKLIST[tl], "checklist_lang": tl,
     }
     version = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
@@ -563,8 +588,9 @@ class PlanService:
     """Builds household plans: nearest shelters by haversine, steps from the model (validated) or a
     template, an in-memory cache, and the id the audio endpoint finds the text by."""
 
-    def __init__(self, textgen: TextGen | None, clock: Callable[[], float]):
+    def __init__(self, textgen: TextGen | None, clock: Callable[[], float], store: Store | None = None):
         self._textgen = textgen
+        self._store = store
         self._clock = clock
         self._lock = threading.Lock()
         self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -573,14 +599,13 @@ class PlanService:
         """Up to two nearest non-hospital shelters with distance in km (from the district centre when
         the phone sent no location)."""
         plat, plon = (lat, lon) if lat is not None and lon is not None else (district.lat, district.lon)
-        cands = [s for s in shelters_for(district) if s["kind"] != "hospital"]
+        cands = [s for s in shelters_for(district, self._store) if s["kind"] != "hospital"]
         ranked = sorted(((s, haversine_m(plat, plon, s["lat"], s["lon"]) / 1000.0) for s in cands), key=lambda p: (p[1], p[0]["id"]))
         return ranked[:NEAREST_SHELTERS]
 
-    @staticmethod
-    def _known_names(district: districts.District) -> frozenset[str]:
+    def _known_names(self, district: districts.District) -> frozenset[str]:
         return frozenset(
-            n.lower() for s in shelters_for(district) for n in (s["name"], s.get("name_local") or "") if n
+            n.lower() for s in shelters_for(district, self._store) for n in (s["name"], s.get("name_local") or "") if n
         )
 
     @staticmethod
