@@ -1,4 +1,4 @@
-"""Broadcast: one public message from the control room, in the five app languages, checked.
+"""Broadcast: one public message from the control room, in the enabled app languages, checked.
 
 Flow: the operator writes a message (usually English). ``draft`` asks a model for faithful
 translations (call 1), then asks a SEPARATE model call to back-translate each one into English and
@@ -33,13 +33,19 @@ from typing import Any
 
 from pydantic import BaseModel, create_model
 
-from . import districts
+from . import districts, languages
 from .textgen import TextGen, call_json
 
 log = logging.getLogger("relay.broadcast")
 
-LANGS = ("en", "hi", "or", "tl", "war")
-LANG_NAMES = {"en": "English", "hi": "Hindi", "or": "Odia", "tl": "Filipino (Tagalog)", "war": "Waray"}
+ALL_LANGS = ("en", "hi", "or", "tl", "war")  # broadcast-capable wire languages (Cebuano has no phone voice yet)
+
+
+def active_langs() -> tuple[str, ...]:
+    """The languages a broadcast is translated into and approved in: ALL_LANGS that are enabled
+    (``languages``; en and hi by default). Read on every call so RELAY_LANGS changes apply."""
+    return tuple(c for c in ALL_LANGS if languages.is_enabled(c))
+
 MAX_TEXT_CHARS = 600
 MAX_ISSUES_CHARS = 300
 CALL_TIMEOUT_S = 30.0
@@ -123,15 +129,15 @@ issues is an empty string.
 
 def _translate(source: str, source_lang: str, targets: list[str], textgen: TextGen) -> dict[str, Any]:
     prompt = _TRANSLATE_PROMPT.format(
-        source_lang=LANG_NAMES[source_lang], source=json.dumps(source, ensure_ascii=False),
-        targets="\n".join(f'- "{lang}": {LANG_NAMES[lang]}' for lang in targets),
+        source_lang=languages.name(source_lang), source=json.dumps(source, ensure_ascii=False),
+        targets="\n".join(f'- "{lang}": {languages.name(lang)}' for lang in targets),
     )
     return call_json(textgen, prompt, _schema("Translations", targets, str, ""), timeout_s=CALL_TIMEOUT_S)
 
 
 def _check(source: str, source_lang: str, texts: dict[str, str], checker: TextGen) -> dict[str, Any]:
     prompt = _CHECK_PROMPT.format(
-        source_lang=LANG_NAMES[source_lang], source=json.dumps(source, ensure_ascii=False),
+        source_lang=languages.name(source_lang), source=json.dumps(source, ensure_ascii=False),
         translations=json.dumps(texts, ensure_ascii=False),
     )
     schema = _schema("Checks", list(texts), LangCheck, LangCheck())
@@ -157,20 +163,21 @@ def draft(
     checker: TextGen | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-language results ``{lang: {text, back_translation, faithful, issues, checks_passed,
-    status}}`` for all five languages. The source language holds the source verbatim (status ok).
+    status}}`` for every enabled broadcast language. The source language holds the source verbatim (status ok).
     Raises ValueError only for a bad source; model trouble degrades statuses instead.
     ``district`` is carried for the caller's record; it does not change the prompts."""
-    if source_lang not in LANGS:
-        raise ValueError(f"source_lang must be one of {', '.join(LANGS)}")
+    langs = active_langs()
+    if source_lang not in langs:
+        raise ValueError(f"source_lang must be one of {', '.join(langs)}")
     source = source_text.strip()
     if not source:
         raise ValueError("text is empty")
-    targets = [lang for lang in LANGS if lang != source_lang]
+    targets = [lang for lang in langs if lang != source_lang]
     out: dict[str, dict[str, Any]] = {lang: _entry(issues="no translation") for lang in targets}
     out[source_lang] = _entry(source, source, True, "", True, "ok")
 
     def done() -> dict[str, dict[str, Any]]:
-        return {lang: out[lang] for lang in LANGS}
+        return {lang: out[lang] for lang in langs}
 
     if textgen is None:
         return done()
@@ -223,11 +230,12 @@ def apply_approval(
     explicitly or edited is the human's call, but it must still have text and pass the
     deterministic checks against the source. An edited text replaces the model's and is marked
     ``edited`` (its back-translation is dropped: it was for the old text)."""
+    active = active_langs()
     trans = {k: dict(v) for k, v in broadcast["translations"].items()}
     source, src_lang = broadcast["source_text"], broadcast["source_lang"]
     edits = edits or {}
     for lang, text in edits.items():
-        if lang not in LANGS:
+        if lang not in active:
             raise ValueError(f"unknown language {lang}")
         if lang == src_lang:
             raise ValueError("the source text can not be edited; create a new broadcast")
@@ -236,16 +244,16 @@ def apply_approval(
         if issues:
             raise ValueError(f"{lang}: {_join(*issues)}")
         trans[lang] = {**_entry(text, "", False, "edited by operator, not model-checked", True, "ok"), "edited": True}
-    chosen = [lang for lang in LANGS if trans[lang]["status"] == "ok"] if langs is None else list(dict.fromkeys(langs))
+    chosen = [lang for lang in active if trans.get(lang, {}).get("status") == "ok"] if langs is None else list(dict.fromkeys(langs))
     chosen += [lang for lang in edits if lang not in chosen]
     for lang in chosen:
-        if lang not in LANGS:
+        if lang not in active:
             raise ValueError(f"unknown language {lang}")
-        text = trans[lang]["text"]
+        text = trans.get(lang, {}).get("text", "")
         if not text.strip():
             raise ValueError(f"{lang}: no text to publish")
         if deterministic_issues(source, text):
             raise ValueError(f"{lang}: fails the checks against the source")
     if not chosen:
         raise ValueError("no language to approve")
-    return {"translations": trans, "approved_langs": [lang for lang in LANGS if lang in chosen]}
+    return {"translations": trans, "approved_langs": [lang for lang in active if lang in chosen]}

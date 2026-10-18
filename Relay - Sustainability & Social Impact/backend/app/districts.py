@@ -2,7 +2,9 @@
 
 The backend stores no district field. Like the dashboard (``dashboard/src/lib/districts.ts``, keep
 the two in sync), a point belongs to the district whose centre is nearest. Each district has one
-local language: dispatch orders, sitreps and broadcasts are written in English plus that language.
+native language (``native_lang``). Dispatch orders and sitreps are written in English plus the
+district's ``local_lang``: its native language when that language is enabled (``languages``), else
+Hindi, the control room's second language.
 """
 
 from __future__ import annotations
@@ -11,6 +13,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from . import languages
+
 
 @dataclass(frozen=True)
 class District:
@@ -18,7 +22,11 @@ class District:
     name: str
     lat: float
     lon: float
-    local_lang: str  # LANG_CODES tag
+    native_lang: str  # LANG_CODES tag
+
+    @property
+    def local_lang(self) -> str:
+        return self.native_lang if languages.is_enabled(self.native_lang) else languages.CONTROL_ROOM_SECOND
 
 
 DISTRICTS: tuple[District, ...] = (
@@ -26,7 +34,6 @@ DISTRICTS: tuple[District, ...] = (
     District("delhi", "Delhi", 28.614, 77.209, "hi"),
 )
 DEFAULT_DISTRICT = DISTRICTS[0]
-LANG_NAMES = {"en": "English", "hi": "Hindi", "or": "Odia", "tl": "Filipino", "war": "Waray", "ceb": "Cebuano"}
 
 
 def by_id(district_id: str) -> District | None:

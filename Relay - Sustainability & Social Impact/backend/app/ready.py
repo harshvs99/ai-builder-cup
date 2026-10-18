@@ -68,7 +68,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
-from . import districts
+from . import districts, languages
 from .cluster import haversine_m
 from .geocode import PURI_BBOX
 from .store import Store
@@ -98,7 +98,7 @@ NEAREST_SHELTERS = 2
 PLAN_TTL_S = 6 * 3600       # a plan the model wrote
 TEMPLATE_TTL_S = 300        # a template served because the model failed: retry the model soon
 CACHE_MAX = 512
-TEMPLATE_LANGS = ("en", "hi", "or")  # other languages get the English template, marked by ``steps_lang``
+TEMPLATE_LANGS = ("en", "hi")  # reviewed templates; CONTRIB_* languages join only when enabled. Others get English, marked by ``steps_lang``
 
 
 # --------------------------------------------------------------------------------------
@@ -154,7 +154,8 @@ def shelters_for(district: districts.District) -> list[dict[str, Any]]:
 
 
 def use_local_name(lang: str, district: districts.District) -> bool:
-    return lang == district.local_lang
+    # ``name_local`` is written in the district's native language: use it only when that language is enabled
+    return lang == district.native_lang and languages.is_enabled(lang)
 
 
 def shelter_name(s: dict[str, Any], lang: str, district: districts.District) -> str:
@@ -308,7 +309,6 @@ def import_cap(store: Store, district_id: str, cap_xml: str, now: float) -> dict
 # the pack
 # --------------------------------------------------------------------------------------
 
-# NOTE: the Hindi and Odia texts below are first drafts pending native-speaker review.
 CHECKLIST: dict[str, list[str]] = {
     "en": [
         "Documents, medicines and a phone charger in one waterproof bag",
@@ -326,6 +326,10 @@ CHECKLIST: dict[str, list[str]] = {
         "निकलने से पहले बिजली और गैस बंद करें",
         "सरकारी चेतावनी मानें और कहने पर तुरंत निकलें",
     ],
+}
+
+# PENDING COMMUNITY REVIEW: used only when the language is enabled (RELAY_LANGS).
+CONTRIB_CHECKLIST: dict[str, list[str]] = {
     "or": [
         "ପରିଚୟ ପତ୍ର, ଔଷଧ ଓ ଚାର୍ଜର୍ ଗୋଟିଏ ଜଳରୋଧୀ ବ୍ୟାଗରେ",
         "ଅତିକମରେ 3 ଦିନର ପିଇବା ପାଣି ଓ ଶୁଖିଲା ଖାଦ୍ୟ",
@@ -338,7 +342,11 @@ CHECKLIST: dict[str, list[str]] = {
 
 
 def template_lang(lang: str) -> str:
-    return lang if lang in TEMPLATE_LANGS else "en"
+    """The language a template is served in: ``lang`` if it has a reviewed template, or a pending-review
+    one and is enabled; else English."""
+    if lang in TEMPLATE_LANGS or (lang in CONTRIB_T and languages.is_enabled(lang)):
+        return lang
+    return "en"
 
 
 def pack_warning(w: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -355,7 +363,7 @@ def build_pack(district: districts.District, lang: str, warning: dict[str, Any] 
     content = {
         "district": district.id, "lang": lang, "warning": pack_warning(warning),
         "shelters": [shelter_view(s, lang, district) for s in shelters_for(district)],
-        "checklist": CHECKLIST[tl], "checklist_lang": tl,
+        "checklist": CHECKLIST.get(tl) or CONTRIB_CHECKLIST[tl], "checklist_lang": tl,
     }
     version = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
     return {**content, "generated_at": int(now), "version": version}
@@ -423,6 +431,10 @@ _T: dict[str, dict[str, str]] = {
         "phone": "फ़ोन और पावर बैंक चार्ज रखें। Relay ऐप तैयार रखें: बिना मोबाइल सिग्नल के भी मदद का संदेश जा सकता है।",
         "home": "निकलने से पहले बिजली और गैस बंद करें और कीमती सामान ऊँची जगह रखें।",
     },
+}
+
+# PENDING COMMUNITY REVIEW: used only when the language is enabled (RELAY_LANGS).
+CONTRIB_T: dict[str, dict[str, str]] = {
     "or": {
         "go1": "ପ୍ରଶାସନ ଯିବାକୁ କହିଲେ ପ୍ରଥମେ {s1} କୁ ଯାଆନ୍ତୁ।",
         "go2": "ପ୍ରଶାସନ ଯିବାକୁ କହିଲେ ପ୍ରଥମେ {s1} କୁ ଯାଆନ୍ତୁ। ବାଟ ବନ୍ଦ ଥିଲେ {s2} କୁ ଯାଆନ୍ତୁ।",
@@ -442,7 +454,8 @@ _T: dict[str, dict[str, str]] = {
 
 def template_steps(lang: str, h: Household, names: list[str]) -> list[str]:
     """Deterministic plan from the household flags (English for languages without a template)."""
-    t = _T[template_lang(lang)]
+    tl = template_lang(lang)
+    t = _T.get(tl) or CONTRIB_T[tl]
     steps: list[str] = []
     if len(names) >= 2:
         steps.append(t["go2"].format(s1=names[0], s2=names[1]))
@@ -499,7 +512,7 @@ def build_prompt(lang: str, h: Household, shelters: list[dict[str, Any]], warnin
         "shelters": [{"token": f"[S{i}]", "kind": s["kind"], "facilities": s["facilities"]} for i, s in enumerate(shelters, 1)],
     }
     return _PROMPT.format(
-        hazard="cyclone or flood", lang_name=districts.LANG_NAMES.get(lang, "English"),
+        hazard="cyclone or flood", lang_name=languages.name(lang),
         facts=json.dumps(facts, ensure_ascii=False),
     )
 
@@ -588,6 +601,7 @@ class PlanService:
     ) -> dict[str, Any]:
         ranked = self.nearest(district, lat, lon)
         shelters = [s for s, _ in ranked]
+        req_lang, lang = lang, languages.effective(lang)  # a language that is not enabled gets English steps
         key = (district.id, lang, household_bucket(h), tuple(s["id"] for s in shelters), warning["id"] if warning else None)
         pid = self.plan_id(key)
         entry = self.get(pid)
@@ -608,14 +622,14 @@ class PlanService:
                 steps = template_steps(lang, h, names)
                 steps_lang = template_lang(lang)
                 ttl = TEMPLATE_TTL_S if self._textgen is not None else PLAN_TTL_S
-            entry = {"lang": steps_lang, "requested_lang": lang, "steps": steps, "source": source, "expires": self._clock() + ttl}
+            entry = {"lang": steps_lang, "requested_lang": req_lang, "steps": steps, "source": source, "expires": self._clock() + ttl}
             with self._lock:
                 self._cache[pid] = entry
                 self._cache.move_to_end(pid)
                 while len(self._cache) > CACHE_MAX:
                     self._cache.popitem(last=False)
         return {
-            "plan_id": pid, "lang": lang, "steps_lang": entry["lang"], "district": district.id,
+            "plan_id": pid, "lang": req_lang, "steps_lang": entry["lang"], "district": district.id,
             "steps": list(entry["steps"]), "source": entry["source"],
             "warning_id": warning["id"] if warning else None,
             "nearest_shelters": [

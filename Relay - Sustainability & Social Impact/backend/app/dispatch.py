@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from . import districts, templates
+from . import districts, languages, templates
 from .codec import ETA_UNKNOWN, STATUS_DISPATCHED, STATUS_ON_THE_WAY, STATUS_RESOLVED, Ack, encode_ack
 from .cluster import haversine_m
 from .store import AckSpec
@@ -51,7 +51,6 @@ MAX_DISPATCH_KM = 150.0  # a team further than this from a located ticket is ano
 FLAT_ETA_MIN = 45  # no usable location: same as the stock ACK
 ETA_STEP_MIN = 5
 MAX_ETA_MIN = 0xFFFE  # 0xFFFF means "unknown" on the wire
-LOCAL_LANGS = {"hi": "Hindi", "or": "Odia"}
 MAX_ORDER_CHARS = 600
 
 
@@ -164,9 +163,11 @@ def order_template_en(t: dict[str, Any], team_name: str, eta_min: int) -> str:
     return f"Ticket #{t['ticket_no']}: send {team_name} to {_where(t)}. {category}: {what}{who}. ETA {eta_min} min."
 
 
-# NOTE: the Hindi and Odia order templates are first drafts pending native-speaker review.
 _ORDER_LOCAL = {
     "hi": "टिकट #{n}: {team} को {where} भेजें। अनुमानित समय {eta} मिनट।",
+}
+# PENDING COMMUNITY REVIEW: first drafts, only used when the language is enabled (RELAY_LANGS).
+CONTRIB_ORDER_LOCAL = {
     "or": "ଟିକେଟ #{n}: {team} କୁ {where} ପଠାନ୍ତୁ। ଆନୁମାନିକ ସମୟ {eta} ମିନିଟ।",
 }
 
@@ -180,13 +181,19 @@ def local_lang_for(t: dict[str, Any], team: dict[str, Any] | None = None) -> str
     d = districts.ticket_district(t)
     if d is not None:
         return d.local_lang
-    if t.get("lang") in LOCAL_LANGS:
+    if t.get("lang") in _local_langs():
         return t["lang"]
     return districts.DEFAULT_DISTRICT.local_lang
 
 
+def _local_langs() -> dict[str, str]:
+    """Non-English languages an order can be written in: enabled ones that have an order template."""
+    return {c: languages.name(c) for c in languages.enabled() if c != "en" and c in {**CONTRIB_ORDER_LOCAL, **_ORDER_LOCAL}}
+
+
 def order_template_local(t: dict[str, Any], lang: str, team_name: str, eta_min: int) -> str:
-    return _ORDER_LOCAL[lang].format(n=t["ticket_no"], team=team_name, where=_where(t), eta=eta_min)
+    table = {**CONTRIB_ORDER_LOCAL, **_ORDER_LOCAL} if languages.is_enabled(lang) else _ORDER_LOCAL
+    return table.get(lang, _ORDER_LOCAL["hi"]).format(n=t["ticket_no"], team=team_name, where=_where(t), eta=eta_min)
 
 
 class OrderDraft(BaseModel):
@@ -249,7 +256,7 @@ def draft_order(
     )
     prompt = _ORDER_PROMPT.format(
         facts=facts, ticket_no=ticket["ticket_no"], team_name=team_name, eta_min=eta_min,
-        local_rule=f"the same order in {LOCAL_LANGS[lang]}, keeping the team name in Latin script",
+        local_rule=f"the same order in {languages.name(lang)}, keeping the team name in Latin script",
     )
     source = "template"
     try:
