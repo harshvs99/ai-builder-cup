@@ -1,0 +1,23 @@
+// Build-time connection defaults for the Relay iOS app (the iOS counterpart of android/local.properties:
+// relay.backendUrl, relay.deviceKey). Copy this file to ios/Config/Relay.xcconfig (git-ignored, never commit the key)
+// and fill in the values.
+//
+// How it is read: Info.plist has RelayBackendURL = $(RELAY_BACKEND_URL), RelayDeviceKey = $(RELAY_DEVICE_KEY) and
+// RelayLockConnection = $(RELAY_LOCK_CONNECTION); RelayKit's BuildConfig(infoDictionary:) reads them at launch.
+// A setting that is empty or not defined at all falls back to the standard default (production backend
+// https://relay.harshvs.com, the local dev key, connection editable), so the project builds without this file.
+//
+// To use it, either
+//   1. Xcode: Project "Relay" > Info > Configurations > set Relay.xcconfig for Debug and Release (for the target
+//      or the project), or
+//   2. command line: xcodebuild ... RELAY_BACKEND_URL=https://relay.harshvs.com RELAY_DEVICE_KEY=... build
+//
+// Note: in an .xcconfig, "//" starts a comment, so a URL must be written with the slashes escaped through a variable:
+SLASH = /
+RELAY_BACKEND_URL = https:$(SLASH)$(SLASH)relay.harshvs.com
+
+// Shared gateway key sent as X-Relay-Key. Leave empty for the local dev key ("dev-relay-key").
+RELAY_DEVICE_KEY =
+
+// YES in release builds: backend and key are pinned to the values above and the Developer screen cannot change them.
+RELAY_LOCK_CONNECTION = NO

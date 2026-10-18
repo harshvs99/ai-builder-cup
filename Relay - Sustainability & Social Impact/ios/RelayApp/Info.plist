@@ -53,6 +53,12 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>RelayBackendURL</key>
+	<string>$(RELAY_BACKEND_URL)</string>
+	<key>RelayDeviceKey</key>
+	<string>$(RELAY_DEVICE_KEY)</string>
+	<key>RelayLockConnection</key>
+	<string>$(RELAY_LOCK_CONNECTION)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Relay uses Bluetooth to pass help requests between nearby phones when there is no network.</string>
 	<key>NSMicrophoneUsageDescription</key>
