@@ -9,7 +9,7 @@ import json
 import math
 import struct
 
-NEED, ACK, HELLO, INVENTORY, LOC_HINT, BROADCAST = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
+NEED, ACK, HELLO, INVENTORY, LOC_HINT, BROADCAST, ANNOUNCEMENT = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76
 F_HAS_RECIPIENT, F_HAS_SIGNATURE = 0x01, 0x02
 
 
@@ -128,6 +128,27 @@ def broadcast_payload(b):
         ">B8sBBIiiH", 1, b["bcast_id"], BROADCAST_KINDS[b["kind"]], DISASTERS[b["disaster"]], b["issued_at"],
         e5(b["lat"]), e5(b["lon"]), b["radius_km"],
     )
+
+
+LANGS = {"en": 0, "hi": 1, "or": 2, "tl": 3, "war": 4, "ceb": 5}
+DISTRICT_CODES = {"puri": 0, "delhi": 1}  # wire index of a district (SPEC 5.7)
+ANNOUNCEMENT_STATUS = {"active": 0, "withdrawn": 1}
+MAX_ANNOUNCEMENT_TEXT = 139
+ANNOUNCEMENT_TTL_S = 72 * 3600  # stored like an ACK: dropped 72 h after first storage (SPEC 5.7)
+
+
+def announcement_payload(a):
+    text = a["text"].encode("utf-8")
+    assert len(text) <= MAX_ANNOUNCEMENT_TEXT, "vector text must already fit; the backend shortens before encoding"
+    return struct.pack(
+        ">B8sBBBII", 1, a["announcement_id"], LANGS[a["lang"]], DISTRICT_CODES[a["district"]],
+        ANNOUNCEMENT_STATUS[a["status"]], a["approved_at"], a["expires_at"],
+    ) + bytes([len(text)]) + text
+
+
+def announcement_key(announcement_id, lang, status):
+    """Dedupe key (SPEC 5.7): first 8 bytes of SHA-256(announcement_id || lang || status)."""
+    return hashlib.sha256(announcement_id + bytes([LANGS[lang], ANNOUNCEMENT_STATUS[status]])).digest()[:8]
 
 
 def opaque_key(type_, sender, ts_ms, payload):
@@ -333,6 +354,54 @@ bad_broadcast = {
     "lon_out_of_range": pb1[:19] + struct.pack(">i", -18_000_001) + pb1[23:],
 }
 
+# ANNOUNCEMENT (SPEC 5.7): a duty officer's words, per language, to every phone in a district. Own list, like BROADCAST.
+announcement_vectors = []
+
+
+def announcement_vector(name, a, ttl, ts, sender):
+    pl = announcement_payload(a)
+    announcement_vectors.append({
+        "name": name, "kind": "ANNOUNCEMENT",
+        "fields": {**{k: (H(v) if isinstance(v, bytes) else v) for k, v in a.items()},
+                   "key": H(announcement_key(a["announcement_id"], a["lang"], a["status"]))},
+        "frame": {"type": ANNOUNCEMENT, "ttl": ttl, "timestamp_ms": ts, "sender_id": H(sender), "recipient_id": None},
+        "payload_hex": H(pl), "frame_hex": H(frame(ANNOUNCEMENT, ttl, ts, sender, pl)),
+    })
+    return pl
+
+
+AID = bytes.fromhex("5a5b5c5d5e5f6061")
+pan1 = announcement_vector("announcement_en_active", dict(
+    announcement_id=AID, lang="en", district="puri", status="active", approved_at=1_790_000_000, expires_at=0,
+    text="Cyclone shelters in Puri are open. Move now."), 7, TS + 100, D)
+# Devanagari costs 3 bytes per character (about 46 characters fit).
+announcement_vector("announcement_hi_active_with_expiry", dict(
+    announcement_id=AID, lang="hi", district="puri", status="active", approved_at=1_790_000_000,
+    expires_at=1_790_086_400, text="पुरी में चक्रवात शरण स्थल खुले हैं। अभी जाइए।"), 7, TS + 110, D)
+# Text of exactly 139 bytes: the largest payload (160) and frame (182) there is.
+announcement_vector("announcement_en_max_size_delhi", dict(
+    announcement_id=bytes.fromhex("ffffffffffffff01"), lang="en", district="delhi", status="active",
+    approved_at=0xFFFFFFFF, expires_at=0xFFFFFFFF, text=("Water supply stops from 14:00 today. Store water now. " * 3)[:139]), 4, TS + 120, A)
+# The same announcement withdrawn: a new dedupe key, and the text is kept (a phone shows nothing for it).
+announcement_vector("announcement_en_withdrawn", dict(
+    announcement_id=AID, lang="en", district="puri", status="withdrawn", approved_at=1_790_000_000, expires_at=0,
+    text="Cyclone shelters in Puri are open. Move now."), 7, TS + 130, D)
+announcement_vector("announcement_hi_withdrawn_empty_text", dict(
+    announcement_id=AID, lang="hi", district="delhi", status="withdrawn", approved_at=1_790_000_000, expires_at=0,
+    text=""), 7, TS + 140, B)
+
+# ANNOUNCEMENT payloads every decoder must reject.
+bad_announcement = {
+    "version_2": bytes([2]) + pan1[1:],
+    "too_short": pan1[:20],
+    "trailing_byte": pan1 + b"\x00",
+    "text_length_past_end": pan1[:-1],
+    "text_length_over_139": pan1[:20] + bytes([140]) + b"a" * 140,
+    "lang_six": pan1[:9] + bytes([6]) + pan1[10:],
+    "status_two": pan1[:11] + bytes([2]) + pan1[12:],
+    "invalid_utf8": pan1[:20] + bytes([2, 0xC3, 0x28]),
+}
+
 # Frames every decoder must reject.
 good = frame(NEED, 7, TS, A, p)
 bad = {
@@ -374,7 +443,9 @@ print(json.dumps({
     "vectors": vectors,
     "must_reject_frames": {k: H(v) for k, v in bad.items()},
     "sizes": {"need1_payload": len(p), "need2_payload": len(p2), "ack1_payload": len(pa),
-              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1), "broadcast_payload": len(pb1)},
+              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1), "broadcast_payload": len(pb1),
+              "announcement_max_payload": len(announcement_payload(dict(
+                  announcement_id=AID, lang="en", district="puri", status="active", approved_at=0, expires_at=0, text="a" * 139)))},
     "answer_bank": [
         {"id": qid, "key": key, "options": [{"value": v, "key": k} for k, v in opts.items()]}
         for qid, (key, opts) in BANK.items()
@@ -385,4 +456,9 @@ print(json.dumps({
     "broadcast_vectors": broadcast_vectors,
     "must_reject_broadcast_payloads": {k: H(v) for k, v in bad_broadcast.items()},
     "broadcast_ttl_s": BROADCAST_TTL_S,
+    "announcement_vectors": announcement_vectors,
+    "must_reject_announcement_payloads": {k: H(v) for k, v in bad_announcement.items()},
+    "announcement_lang_codes": LANGS,
+    "announcement_district_codes": DISTRICT_CODES,
+    "announcement_ttl_s": ANNOUNCEMENT_TTL_S,
 }, indent=2, ensure_ascii=False))

@@ -21,6 +21,9 @@ import java.util.Locale
  *  - category: exact; urgency: within +-1; people: exact; vuln: micro F1 over flags
  *  - item / landmark: normalised (lowercase, punctuation to space, leading near/by/at/behind/the/a/an and
  *    trailing Hindi "के पास" dropped) then exact or difflib ratio >= 0.8
+ * Rows in a language the extractor has no lexicon for (Bengali, Bhojpuri: labelled ahead of the work) are scored
+ * and listed in the report under their own heading, but the floors apply to the shipped languages only, so a
+ * missing lexicon is visible without turning every unrelated lexicon edit red.
  * Writes the table and every miss to `build/reports/rule-eval.txt` (and stdout) and fails if any field
  * drops below the floor recorded after the lexicon work, so a lexicon edit cannot silently regress.
  */
@@ -169,7 +172,9 @@ class RuleScoreTest {
 
     @Test fun scoreRuleExtractorPerField() {
         val report = StringBuilder()
-        val g = score(guided(), "guided_prompts.json (34)", report)
+        val (shipped, ahead) = guided().partition { it.lang !in NO_LEXICON }
+        val g = score(shipped, "guided_prompts.json, shipped languages (34)", report)
+        score(ahead, "guided_prompts.json, languages without a lexicon yet (not part of the floors)", report)
         val s = score(sentences(), "sentences.csv (8)", report)
         val out = File(System.getProperty("relay.reportdir") ?: "build/reports").also { it.mkdirs() }
         File(out, "rule-eval.txt").writeText(report.toString())
@@ -186,6 +191,7 @@ class RuleScoreTest {
     }
 
     private companion object {
+        val NO_LEXICON = setOf("bn", "bho")
         const val FLOOR_CAT = 34
         const val FLOOR_ITEM = 34
         const val FLOOR_LMK = 34

@@ -182,7 +182,12 @@ phones around it (`GET /v1/tickets/{n}` then shows the `mesh` geo).
   {langs?, edits?}` publishes the languages whose status is ok (or the listed/edited ones, re-checked; 422 if
   they fail); `POST .../withdraw` retracts; `GET /v1/announcements?district=&status=` lists. Phones with signal
   fetch `GET /v1/announcements/active?district=` with the **device** key: approved, not withdrawn, approved
-  languages only. Mesh delivery is not built (proposal in the module docstring).
+  languages only (each entry also carries `announcement_id`). **Mesh delivery** (SPEC §5.7, frame `0x76`): approval assigns an
+  `announcement_id` (8 random bytes, shared by all languages) and a `mesh_texts` entry per language of at most 139 UTF-8
+  bytes (a longer text is cut on a character boundary and ends in `…`); approving and withdrawing each take a sequence
+  number. A gateway adds `district` and/or `announcement_cursor` to `POST /v1/sync` and gets `announcements` (base64
+  ACTIVE / WITHDRAWN payloads, whole events only, at most 50, nothing older than 72 h) plus the next `announcement_cursor`;
+  a gateway that sends neither field gets neither back, and `broadcasts` (disaster declarations, §5.6) is untouched.
 - `uv run python scripts/seed_district.py --url http://localhost:8080` loads the demo night.
 
 ## Ready mode (before landfall)
