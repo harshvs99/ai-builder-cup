@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { Team, Ticket } from '../types';
 import { formatRelative } from '../lib/time';
-import { accuracyLabel, hasMeshEstimate, isMappable, meshEstimateLabel } from '../lib/location';
+import {
+  accuracyLabel,
+  canLocateByLandmark,
+  hasMapsEstimate,
+  hasMeshEstimate,
+  isMappable,
+  mapsEstimateText,
+  mapsLink,
+  meshEstimateLabel,
+} from '../lib/location';
 import {
   capitalise,
   clockTime,
@@ -67,6 +76,7 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
     );
   const onTheWay = () => run('onTheWay', () => api.onTheWay(t.ticket_no));
   const resolve = () => run('resolve', () => api.resolve(t.ticket_no));
+  const locate = () => run('locate', () => api.locate(t.ticket_no));
   const propose = () =>
     run('propose', async () => {
       await api.proposeDispatch(t.ticket_no);
@@ -146,6 +156,27 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
             <span className="muted small block">
               Dashed circle on the map, around {t.geo.lat.toFixed(4)}, {t.geo.lon.toFixed(4)}. Confirm with the ward office before sending a team.
             </span>
+          </p>
+        )}
+
+        {hasMapsEstimate(t) && t.geo && (
+          <p className="est-line">
+            <span className="approx-badge" title="Estimated from the landmark text, not a GPS fix">Approximate</span>{' '}
+            Approx. location: {mapsEstimateText(t.geo).place && <b>{mapsEstimateText(t.geo).place}</b>}
+            {mapsEstimateText(t.geo).place ? ' — ' : ''}{mapsEstimateText(t.geo).rest}{' '}
+            {mapsLink(t.geo) && (
+              <a className="link" href={mapsLink(t.geo)!} target="_blank" rel="noopener">Open in Google Maps</a>
+            )}
+            <span className="muted small block">
+              Google Maps · {t.geo.lat.toFixed(4)}, {t.geo.lon.toFixed(4)}. Confirm with the ward office before sending a team.
+            </span>
+          </p>
+        )}
+        {canLocateByLandmark(t) && (
+          <p>
+            <button type="button" className="btn ghost sm" disabled={!!busy} onClick={locate}>
+              {busy === 'locate' ? 'Locating…' : 'Locate with Maps'}
+            </button>
           </p>
         )}
 

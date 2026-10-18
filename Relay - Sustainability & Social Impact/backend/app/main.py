@@ -52,7 +52,8 @@ from .codec import (
     encode_need,
     to_e5,
 )
-from .location import add_no_fix_note, scrub_legacy_draft, ticket_location
+from .geocode import Geocoder
+from .location import add_no_fix_note, best_loc_acc, scrub_legacy_draft, ticket_location
 from .priority import vuln_names
 from .pubsub import (
     Publisher,
@@ -358,11 +359,13 @@ def create_app(
     triage_budget_s: float | None = None,
     textgen: TextGen | None = None,
     sitrep_textgen: TextGen | None = None,
+    geocoder: Geocoder | None = None,
 ) -> FastAPI:
     """Every keyword defaults to its environment variable (see README); the keywords exist so
     tests can inject fakes. ``pubsub_topic=""`` forces in-process triage. ``textgen`` writes dispatch
     orders and ``sitrep_textgen`` the sitrep (``SITREP_GEMINI_MODEL``, default ``GEMINI_MODEL``);
-    both default to Gemini when the environment enables it, else to templates."""
+    both default to Gemini when the environment enables it, else to templates. ``geocoder`` (Maps-grounded
+    landmark lookup, also used by ``POST /v1/tickets/{no}/locate``) defaults to ``RELAY_GEOCODER``."""
     clock = clock or time.time
     device_key = device_key if device_key is not None else os.environ.get("RELAY_DEVICE_KEY", "dev-relay-key")
     operator_key = operator_key if operator_key is not None else os.environ.get("RELAY_OPERATOR_KEY", "")
@@ -389,6 +392,7 @@ def create_app(
         agent if agent is not None else agent_from_env(),
         clock=clock,
         enrich_budget_s=enrich_budget_s if enrich_budget_s is not None else float(os.environ.get("RELAY_AGENT_BUDGET_S", "20")),
+        geocoder=geocoder,
     )
 
     @asynccontextmanager
@@ -576,6 +580,32 @@ def create_app(
         out = _ticket_json(row, packets, store.get_dispatch_record(ticket_no))
         out["packets"] = [_packet_json(p) for p in packets]
         return out
+
+    @app.post("/v1/tickets/{ticket_no}/locate", dependencies=operator)
+    def locate(ticket_no: int) -> dict[str, Any]:
+        """Estimate where a no-fix ticket is from its landmark now: the gazetteer, then the Maps geocoder. Writes
+        ``geo`` (replacing an earlier landmark estimate) and returns the ticket. 409 for a ticket with a GPS fix or
+        a mesh estimate, 503 if only the (unconfigured) Maps geocoder could help, 422 if nothing confident was found."""
+        row = ticket_or_404(ticket_no)
+        packets = store.ticket_packets(ticket_no)
+        if best_loc_acc(p["loc_acc"] for p in packets) != 0:
+            raise HTTPException(status_code=409, detail="ticket has a GPS fix")
+        if (row.get("geo") or {}).get("source") == "mesh":
+            raise HTTPException(status_code=409, detail="ticket already has a mesh location estimate")
+        landmark = (row["landmark"] or "").strip()
+        if not landmark:
+            raise HTTPException(status_code=422, detail="ticket has no landmark to locate")
+        geo = pipeline.gazetteer.locate(landmark)
+        if geo is None:
+            if pipeline.geocoder.name == "none":
+                raise HTTPException(status_code=503, detail="no Maps geocoder configured (RELAY_GEOCODER=gemini_maps)")
+            geo = pipeline.geocoder.locate(landmark, pipeline.ticket_district(packets))
+        if geo is None:
+            raise HTTPException(status_code=422, detail="could not place that landmark with confidence")
+        if not store.set_geo(ticket_no, geo):  # a fix or a mesh estimate arrived since the reads above
+            raise HTTPException(status_code=409, detail="ticket has a GPS fix or a mesh location estimate")
+        row = ticket_or_404(ticket_no)
+        return _ticket_json(row, store.ticket_packets(ticket_no), store.get_dispatch_record(ticket_no))
 
     @app.post("/v1/tickets/{ticket_no}/approve", dependencies=operator)
     def approve(ticket_no: int, body: ApproveRequest | None = None) -> dict[str, Any]:

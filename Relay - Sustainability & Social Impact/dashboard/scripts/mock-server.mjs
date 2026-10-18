@@ -46,6 +46,12 @@ function addTicket(f) {
 }
 
 const min = (m) => now() - m * 60;
+
+// What the backend stores for a landmark found with Gemini + Google Maps grounding (SPEC section 7, `geo`).
+const MAPS_GEO = {
+  lat: 20.1146, lon: 85.8309, source: 'gemini_maps', query: 'Pipili bus stand', name: 'Pipili Bus Stand',
+  place_id: 'ChIJmockPipiliBusStand', maps_uri: 'https://www.google.com/maps/place/?q=place_id:ChIJmockPipiliBusStand', district: 'puri',
+};
 const FIXTURES = [
   { category: 'MEDICAL', item: 'insulin', landmark: 'school', summary: 'mother needs insulin, diabetic', lat: 20.29612, lon: 85.82451, urgency: 3, people: 1, vuln_flags: ['ELDERLY'], lang: 'or', report_count: 3, max_hops: 2, first_reported_at: min(14) },
   { category: 'RESCUE', item: 'boat', landmark: 'Puri beach road', summary: 'family trapped on roof, water rising', lat: 19.8135, lon: 85.8312, urgency: 3, people: 5, vuln_flags: ['CHILD', 'TRAPPED'], lang: 'or', report_count: 5, max_hops: 4, first_reported_at: min(31) },
@@ -60,6 +66,9 @@ const FIXTURES = [
   // No fix, but two nearby relay phones sent location hints: the backend adds an approximate mesh estimate
   // (has_location stays false; the dashboard draws a dashed circle, never a GPS dot).
   { category: 'WATER', item: 'drinking water', landmark: null, summary: 'no clean water, family of 6 (location off, mesh estimate)', lat: null, lon: null, loc_acc: 0, geo: { lat: 20.2763, lon: 85.8309, source: 'mesh', radius_m: 130, hint_count: 2 }, urgency: 2, people: 6, vuln_flags: ['CHILD'], lang: 'or', report_count: 1, max_hops: 2, first_reported_at: min(6) },
+  // No fix, landmark found on Google Maps by the backend (has_location stays false; shown in the detail panel with
+  // the Google Maps credit, not plotted). "Locate with Maps" on the 'school' ticket above fills in a similar one.
+  { category: 'FOOD', item: 'rice', landmark: 'Pipili bus stand', summary: '9 people need food (location off, found on Maps)', lat: null, lon: null, loc_acc: 0, geo: MAPS_GEO, urgency: 2, people: 9, vuln_flags: [], lang: 'or', report_count: 1, max_hops: 2, first_reported_at: min(9) },
 ];
 FIXTURES.forEach(addTicket);
 
@@ -171,7 +180,7 @@ const server = http.createServer((req, res) => {
     for (const t of tickets.values()) if (t.status === 'OPEN') open_by_category[t.category] = (open_by_category[t.category] ?? 0) + 1;
     return send(res, 200, { open_by_category, gateways_online: GATEWAYS.length - 1, tickets: tickets.size });
   }
-  const m = path.match(/^\/v1\/tickets\/(\d+)(\/approve|\/on-the-way|\/resolve)?$/);
+  const m = path.match(/^\/v1\/tickets\/(\d+)(\/approve|\/on-the-way|\/resolve|\/locate)?$/);
   if (m) {
     const t = tickets.get(Number(m[1]));
     if (!t) return send(res, 404, { detail: 'ticket not found' });
@@ -188,6 +197,14 @@ const server = http.createServer((req, res) => {
         send(res, 200, t);
       });
       return;
+    }
+    if (req.method === 'POST' && m[2] === '/locate') {
+      // Same statuses as the backend: 409 fix or mesh estimate, 422 no landmark; otherwise a canned Maps answer.
+      if (t.has_location) return send(res, 409, { detail: 'ticket has a GPS fix' });
+      if (t.geo?.source === 'mesh') return send(res, 409, { detail: 'ticket already has a mesh location estimate' });
+      if (!t.landmark?.trim()) return send(res, 422, { detail: 'ticket has no landmark to locate' });
+      t.geo = { ...MAPS_GEO, query: t.landmark.trim() };
+      return send(res, 200, t);
     }
     if (req.method === 'POST' && m[2] === '/on-the-way') { t.status = 'ON_THE_WAY'; return send(res, 200, t); }
     if (req.method === 'POST' && m[2] === '/resolve') { t.status = 'RESOLVED'; return send(res, 200, t); }

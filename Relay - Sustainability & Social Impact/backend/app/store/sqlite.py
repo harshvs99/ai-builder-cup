@@ -418,9 +418,10 @@ class SqliteStore:
     def ticket_for_msg(self, msg_id: str) -> int | None:
         return self._linked_ticket(msg_id)
 
-    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+    def set_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
         with self.tx() as c:
-            if self.get_ticket(ticket_no) is None:
+            current = self.get_ticket(ticket_no)
+            if current is None or (geo.get("source") != "mesh" and "geo" not in keep_mesh_geo(current.get("geo"), {"geo": geo})):
                 return False
             fixed = c.execute(
                 "SELECT 1 FROM ticket_packets tp JOIN packets p ON p.msg_id = tp.msg_id "

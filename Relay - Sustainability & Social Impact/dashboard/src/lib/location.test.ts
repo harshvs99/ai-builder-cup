@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  accuracyLabel, boundsOf, circleRing, countEstimated, countWithoutLocation, estimateBounds, estimatedTickets,
-  hasMeshEstimate, isMappable, mappableTickets, meshEstimateLabel, meshEstimateShort, noLocationBadge,
+  accuracyLabel, boundsOf, canLocateByLandmark, circleRing, countEstimated, countWithoutLocation, estimateBounds, estimatedTickets,
+  hasMapsEstimate, hasMeshEstimate, isMappable, mappableTickets, mapsEstimateText, mapsLink, meshEstimateLabel, meshEstimateShort, noLocationBadge,
   plottableBounds, toEstimateAreas, toFeatures,
 } from './location';
 import type { Geo } from '../types';
@@ -230,5 +230,38 @@ describe('estimate geometry for the map', () => {
     expect(both[2]).toBeGreaterThanOrEqual(86);
     // GPS-only behaviour unchanged
     expect(plottableBounds([fix({ lat: 21, lon: 86 })])).toEqual([86, 21, 86, 21]);
+  });
+});
+
+describe('Google Maps estimates', () => {
+  const maps = (over: Partial<Geo> = {}): Geo => ({
+    lat: 19.81, lon: 85.83, source: 'gemini_maps', query: 'pipili bus stand', name: 'Pipili Bus Stand',
+    place_id: 'ChIJabc', maps_uri: 'https://maps.google.com/?cid=42', district: 'puri', ...over,
+  });
+  it('hasMapsEstimate: only a no-fix ticket with a gemini_maps geo', () => {
+    expect(hasMapsEstimate(nofix({ geo: maps() }))).toBe(true);
+    expect(hasMapsEstimate(nofix({ geo: maps({ source: 'gazetteer' }) }))).toBe(false);
+    expect(hasMapsEstimate(fix({ geo: maps() }))).toBe(false);
+    expect(hasMapsEstimate(nofix())).toBe(false);
+    expect(hasMeshEstimate(nofix({ geo: maps() }))).toBe(false); // never drawn as a mesh circle
+    expect(countWithoutLocation([nofix({ geo: maps() })])).toBe(1); // still "without location"
+  });
+  it('mapsEstimateText names the place and the landmark, and degrades', () => {
+    expect(mapsEstimateText(maps())).toEqual({ place: 'Pipili Bus Stand', rest: 'found on Google Maps from the landmark “pipili bus stand”' });
+    expect(mapsEstimateText(maps({ name: undefined, query: undefined }))).toEqual({ place: null, rest: 'found on Google Maps' });
+  });
+  it('mapsLink only returns https URLs', () => {
+    expect(mapsLink(maps())).toBe('https://maps.google.com/?cid=42');
+    expect(mapsLink(maps({ maps_uri: 'javascript:alert(1)' }))).toBeNull();
+    expect(mapsLink(maps({ maps_uri: 'http://maps.google.com/' }))).toBeNull();
+    expect(mapsLink(maps({ maps_uri: undefined }))).toBeNull();
+  });
+  it('canLocateByLandmark: no fix, a landmark, no mesh estimate', () => {
+    expect(canLocateByLandmark(nofix({ landmark: 'school' }))).toBe(true);
+    expect(canLocateByLandmark(nofix({ landmark: 'school', geo: maps() }))).toBe(true);
+    expect(canLocateByLandmark(nofix({ landmark: '  ' }))).toBe(false);
+    expect(canLocateByLandmark(nofix({ landmark: null }))).toBe(false);
+    expect(canLocateByLandmark(fix({ landmark: 'school' }))).toBe(false);
+    expect(canLocateByLandmark(nofix({ landmark: 'school', geo: { lat: 1, lon: 1, source: 'mesh' } }))).toBe(false);
   });
 });

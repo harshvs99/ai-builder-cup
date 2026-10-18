@@ -42,7 +42,7 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `RELAY_DB` | `relay.db` | SQLite file path |
 | `GOOGLE_CLOUD_PROJECT`, `RELAY_FIRESTORE_DB` | unset | Firestore: `firestore.Client(project=..., database=...)`, ADC credentials |
 | `RELAY_DEVICE_KEY` | `dev-relay-key` | required in `X-Relay-Key` on `/v1/sync` (constant-time compare; **change in prod**) |
-| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest` and `GET /v1/stats` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
+| `RELAY_OPERATOR_KEY` | unset | opt-in control-room auth. Unset = routes open, as before. Set = `GET /v1/tickets[/{no}]`, `POST /v1/tickets/{no}/approve\|on-the-way\|resolve\|locate`, `GET /v1/teams`, `POST /v1/dispatch/propose`, `POST /v1/sitreps/run`, `GET /v1/sitreps/latest` and `GET /v1/stats` need `X-Operator-Key` (constant-time compare, 401 otherwise). `/v1/sync` keeps the device key; `/healthz`, `/v1/health` and `/internal/triage` are unchanged. A caller that is not the dashboard (e.g. the hourly sitrep Cloud Scheduler job) must send the header too. The dashboard reads it from `VITE_OPERATOR_KEY` or a `?key=` URL param |
 | `RELAY_ENV` | `dev` | `prod` removes `POST /v1/dev/inject` (404) |
 | `RELAY_CORS_ORIGINS` | empty | extra comma-separated origins; `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed |
 | `RELAY_STATIC_DIR` | unset | if the directory exists, the built dashboard is served at `/` (after all API routes, `index.html` fallback) |
@@ -53,6 +53,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 | `GEMINI_API_KEY` | unset | enables Gemini with an API key (Vertex wins if both are set); neither = deterministic agent |
 | `GEMINI_MODEL` | `gemini-flash-latest` | model for the Gemini agent |
 | `SITREP_GEMINI_MODEL` | `GEMINI_MODEL` | model that writes the sitrep prose (set a Pro-tier name here) |
+| `RELAY_GEOCODER` | unset | `gemini_maps` turns on Gemini + Google Maps grounding for no-fix landmarks the gazetteer does not know, and for `POST /v1/tickets/{no}/locate` (billed, hence opt-in). Needs Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI`) or `GEMINI_API_KEY`; Vertex wins if both are set. An answer without a Maps grounding chunk, or outside the ticket's district bounding box, is dropped |
+| `GEMINI_GEOCODE_MODEL` | `GEMINI_MODEL` | model for the Maps geocoder (then `gemini-flash-latest`) |
 | `RELAY_AGENT_BUDGET_S` | `20` | wall-clock cap on Gemini enrichment per batch |
 | `PORT` | `8080` | Docker/Cloud Run listen port |
 
@@ -60,6 +62,8 @@ curl -s -X POST localhost:8080/v1/tickets/101/approve
 
 ```
 app/codec.py            wire frame + NEED/ACK/HELLO/INVENTORY/LOC_HINT codec (strict; raises CodecError)
+app/districts.py        districts (Puri, Delhi): id, name, bounding box, centre; nearest / containing lookups (pure)
+app/geocode.py          landmark -> approximate point: Puri gazetteer, optional Maps-grounded Gemini (district-aware)
 app/meshgeo.py          approximate position from LOC_HINTs: intersection of discs, RSSI as a weak weight (pure)
 app/store/base.py       Store interface (ingest, approve_ticket, acks, ...) and shared types
 app/store/sqlite.py     SqliteStore (local dev, tests)
@@ -105,6 +109,23 @@ asks Gemini, one structured-JSON call per touched ticket (8 s hard timeout), for
 a tier adjustment clamped to one tier, and a polished + translated dispatch draft. The score is
 never model-written; ACK text is never model-written; any error or invalid field falls back to
 the deterministic value and is logged.
+
+## Landmark location (gazetteer, Google Maps)
+
+A NEED with no GPS fix and a landmark gets an approximate `geo` (never a fix: `lat`/`lon`/`has_location` stay as
+reported). Phase 1 tries the gazetteer. With `RELAY_GEOCODER=gemini_maps`, phase 2 asks Gemini with the Google Maps
+grounding tool, and `POST /v1/tickets/{no}/locate` does both on demand (409 for a ticket with a GPS fix or a mesh
+estimate, 503 without a Maps geocoder when the gazetteer has no match, 422 for an empty or unplaceable landmark).
+
+- **District**: the ticket's district is the one nearest to the median position of the GPS-fixed tickets its gateway
+  uploaded (`geocode.gateway_district`, from `list_tickets_with_links`). Known: the prompt names that district, the
+  Maps search is biased to its centre and the answer must lie in its bounding box. Unknown: the prompt names every
+  district and the answer must lie in any of them. The table is `app/districts.py`.
+- **Grounding required**: the answer is dropped unless the response has a Maps grounding chunk
+  (`grounding_metadata.grounding_chunks[].maps`). The chunk whose title best matches the name the model gave supplies
+  `name`, `place_id` and `maps_uri` for the `geo` record (SPEC section 7), which the dashboard shows with a Google Maps credit.
+- Landmark text only reaches the model as quoted JSON; the call has a 6 s hard timeout and never raises.
+- `set_geo` is the one guarded store write: refused for a ticket with a fix, and a landmark estimate never replaces a mesh one.
 
 ## Mesh-assisted location (LOC_HINT)
 

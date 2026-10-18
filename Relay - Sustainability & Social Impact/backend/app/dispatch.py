@@ -152,6 +152,9 @@ def _where(t: dict[str, Any]) -> str:
             near = f", near {landmark}" if landmark else ""
             return (f"approx. {geo['lat']:.4f}, {geo['lon']:.4f} (within about {geo.get('radius_m', '?')} m, "
                     f"estimated from {geo.get('hint_count', '?')} nearby phone(s){near})")
+        if geo.get("source") == "gemini_maps" and geo.get("name"):
+            return (f"approx. near {geo['name']} (Google Maps, from landmark '{geo.get('query') or landmark}') "
+                    f"at {geo['lat']:.4f}, {geo['lon']:.4f}")
         return f"approx. {geo['lat']:.4f}, {geo['lon']:.4f} (estimated from landmark{': ' + landmark if landmark else ''})"
     return landmark or "location unknown"
 

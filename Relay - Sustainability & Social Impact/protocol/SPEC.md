@@ -415,6 +415,10 @@ Response:
 - `GET /v1/tickets/{ticket_no}` → `Ticket` with `packets: [...]`.
 - `POST /v1/tickets/{ticket_no}/approve` → queues a `DISPATCHED` ACK for every linked NEED's
   origin, returns the updated `Ticket`.
+- `POST /v1/tickets/{ticket_no}/locate` → estimates the position of a ticket with no GPS fix from its landmark now
+  (gazetteer, then the Maps geocoder), stores it as `geo` and returns the updated `Ticket`. `404` unknown ticket; `409` the
+  ticket has a GPS fix or a `mesh` `geo` (never replaced); `503` no Maps geocoder is configured and the gazetteer has no
+  match; `422` the landmark is empty or nothing confident was found.
 - `POST /v1/broadcasts` → body `{ "kind": "disaster" | "cleared" (default "disaster"), "disaster": "flood" | "cyclone" | "earthquake" | "landslide",
   "lat", "lon", "radius_km" }` (area optional; `radius_km > 0` needs `lat` and `lon`) → `{ "id", "kind", "disaster", "issued_at",
   "expires_at", "area"? }`. Stored and served to gateways for 24 h (§5.6).
@@ -445,7 +449,12 @@ does not have yet.
 
 **`geo`** (optional, only on a ticket with `has_location = false`) is an approximate position, never a fix, and never
 set on a ticket that has one: `{ "lat", "lon", "source", ... }`, where `source` is one of
-- `"gazetteer"` or `"gemini_maps"`: looked up from the free-text landmark; also carries `query` (the landmark);
+- `"gazetteer"`: looked up from the free-text landmark in the curated Puri gazetteer; also carries `query` (the landmark);
+- `"gemini_maps"`: found by Gemini with Google Maps grounding from the landmark; carries `query`, `name` (the Google
+  Maps place chosen), `district` (id of the district whose bounding box holds the point: `puri` or `delhi`, as in the
+  dashboard) and, when Google returned them, `place_id` and `maps_uri` (an `https` link to the place on Google Maps).
+  Only an answer backed by a Google Maps grounding chunk and inside the ticket's district is stored. A dashboard that
+  shows a `gemini_maps` position must credit Google Maps (grounding terms) and may link `maps_uri`;
 - `"mesh"`: estimated from `LOC_HINT` frames (§5.5); also carries `radius_m` (u32, metres, a multiple of 10) and
   `hint_count` (the hints that agreed and were used). A mesh estimate replaces a landmark one; a landmark lookup never
   replaces a mesh one.

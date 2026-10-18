@@ -27,7 +27,9 @@ export interface PacketInfo {
 
 /**
  * Estimated position for a ticket with no GPS fix. Never a fix: has_location stays false.
- * - "gazetteer" / "gemini_maps": looked up from the landmark text (`query`).
+ * - "gazetteer" / "gemini_maps": looked up from the landmark text (`query`). A "gemini_maps" estimate
+ *   also names the Google Maps place (`name`), its `place_id` and a link to it (`maps_uri`), and the
+ *   `district` id it was validated against. Showing one requires crediting Google Maps.
  * - "mesh": from nearby relay phones' location hints; `radius_m` (a multiple of 10) bounds the
  *   uncertainty and `hint_count` is how many phones contributed. No `query`.
  */
@@ -37,6 +39,10 @@ export interface Geo {
   lon: number;
   source: GeoSource;
   query?: string;
+  name?: string;
+  place_id?: string;
+  maps_uri?: string;
+  district?: string;
   radius_m?: number;
   hint_count?: number;
 }

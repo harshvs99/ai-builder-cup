@@ -294,7 +294,7 @@ class FirestoreStore:
         no = (snap.to_dict() or {}).get("ticket_no") if snap.exists else None
         return int(no) if no is not None else None
 
-    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+    def set_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
         from google.cloud import firestore
 
         tref = self._col("tickets").document(str(ticket_no))
@@ -302,7 +302,7 @@ class FirestoreStore:
         @firestore.transactional
         def run(txn) -> bool:
             snap = tref.get(transaction=txn)
-            if not snap.exists:
+            if not snap.exists or (geo.get("source") != "mesh" and "geo" not in keep_mesh_geo((snap.to_dict() or {}).get("geo"), {"geo": geo})):
                 return False
             # ``links`` are the ticket's packets, written in the same transaction that links them
             for lk in snap.get("links") or []:
