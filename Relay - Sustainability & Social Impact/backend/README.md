@@ -106,6 +106,20 @@ a tier adjustment clamped to one tier, and a polished + translated dispatch draf
 never model-written; ACK text is never model-written; any error or invalid field falls back to
 the deterministic value and is logged.
 
+## Photo tags (NEED v3)
+
+A requester can photograph the scene, but pixels never leave the phone: an on-device classifier maps the photo to a
+fixed tag vocabulary (`protocol/SPEC.md` §5.1: `floodwater`, `house_damaged`, `people_stranded`, ...) and only a 16-bit
+bitmask travels in a v3 NEED. The backend decodes it at sync and serves it on the ticket as
+`photo_tags: {tag key: number of reports that carried it}` (omitted when empty; a merged ticket adds one per
+report that carried the tag). `GET /v1/tickets/{n}` also lists `photo_tags: [keys]` on each packet, read back
+from the stored frame (no column). Tags are what the phone's classifier saw, an observation and not a verified
+assessment, so they never change `priority_score` or the tier: the priority reason only gains a note,
+"Photo shows: people stranded, floodwater." (added when the ticket is served, so it also follows a Gemini reason).
+
+`POST /v1/dev/inject` takes `photo_tags: ["floodwater", ...]` (unknown keys are a 422), and `scripts/seed_district.py`
+gives 14 of its 40 synthetic reports tags.
+
 ## Mesh-assisted location (LOC_HINT)
 
 A NEED with `loc_acc = 0` (no GPS fix) gets an approximate position when nearby phones that *do* have a fix

@@ -50,10 +50,12 @@ from .codec import (
     encode_frame,
     encode_loc_hint,
     encode_need,
+    photo_tags_from_json,
+    photo_tags_to_json,
     to_e5,
 )
 from .location import add_no_fix_note, scrub_legacy_draft, ticket_location
-from .priority import vuln_names
+from .priority import add_photo_note, vuln_names
 from .pubsub import (
     Publisher,
     PubSubPublisher,
@@ -136,6 +138,7 @@ class NeedJson(BaseModel):
     loc_acc: int = Field(default=1, ge=0, le=5)  # extra, optional
     created_at: int | None = Field(default=None, ge=0, lt=1 << 32)  # extra, optional (unix s)
     answers: dict[str, str] = Field(default_factory=dict)  # extra, optional: {question key: answer key}, max 3
+    photo_tags: list[str] = Field(default_factory=list)  # extra, optional: on-device photo tags (SPEC 5.1 table)
     mesh_hints: list[MeshHintJson] = Field(default_factory=list, max_length=8)  # extra, optional: needs loc_acc 0
 
     @field_validator("category")
@@ -162,6 +165,15 @@ class NeedJson(BaseModel):
             raise ValueError("at most 3 answers")
         try:
             answers_from_json(v)
+        except CodecError as e:
+            raise ValueError(str(e)) from e
+        return v
+
+    @field_validator("photo_tags")
+    @classmethod
+    def _photo_tags(cls, v: list[str]) -> list[str]:
+        try:
+            photo_tags_from_json(v)
         except CodecError as e:
             raise ValueError(str(e)) from e
         return v
@@ -210,6 +222,7 @@ def _ticket_json(
     if not loc["has_location"]:  # rows triaged before no-fix handling carry "0.00000, 0.00000" in their text
         draft_en, draft_local = (scrub_legacy_draft(d, row["landmark"]) for d in (draft_en, draft_local))
         reason = add_no_fix_note(reason, row["landmark"])
+    reason = add_photo_note(reason, row.get("photo_tags"))  # a note only: the score never reads photo tags
     out = {
         "ticket_no": row["ticket_no"],
         "category": row["category"],
@@ -234,8 +247,9 @@ def _ticket_json(
     }
     # Optional fields, absent when unset. ``geo`` is an estimate from the landmark for a ticket with no
     # GPS fix (has_location stays false); ``reclass`` is {from, to, reason} and ``category`` is the new one;
-    # ``answers`` is {question key: answer key} from the intake follow-up questions.
-    for key in ("geo", "reclass", "answers"):
+    # ``answers`` is {question key: answer key} from the intake follow-up questions; ``photo_tags`` is
+    # {tag key: reports that carried it}, what the requesters' phones saw in their photos (no pixels travel).
+    for key in ("geo", "reclass", "answers", "photo_tags"):
         if row.get(key):
             out[key] = row[key]
     for key in ("proposal", "dispatch"):  # optional: absent until proposed / approved
@@ -255,7 +269,7 @@ def _broadcast_json(b: Broadcast) -> dict[str, Any]:
 
 
 def _packet_json(p: dict[str, Any]) -> dict[str, Any]:
-    return {
+    out = {
         "msg_id": p["msg_id"],
         "origin_node": p["origin_node"],
         "gateway_node": p["gateway_node"],
@@ -265,6 +279,14 @@ def _packet_json(p: dict[str, Any]) -> dict[str, Any]:
         "reported_at": p["reported_at"],
         "summary": p["summary"],
     }
+    # Tags are not a column: read them back from the stored frame (v3 NEED payload).
+    try:
+        tags = photo_tags_to_json(decode_need(decode_frame(bytes(p["frame"])).payload).photo_tags)
+    except (CodecError, KeyError, TypeError):
+        tags = []
+    if tags:
+        out["photo_tags"] = tags
+    return out
 
 
 def decode_frames(b64_frames: list[str]) -> tuple[list[IncomingNeed], int]:
@@ -772,7 +794,7 @@ def create_app(
                     category=CATEGORY_NAMES.index(nj.category), urgency=nj.urgency, people=nj.people,
                     vuln_flags=flags, lat=nj.lat, lon=nj.lon, loc_acc=nj.loc_acc,
                     lang=LANG_CODES.index(nj.lang), item=nj.item, landmark=nj.landmark, summary=nj.summary,
-                    answers=answers_from_json(nj.answers),
+                    answers=answers_from_json(nj.answers), photo_tags=photo_tags_from_json(nj.photo_tags),
                 )
                 frame = encode_frame(TYPE_NEED, INITIAL_TTL, int(now * 1000), origin, encode_need(need))
                 # round-trip through the decoder so injected needs see exactly what the wire would carry

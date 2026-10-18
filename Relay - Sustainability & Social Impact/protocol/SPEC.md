@@ -113,14 +113,17 @@ Any other type (including `LOC_HINT` or `BROADCAST` on a build that predates it)
 
 ## 5. Payloads
 
-Every payload starts with a 1-byte `payload_version`: `0x01` for every type, plus `0x02` for `NEED`
-(§5.1, intake answers). A `NEED` or `ACK` with any other `payload_version` is treated like an unknown type (§4):
+Every payload starts with a 1-byte `payload_version`: `0x01` for every type, plus `0x02` and `0x03` for `NEED`
+(§5.1, intake answers; photo tags). A `NEED` or `ACK` with any other `payload_version` is treated like an unknown type (§4):
 relayed if `ttl > 1`, never stored or shown.
 
 **Upgrade consequence of NEED v2:** a build that predates v2 sees `payload_version = 2` as unknown, so it
 **relays** the frame (opaque key, at most once per node) but does **not** show, store or upload it; a gateway on an
 old build therefore never uploads a v2 NEED. Encoders emit v1 whenever a NEED has no answers, so v1 traffic is
 unaffected; only a NEED that carries answers needs a v2-aware gateway somewhere on its path to reach the backend.
+The same holds for **NEED v3** (photo tags): a build that predates v3 relays it but does not show, store or upload
+it, so a NEED that carries photo tags needs a v3-aware gateway somewhere on its path. Encoders emit v1 / v2 whenever
+there are no tags, so earlier traffic is unaffected.
 
 **Opaque key** (for unknown types and unknown payload versions): the first 8 bytes of
 SHA-256 over `type ‖ sender_id ‖ timestamp_ms (8 bytes BE) ‖ payload`. It goes in the same
@@ -130,7 +133,7 @@ seen-set, so opaque frames are relayed at most once per node.
 
 ```
 size field
-1    payload_version   = 0x01 (no answers) or 0x02 (v1 layout + 3 answer bytes, below)
+1    payload_version   = 0x01 (no answers), 0x02 (v1 layout + 3 answer bytes, below) or 0x03 (v2 layout + photo tags)
 8    msg_id            random 64-bit, end-to-end identity and dedupe key
 8    origin_node       node_id of the requester (ACKs are addressed here)
 4    created_at        unix seconds, u32
@@ -179,11 +182,35 @@ OTHER has no questions. Question text per language (en, hi, or, tl, war) lives i
 model or the rules only ever choose a question id. A new question needs a new id, and a new answer value on an
 existing question needs a new `payload_version` (decoders reject what they do not know).
 
-Encoders emit **v1 when there are no answers and v2 when there is at least one**. Decoders (Kotlin and Python) accept
-both. Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
+**`payload_version = 0x03`** is exactly the v1 layout (with the version byte set to 3), then the **3 answer bytes**
+(same rules as v2, except that all three may be empty), then **`photo_tags`**, a `u16` big-endian bitmask. Max v3
+payload 118 + 3 + 2 = **123 bytes**, frame 22 + 123 = **145 bytes** (≤ 182; the vector `need_v3_max_size` pins it).
+
+```
+bit  key                bit  key                bit  key
+0    floodwater         6    road_blocked       12   vehicle_damaged
+1    house_damaged      7    tree_fallen        13   fire
+2    house_collapsed    8    power_line_down    14   landslide
+3    roof_damaged       9    boat_damaged       15   reserved, must be 0
+4    person_injured     10   crops_damaged
+5    people_stranded    11   livestock_lost
+```
+The tag table is fixed data, never renumbered; `protocol/vectors.json` carries it as `photo_tag_bank` and every
+codec's tests check their table against it. A new tag needs a new bit, and bit 15 stays reserved until a new
+`payload_version` defines it.
+
+**Privacy: tags only, never pixels.** The photo is classified **on the phone** into this vocabulary and discarded;
+the image is never sent over the mesh or to the backend, so "no names, no numbers, no pixels" holds. A tag is what the
+phone's classifier saw, an observation and not a verified assessment: the backend counts the reports that carried a
+tag and shows it to the operator as context, and never lets it change a priority score.
+
+Encoders emit **v1 when there are no answers and no tags, v2 when there is at least one answer and no tags, and v3
+when there is any tag (with or without answers)**. Decoders (Kotlin, Swift and Python) accept all three. Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
 within limits, valid UTF-8, no trailing bytes; for v2 additionally exactly 3 answer bytes, every non-empty byte a
 known question id with a value that question defines, no duplicate id, no occupied slot after an empty one, and at
-least one answer (all-empty v2 is invalid). Invalid → drop.
+least one answer (all-empty v2 is invalid). For v3: exactly 3 answer bytes (same checks, but all-empty is valid) and
+exactly 2 `photo_tags` bytes, nonzero (`photo_tags == 0` is invalid; encoders send v1 / v2 instead) with bit 15 clear.
+Invalid → drop.
 
 ### 5.2 `ACK` (type `0x71`), ≤ 145 bytes
 
@@ -435,12 +462,18 @@ Response:
   "status": "OPEN", "dispatch_draft": {"en": "...", "local": "..."},
   "first_reported_at": 1790000000, "max_hops": 2, "gateways": ["a1b2c3d4e5f60718"],
   "msg_ids": ["0011223344556677"],
-  "answers": {"conscious": "no", "road_reachable": "yes"}
+  "answers": {"conscious": "no", "road_reachable": "yes"},
+  "photo_tags": {"floodwater": 2, "people_stranded": 1}
 }
 ```
 `answers` (optional, omitted when the ticket has none) maps question key to answer key (§5.1 table; `unknown` is a
 real answer). For a merged ticket it holds the first report's answers, and a later report fills only keys the ticket
 does not have yet.
+`photo_tags` (optional, omitted when empty) maps a tag key (§5.1 table) to the number of linked reports that carried
+it, so `{"floodwater": 2}` on a 3-report ticket means two phones saw floodwater. These are observations from the
+requesters' phones, not verified facts, and they never change `priority_score` or `priority_tier`; the only effect on
+priority is a note appended to `priority_reason`, e.g. "Photo shows: floodwater, people stranded." The detail view's
+`packets` entries carry `photo_tags` as a list of keys when that report had any.
 `status` is `OPEN` or `DISPATCHED`.
 
 **`geo`** (optional, only on a ticket with `has_location = false`) is an approximate position, never a fix, and never
@@ -477,7 +510,8 @@ also carries its own `loc_acc`.
 `protocol/vectors.json` holds hex encodings produced by `protocol/gen_vectors.py` (the
 reference encoder). Both codecs must (a) encode each vector's fields to exactly the given hex
 and (b) decode the hex back to the same fields. The v1 vectors are byte-identical to the originals; the `need_v2_*`
-vectors cover the answer bytes, and the `loc_hint_*` vectors cover `LOC_HINT` (fields include its dedupe `key`).
+vectors cover the answer bytes, the `need_v3_*` vectors cover the photo tags (fields carry `photo_tags` and `photo_tags_mask`;
+`photo_tag_bank` is the bit table both codecs must match), and the `loc_hint_*` vectors cover `LOC_HINT` (fields include its dedupe `key`).
 `must_reject_need_payloads` and `must_reject_loc_hint_payloads` list payloads both decoders must refuse,
 `loc_hint_acc_max_m` is the accuracy-bucket table, and `answer_bank` is the question table both codecs must match. Regenerate with
 `python3 protocol/gen_vectors.py > protocol/vectors.json`.

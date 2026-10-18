@@ -125,6 +125,7 @@ def need_frame(
     created_at: int = T0,
     ttl: int = 7,
     answers: tuple[tuple[int, int], ...] = (),
+    photo_tags: int = 0,
 ) -> tuple[bytes, codec.Need]:
     n = next(_msg_counter)
     origin = origin if origin is not None else n.to_bytes(8, "big")
@@ -133,6 +134,7 @@ def need_frame(
         msg_id=msg_id, origin_node=origin, created_at=created_at, category=category, urgency=urgency,
         people=people, vuln_flags=vuln_flags, lat=lat, lon=lon, loc_acc=loc_acc, lang=lang,
         item=item, landmark=landmark, summary=summary, answers=answers,
+        photo_tags=photo_tags,
     )
     frame = codec.encode_frame(codec.TYPE_NEED, ttl, (created_at + 1) * 1000, origin, codec.encode_need(need))
     return frame, need

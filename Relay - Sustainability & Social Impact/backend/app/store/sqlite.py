@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     -- JSON {from, to, reason}: category corrected at triage
     reclass            TEXT,
     -- JSON {question key: answer key}: intake answers (first report wins)
-    answers            TEXT
+    answers            TEXT,
+    -- JSON {tag key: number of reports that carried it}: on-device photo tags (no pixels ever reach the backend)
+    photo_tags         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_open ON tickets(status, category);
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { Team, Ticket } from '../types';
 import { formatRelative } from '../lib/time';
+import { photoTagChips } from '../lib/photoTags';
 import { accuracyLabel, hasMeshEstimate, isMappable, meshEstimateLabel } from '../lib/location';
 import {
   capitalise,
@@ -105,6 +106,7 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
   const order = t.dispatch?.order_en ?? t.proposal?.order_en ?? t.dispatch_draft?.en ?? null;
   const orderLocal = t.proposal?.order_local ?? t.dispatch_draft?.local ?? null;
   const eligible = teams.filter((tm) => tm.status !== 'off');
+  const tagChips = photoTagChips(t.photo_tags);
 
   return (
     <section className="detail panel" aria-label={`Request ${ticketRef(t.ticket_no)}`}>
@@ -159,6 +161,21 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
           {firstPacket ? `uploaded ${clockTime(firstPacket.received_at)}` : 'uploaded'}
           {delays.length ? ` · ${formatMinutes(Math.min(...delays) / 60)} phone to upload` : ''} · identities hidden
         </p>
+
+        {tagChips.length > 0 && (
+          <>
+            <h3>Photo tags</h3>
+            <ul className="tag-chips" aria-label="Photo tags">
+              {tagChips.map((c) => (
+                <li key={c.tag} className={`tag-chip sev-${c.severity}`}>
+                  {c.label}
+                  {t.report_count > 1 && <span className="tag-count" title={`${c.count} of ${t.report_count} reports`}>×{c.count}</span>}
+                </li>
+              ))}
+            </ul>
+            <p className="muted small">From the requester's photo, classified on the phone. Only tags travel; no image was sent.</p>
+          </>
+        )}
 
         <h3>Dispatch</h3>
         <div className="dispatch-card">
