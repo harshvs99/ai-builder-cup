@@ -397,7 +397,7 @@ def create_app(
         if not teams_seeded.is_set():
             with seed_lock:
                 if not teams_seeded.is_set():
-                    store.seed_teams(team_data.load_seed())
+                    store.seed_teams(team_data.load_all_seeds())
                     teams_seeded.set()
 
     def team_views() -> list[dict[str, Any]]:

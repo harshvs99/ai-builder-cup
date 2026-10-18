@@ -141,7 +141,7 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
 
         <h3>Mesh path</h3>
         <p className="path">
-          <i className="dot ok" aria-hidden /> Villager's phone <span aria-hidden>→</span> {t.max_hops} hop{t.max_hops === 1 ? '' : 's'}{' '}
+          <i className="dot ok" aria-hidden /> Requester's phone <span aria-hidden>→</span> {t.max_hops} hop{t.max_hops === 1 ? '' : 's'}{' '}
           <span aria-hidden>→</span> <i className="sq" aria-hidden /> Gateway{' '}
           {t.gateways.length ? t.gateways.map((g) => `GW-${shortNode(g)}`).join(', ') : '–'}
         </p>
@@ -227,7 +227,7 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
               <p className="muted small">Dispatch order</p>
               {order && <p>{order}</p>}
               {orderLocal && orderLocal !== order && <p lang={t.proposal?.local_lang ?? t.lang}>{orderLocal}</p>}
-              <p className="muted small">The villager's phone gets a confirmation in {languageName(t.lang) || 'their language'} over the mesh.</p>
+              <p className="muted small">The requester gets a confirmation in {languageName(t.lang) || 'their language'} over the mesh.</p>
             </div>
           )}
         </div>

@@ -205,7 +205,7 @@ export function SitrepView({ tickets, teams, stats, gateways, nowSec, onOpen, sc
               )}
               <p className="muted small">
                 Covers {clockTime(sitrep.period_start)} to {clockTime(sitrep.period_end)}. Every figure in the text is
-                checked against the store; the report names places, teams and gateways only, never a villager or a phone owner.
+                checked against the store; the report names places, teams and gateways only, never a requester or a phone owner.
               </p>
             </>
           ) : (

@@ -47,6 +47,7 @@ CATEGORY_KIND = {
 # everything else on damaged roads.
 SPEED_KMH = {"boat": 15.0, "medical": 25.0, "supply": 25.0}
 PREP_MIN = 10
+MAX_DISPATCH_KM = 150.0  # a team further than this from a located ticket is another district's
 FLAT_ETA_MIN = 45  # no usable location: same as the stock ACK
 ETA_STEP_MIN = 5
 MAX_ETA_MIN = 0xFFFE  # 0xFFFF means "unknown" on the wire
@@ -106,13 +107,16 @@ def allocate(tickets: list[dict[str, Any]], teams: list[dict[str, Any]]) -> list
     out: list[Assignment] = []
     for ticket in sorted((t for t in tickets if t["status"] == "OPEN"), key=_priority_key):
         wanted = CATEGORY_KIND.get(ticket["category"], "supply")
-        candidates = [by_id[i] for i, r in room.items() if r > 0 and by_id[i]["kind"] == wanted]
+        point = ticket_point(ticket)
+        free = [by_id[i] for i, r in room.items() if r > 0]
+        if point is not None:
+            free = [c for c in free if distance_km(c, point) <= MAX_DISPATCH_KM]
+        candidates = [c for c in free if c["kind"] == wanted]
         fallback = not candidates
         if fallback:
-            candidates = [by_id[i] for i, r in room.items() if r > 0]
+            candidates = free
         if not candidates:
             continue
-        point = ticket_point(ticket)
         team = min(candidates, key=lambda c: (eta_minutes(c, point), -room[c["id"]], c["id"]))
         room[team["id"]] -= 1
         eta = eta_minutes(team, point)

@@ -42,6 +42,25 @@ def test_seed_teams_shape():
     assert len({t["id"] for t in seed}) == 6
 
 
+def test_delhi_seed_shape():
+    delhi = teams.load_seed(teams.DATA_DIR / "teams_delhi.json")
+    assert len(delhi) == 40
+    assert {t["kind"] for t in delhi} == {"boat", "medical", "supply"}
+    assert sum("Dwarka" in t["name"] for t in delhi) >= 10
+    assert all(28.4 < t["base_lat"] < 28.9 and 76.8 < t["base_lon"] < 77.4 for t in delhi)
+    assert len({t["id"] for t in teams.load_all_seeds()}) == 46
+
+
+def test_allocation_never_crosses_districts():
+    views_all = [teams.team_view(t, {}) for t in teams.load_all_seeds()]
+    [a] = dispatch.allocate([ticket(1, "RESCUE", at=(28.6315, 77.2167))], views_all)  # Connaught Place
+    assert a.team_id.startswith("boat-") and a.eta_min < 120 and a.team_id != "boat-puri"
+    [b] = dispatch.allocate([ticket(2, "RESCUE", at=PURI)], views_all)
+    assert b.team_id in {"boat-puri", "boat-brahmagiri"}
+    # nobody within range of a point in the open ocean: no assignment instead of a 1000 km trip
+    assert dispatch.allocate([ticket(3, "RESCUE", at=(0.0, -30.0))], views_all) == []
+
+
 @pytest.mark.parametrize("category,kind", [
     ("RESCUE", "boat"), ("MISSING_PERSON", "boat"), ("MEDICAL", "medical"),
     ("WATER", "supply"), ("FOOD", "supply"), ("SHELTER", "supply"), ("OTHER", "supply"),
@@ -207,7 +226,7 @@ def seed_three(client):
 
 def test_teams_endpoint(client):
     r = client.get("/v1/teams").json()
-    assert len(r) == 6
+    assert len(r) == len(teams.load_all_seeds()) == 46
     assert set(r[0]) == {"id", "name", "kind", "capacity", "base_lat", "base_lon", "load", "status"}
     assert all(t["load"] == 0 and t["status"] == "free" for t in r)
 

@@ -23,6 +23,17 @@ def load_seed(path: Path | None = None) -> list[dict[str, Any]]:
     return teams
 
 
+def load_all_seeds() -> list[dict[str, Any]]:
+    """Every ``data/teams_*.json`` (one file per district), ids unique across files."""
+    out: list[dict[str, Any]] = []
+    for path in sorted(DATA_DIR.glob("teams_*.json")):
+        out.extend(load_seed(path))
+    ids = [t["id"] for t in out]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate team id across seed files")
+    return out
+
+
 def team_view(team: dict[str, Any], loads: dict[str, int]) -> dict[str, Any]:
     load = loads.get(team["id"], 0)
     if team["status"] == "off":

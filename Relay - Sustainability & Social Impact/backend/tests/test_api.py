@@ -223,7 +223,7 @@ def test_stats_and_gateway_online_window(client, clock):
     assert s["open_by_category"]["MEDICAL"] == 1 and s["open_by_category"]["FOOD"] == 1
     assert set(s) == {"open_by_category", "gateways_online", "tickets", "open", "p1_open", "oldest_open_at",
                       "teams_free", "teams_total"}
-    assert (s["open"], s["oldest_open_at"], s["teams_free"], s["teams_total"]) == (2, T0, 6, 6)
+    assert (s["open"], s["oldest_open_at"], s["teams_free"], s["teams_total"]) == (2, T0, 46, 46)
     client.post("/v1/tickets/101/approve")
     assert client.get("/v1/stats").json()["open_by_category"]["MEDICAL"] == 0
     clock.t += 61
