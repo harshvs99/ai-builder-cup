@@ -53,6 +53,15 @@ Legend: **[V]** verified (source or method inline). **[A]** assumption, to be me
 - Sending voice or images over the mesh. Only text packets travel.
 - True routing protocols such as AODV or BATMAN. We use flooding plus anti-entropy, which is enough at village scale.
 - Control-room bulletins (§7.5) and SMS uplink (§2a): designed for, not in the v1 spec.
+- Everyday civic requests (complaints and service requests to local government, see §1.1): the product direction, not built for the hackathon.
+
+### 1.1 Product direction: an everyday civic app that is ready for disaster
+An app people install only after a cyclone has already lost: the towers are down, the Play Store is unreachable, and Relay can only spread phone to phone (Decision 6). Adoption is the binding constraint, so the long-term plan is for Relay to be useful **every day**, not only in an emergency.
+
+- **Day to day:** residents use Relay to file complaints and requests with their local government (panchayat, block office, municipality): a broken streetlight, a blocked drain, a water supply outage, a pension or ration-card query. The same voice-first, multilingual input applies: speak the problem, and the app turns it into a structured, categorised request with a location. These requests travel over the normal internet, not the mesh.
+- **When disaster strikes:** the app is already installed, the user already trusts it and knows how to use it, and the same local officials are already on the other end. The mesh and the NEED flow take over, and the app becomes most useful at the moment it matters most.
+- **Why it fits the architecture:** the voice → structured-packet pipeline (§5.3), the Gemini triage and dedup agent (§7.4), the ticket model and the control-room dashboard (§8) generalise from relief needs to civic grievances with a new set of categories. The control room is the same office in both modes.
+- **Hackathon scope:** we build and demo **only the disaster-needs path**. Civic requests are presented as the roadmap and adoption strategy. Nothing in v1 is built for them, but we avoid choices that would block them (for example, the category set stays an extensible enum).
 
 ---
 
