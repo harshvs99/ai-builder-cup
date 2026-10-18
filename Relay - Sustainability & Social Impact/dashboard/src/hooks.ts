@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { detectNewTickets } from './lib/diff';
 import { ALL_DISTRICTS, DEFAULT_DISTRICT, districtById } from './lib/districts';
-import type { Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type { CapImportResult, Gateway, NewWarning, ReadyShelter, ReadyWarning, Sitrep, Stats, Team, Ticket } from './types';
 
 export const POLL_MS = 2000;
 export const PULSE_MS = 4000;
@@ -159,6 +159,70 @@ export function useSitrep(district: string | null) {
     }
   }, [district]);
   return { sitrep, loaded, busy, error, regenerate };
+}
+
+/** A district's Ready-mode warnings and shelter list, plus issue / cancel / CAP-import actions. */
+export function useReady(district: string | null) {
+  const [warnings, setWarnings] = useState<ReadyWarning[]>([]);
+  const [shelters, setShelters] = useState<ReadyShelter[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  const reload = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!district) return;
+      const [w, s] = await Promise.all([api.listWarnings(district, signal), api.listShelters(district, signal)]);
+      if (signal?.aborted) return;
+      setWarnings(w);
+      setShelters(s);
+    },
+    [district],
+  );
+
+  useEffect(() => {
+    setWarnings([]);
+    setShelters([]);
+    setError(null);
+    if (!district) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    const ctl = new AbortController();
+    reload(ctl.signal)
+      .catch((e) => !ctl.signal.aborted && setError(message(e)))
+      .finally(() => !ctl.signal.aborted && setLoaded(true));
+    return () => ctl.abort();
+  }, [district, reload]);
+
+  /** Run a write, then re-read the list; errors land in `error` and the result is null. */
+  const act = useCallback(
+    async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const out = await fn();
+        await reload();
+        return out;
+      } catch (e) {
+        setError(message(e));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [reload],
+  );
+
+  const issue = useCallback((w: NewWarning) => act(() => api.issueWarning(w)), [act]);
+  const cancel = useCallback((id: number) => act(() => api.cancelWarning(id)), [act]);
+  const importCap = useCallback(
+    (xml: string): Promise<CapImportResult | null> => (district ? act(() => api.importCap(district, xml)) : Promise.resolve(null)),
+    [act, district],
+  );
+  return { warnings, shelters, loaded, busy, error, issue, cancel, importCap };
 }
 
 const SEEN_KEY = 'relay.seenTickets';

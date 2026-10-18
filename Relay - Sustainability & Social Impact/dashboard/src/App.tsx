@@ -5,6 +5,7 @@ import { Queue } from './components/Queue';
 import { Detail, type DetailAction } from './components/Detail';
 import { BroadcastView } from './components/BroadcastView';
 import { GatewaysView, SitrepView, TeamsView } from './components/Views';
+import { ReadyView } from './components/ReadyView';
 import { useDistrict, useLiveData, useNowSec, useSeen, useTheme, useTicketDetail } from './hooks';
 import { districtById, districtName, teamInDistrict, ticketInDistrict } from './lib/districts';
 import { sortTickets } from './lib/sort';
@@ -210,6 +211,7 @@ export function App() {
         <SitrepView scope={districtName(district)} districtId={districtById(district)?.id ?? null} tickets={tickets} teams={teams} stats={stats} gateways={gateways} nowSec={nowSec} onOpen={open} />
       )}
       {view === 'broadcast' && <BroadcastView district={district} nowSec={nowSec} />}
+      {view === 'ready' && <ReadyView scope={districtName(district)} districtId={districtById(district)?.id ?? null} />}
       {view === 'gateways' && <GatewaysView gateways={gateways} tickets={tickets} nowSec={nowSec} />}
     </div>
   );

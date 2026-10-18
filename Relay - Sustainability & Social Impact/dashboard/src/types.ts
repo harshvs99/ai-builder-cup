@@ -177,3 +177,86 @@ export interface Broadcast {
   approved_at: number | null;
   approved_langs: BroadcastLang[];
 }
+
+export type WarningSource = 'IMD' | 'PAGASA' | 'NDMA' | 'manual';
+export type WarningSeverity = 'watch' | 'warning' | 'alert';
+
+/** A Ready-mode warning for one district (issued by an operator or imported from a CAP alert). */
+export interface ReadyWarning {
+  id: number;
+  district: string;
+  source: WarningSource;
+  severity: WarningSeverity;
+  headline: string;
+  /** unix seconds */
+  issued_at: number;
+  expected_landfall_at: number | null;
+  expires_at: number | null;
+  cancelled_at: number | null;
+  /** Not cancelled and not expired, as the backend sees it. */
+  active: boolean;
+  cap_identifier?: string | null;
+  area?: string;
+}
+
+export interface NewWarning {
+  district: string;
+  source: WarningSource;
+  severity: WarningSeverity;
+  headline: string;
+  expected_landfall_at?: number;
+  expires_at?: number;
+}
+
+export interface CapImportResult {
+  imported: ReadyWarning[];
+  skipped: { identifier: string | null; reason: string }[];
+}
+
+export type ShelterKind = 'cyclone_shelter' | 'school' | 'relief_camp' | 'hospital';
+
+export interface ReadyShelter {
+  id: string;
+  name: string;
+  name_en: string;
+  kind: ShelterKind;
+  lat: number;
+  lon: number;
+  capacity: number;
+  facilities: string[];
+  block: string;
+  /** Placeholder entry, not verified: replace with the official list before a pilot. */
+  demo: boolean;
+}
+
+export interface Household {
+  people: number;
+  elderly: boolean;
+  children: boolean;
+  infants: boolean;
+  pregnant: boolean;
+  disability: boolean;
+  medical_needs: string;
+  livestock: boolean;
+}
+
+export interface PlanRequest {
+  lang: string;
+  district?: string;
+  lat?: number;
+  lon?: number;
+  household: Household;
+}
+
+export interface ReadyPlan {
+  plan_id: string;
+  lang: string;
+  /** Language the steps are actually in (English when the requested one has no template). */
+  steps_lang: string;
+  district: string;
+  steps: string[];
+  source: 'gemini' | 'template';
+  warning_id: number | null;
+  nearest_shelters: { id: string; name: string; distance_km: number }[];
+  audio_url: string | null;
+}

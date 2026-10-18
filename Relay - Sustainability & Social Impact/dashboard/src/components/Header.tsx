@@ -5,12 +5,13 @@ import { tierOf } from '../lib/sort';
 import { median } from '../lib/triage';
 import { ALL_DISTRICTS, DISTRICTS } from '../lib/districts';
 
-export type View = 'board' | 'teams' | 'sitrep' | 'broadcast' | 'gateways';
+export type View = 'board' | 'teams' | 'sitrep' | 'ready' | 'broadcast' | 'gateways';
 
 const TABS: { id: View; label: string }[] = [
   { id: 'board', label: 'Live board' },
   { id: 'teams', label: 'Teams' },
   { id: 'sitrep', label: 'Situation report' },
+  { id: 'ready', label: 'Ready' },
   { id: 'broadcast', label: 'Broadcast' },
   { id: 'gateways', label: 'Gateways' },
 ];

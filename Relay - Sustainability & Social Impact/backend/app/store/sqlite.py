@@ -165,6 +165,13 @@ CREATE TABLE IF NOT EXISTS broadcasts (
     data     TEXT    NOT NULL                -- JSON, includes id
 );
 CREATE INDEX IF NOT EXISTS idx_broadcasts_district ON broadcasts(district, status);
+
+CREATE TABLE IF NOT EXISTS ready_warnings (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    district TEXT NOT NULL,
+    data     TEXT NOT NULL                   -- JSON, includes id
+);
+CREATE INDEX IF NOT EXISTS idx_ready_warnings_district ON ready_warnings(district, id);
 """
 
 _OLD_STATUS_CHECK = "CHECK (status IN ('OPEN','DISPATCHED'))"
@@ -672,6 +679,36 @@ class SqliteStore:
                 args.append(val)
         sql = "SELECT data FROM broadcasts" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC"
         return [json.loads(r["data"]) for r in self._q(sql, args)]
+
+    # ------------------------------------------------------------------ ready-mode warnings
+    def add_warning(self, warning: dict[str, Any]) -> dict[str, Any]:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO ready_warnings(district, data) VALUES (?, '{}')", (warning["district"],))
+            saved = {"id": int(cur.lastrowid), **{k: v for k, v in warning.items() if k != "id"}}
+            c.execute("UPDATE ready_warnings SET data = ? WHERE id = ?", (json.dumps(saved), saved["id"]))
+            return saved
+
+    def get_warning(self, warning_id: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM ready_warnings WHERE id = ?", (warning_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def list_warnings(self, district: str | None = None) -> list[dict[str, Any]]:
+        if district is None:
+            rows = self._q("SELECT data FROM ready_warnings ORDER BY id DESC LIMIT 200")
+        else:
+            rows = self._q("SELECT data FROM ready_warnings WHERE district = ? ORDER BY id DESC LIMIT 200", (district,))
+        return [json.loads(r["data"]) for r in rows]
+
+    def cancel_warning(self, warning_id: int, now: int) -> dict[str, Any] | None:
+        with self.tx() as c:
+            row = c.execute("SELECT data FROM ready_warnings WHERE id = ?", (warning_id,)).fetchone()
+            if row is None:
+                return None
+            w = json.loads(row["data"])
+            if w.get("cancelled_at") is None:
+                w["cancelled_at"] = int(now)
+                c.execute("UPDATE ready_warnings SET data = ? WHERE id = ?", (json.dumps(w), warning_id))
+            return w
 
     # ------------------------------------------------------------------ acks
     def queue_ack(

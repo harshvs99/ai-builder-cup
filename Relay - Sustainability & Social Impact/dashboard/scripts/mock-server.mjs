@@ -153,11 +153,94 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// Ready mode (before landfall): warnings in memory, a few placeholder shelters, a template plan.
+const DISTRICT_IDS = ['puri', 'delhi'];
+/** @type {Map<number, any>} */
+const warnings = new Map();
+let nextWarning = 1;
+const warningView = (w) => ({ ...w, active: w.cancelled_at == null && (w.expires_at == null || w.expires_at > now()) });
+const SHELTERS = {
+  puri: [
+    { id: 'puri-mcs-01', name: 'Puri Town Cyclone Shelter', kind: 'cyclone_shelter', lat: 19.812, lon: 85.828, capacity: 1500, facilities: ['water', 'toilets', 'generator', 'first_aid'], block: 'Puri Sadar' },
+    { id: 'puri-sch-01', name: 'Zilla School, Puri', kind: 'school', lat: 19.807, lon: 85.835, capacity: 600, facilities: ['water', 'toilets'], block: 'Puri Sadar' },
+    { id: 'puri-hos-01', name: 'District Headquarters Hospital, Puri', kind: 'hospital', lat: 19.818, lon: 85.824, capacity: 300, facilities: ['water', 'generator', 'medical'], block: 'Puri Sadar' },
+  ],
+  delhi: [
+    { id: 'del-sch-01', name: 'Government Boys Senior Secondary School, Connaught Place', kind: 'school', lat: 28.632, lon: 77.219, capacity: 700, facilities: ['water', 'toilets'], block: 'New Delhi' },
+    { id: 'del-camp-01', name: 'Yamuna Bank Relief Camp', kind: 'relief_camp', lat: 28.623, lon: 77.279, capacity: 1500, facilities: ['water', 'toilets', 'kitchen'], block: 'Shahdara' },
+  ],
+};
+const shelterView = (s) => ({ ...s, name_en: s.name, demo: true });
+function readyRoute(req, res, path, url) {
+  if (req.method === 'GET' && path === '/v1/ready/warnings') {
+    const d = url.searchParams.get('district');
+    if (d && !DISTRICT_IDS.includes(d)) return send(res, 404, { detail: `unknown district '${d}'` });
+    return send(res, 200, { warnings: [...warnings.values()].filter((w) => !d || w.district === d).sort((a, b) => b.id - a.id).map(warningView) });
+  }
+  if (req.method === 'GET' && path === '/v1/ready/shelters') {
+    const d = url.searchParams.get('district') ?? '';
+    return SHELTERS[d] ? send(res, 200, { district: d, shelters: SHELTERS[d].map(shelterView) }) : send(res, 404, { detail: `unknown district '${d}'` });
+  }
+  if (req.method === 'POST' && path === '/v1/ready/warnings') {
+    return readBody(req, (b) => {
+      if (!b || !DISTRICT_IDS.includes(b.district)) return send(res, 404, { detail: 'unknown district' });
+      if (!b.headline || !String(b.headline).trim()) return send(res, 422, { detail: 'headline must not be blank' });
+      const w = { id: nextWarning++, district: b.district, source: b.source ?? 'manual', severity: b.severity ?? 'watch', headline: String(b.headline).trim(),
+        expected_landfall_at: b.expected_landfall_at ?? null, expires_at: b.expires_at ?? null, issued_at: now(), cancelled_at: null };
+      warnings.set(w.id, w);
+      send(res, 200, warningView(w));
+    });
+  }
+  if (req.method === 'POST' && path === '/v1/ready/warnings/import-cap') {
+    return readBody(req, (b) => {
+      if (!b || !DISTRICT_IDS.includes(b.district)) return send(res, 404, { detail: 'unknown district' });
+      // The real backend parses CAP 1.2; the mock only lifts the identifier and the headline.
+      const xml = String(b.cap_xml ?? '');
+      const pick = (tag) => xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`))?.[1]?.trim();
+      const headline = pick('headline');
+      if (!xml.includes('<alert') || !headline) return send(res, 422, { detail: 'no CAP <alert> with an <info> block found' });
+      const w = { id: nextWarning++, district: b.district, source: 'NDMA', severity: 'warning', headline, expected_landfall_at: null,
+        expires_at: null, issued_at: now(), cancelled_at: null, cap_identifier: pick('identifier') ?? null, area: pick('areaDesc') ?? '' };
+      warnings.set(w.id, w);
+      send(res, 200, { imported: [warningView(w)], skipped: [] });
+    });
+  }
+  const cancel = path.match(/^\/v1\/ready\/warnings\/(\d+)\/cancel$/);
+  if (req.method === 'POST' && cancel) {
+    const w = warnings.get(Number(cancel[1]));
+    if (!w) return send(res, 404, { detail: 'warning not found' });
+    w.cancelled_at ??= now();
+    return send(res, 200, warningView(w));
+  }
+  if (req.method === 'POST' && path === '/v1/ready/plan/preview') {
+    return readBody(req, (b) => {
+      const district = b?.district ?? 'puri';
+      if (!SHELTERS[district]) return send(res, 404, { detail: 'unknown district' });
+      const h = b.household ?? {};
+      const near = SHELTERS[district].filter((s) => s.kind !== 'hospital').slice(0, 2);
+      const steps = [
+        `When the authorities tell you to leave, go to ${near[0].name} first.${near[1] ? ` If the road is blocked, go to ${near[1].name}.` : ''}`,
+        'Pack one bag now: ID papers, medicines, torch, dry food and 3 days of drinking water.',
+        ...(h.elderly || h.disability ? ['Arrange transport early for anyone who walks slowly or uses an aid.'] : []),
+        ...(h.infants ? ['Pack milk or formula, clean water, nappies and a dry cloth for the baby.'] : []),
+        ...(h.children ? ['Keep children with an adult at all times.'] : []),
+        ...(h.livestock ? ['Untie livestock and leave them on high ground with food and water.'] : []),
+        'Charge your phone and power bank.',
+        'Before you leave, switch off electricity and gas.',
+      ];
+      send(res, 200, { plan_id: hex(16), lang: b.lang ?? 'en', steps_lang: 'en', district, steps, source: 'template', warning_id: null,
+        nearest_shelters: near.map((s, i) => ({ id: s.id, name: s.name, distance_km: 0.6 + i * 0.9 })), audio_url: null });
+    });
+  }
+  return false;
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = url.pathname.replace(/\/+$/, '') || '/';
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
 
+  if (path.startsWith('/v1/ready/') && readyRoute(req, res, path, url) !== false) return;
   if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true });
   if (req.method === 'GET' && path === '/v1/tickets') return send(res, 200, { tickets: sorted().map(summarize) });
   if (req.method === 'GET' && path === '/v1/teams') return send(res, 200, teamViews());

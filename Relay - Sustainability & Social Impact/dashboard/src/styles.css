@@ -350,3 +350,17 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .est-marker.selected { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--panel); }
 .est-marker.dispatched { opacity: 0.5; }
+
+/* Ready view forms */
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.form-grid .wide { grid-column: 1 / -1; }
+.form-grid label, .card form > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+textarea, .form-grid input[type="text"], .form-grid input[type="number"], .form-grid input[type="datetime-local"], .form-grid select {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; min-width: 0;
+}
+textarea { width: 100%; resize: vertical; font-size: 12px; }
+.form-grid .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.form-grid label.check { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; color: var(--text); text-transform: capitalize; }
+.plan { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.plan ol { margin: 8px 0 8px 20px; display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }

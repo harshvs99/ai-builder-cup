@@ -15,6 +15,7 @@ Layout (all top-level collections in the configured database):
                         toward the team's load) are set by approve
   sitreps/{id}          generated sitreps; ``id`` comes from counters/sitrep
   broadcasts/{id}       broadcast drafts and approvals; ``id`` comes from counters/broadcast
+  warnings/{id}         ready-mode warnings; ``id`` comes from counters/warning
   counters/{name}       ``ticket_no`` and ``ack_seq``: ``value`` is the last number handed out
 
 Atomicity: every multi-document write is one Firestore transaction (reads first, then
@@ -606,6 +607,52 @@ class FirestoreStore:
         docs = [s.to_dict() for s in q.stream()]
         docs.sort(key=lambda d: d["id"], reverse=True)
         return docs
+
+    # ------------------------------------------------------------------ ready-mode warnings
+    def add_warning(self, warning: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, wid = self._next(txn, "warning")
+            saved = {**{k: v for k, v in warning.items() if k != "id"}, "id": wid}
+            txn.set(self._col("warnings").document(str(wid)), saved)
+            txn.set(ref, {"value": wid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def get_warning(self, warning_id: int) -> dict[str, Any] | None:
+        snap = self._col("warnings").document(str(warning_id)).get()
+        return snap.to_dict() if snap.exists else None
+
+    def list_warnings(self, district: str | None = None) -> list[dict[str, Any]]:
+        from google.cloud import firestore
+
+        # newest 200 by the single-field ``id`` index; the district filter is in memory (no composite index)
+        docs = self._col("warnings").order_by("id", direction=firestore.Query.DESCENDING).limit(200).stream()
+        out = [d.to_dict() for d in docs]
+        return [w for w in out if district is None or w.get("district") == district]
+
+    def cancel_warning(self, warning_id: int, now: int) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        ref = self._col("warnings").document(str(warning_id))
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any] | None:
+            snap = ref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            w = snap.to_dict()
+            if w.get("cancelled_at") is None:
+                w["cancelled_at"] = int(now)
+                txn.set(ref, w)
+            return w
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
     # ------------------------------------------------------------------ acks
     def _newest_ack_seq(self) -> int:
