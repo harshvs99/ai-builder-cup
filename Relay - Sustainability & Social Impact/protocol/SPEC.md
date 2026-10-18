@@ -210,11 +210,11 @@ size field
 1    payload_version   = 0x01
 8    node_id           must equal the frame sender_id
 1    caps              bit0 IS_GATEWAY
-1    hops_to_gateway   0 if gateway, 0xFF if unknown, else min(neighbour value)+1 capped at 0xFE
+1    hops_to_gateway   0 if gateway, 0xFF if unknown, else min(neighbour value)+1 over neighbours below 0xFE (0xFE is the cap and is ignored, so a gateway-less loop decays to 0xFF)
 2    app_version       u16
 ```
 
-Sent first on every new link, and again whenever `caps` or `hops_to_gateway` changes.
+Sent first on every new link, again whenever `caps` or `hops_to_gateway` changes, and with every 30 s resync (§6.6).
 
 ### 5.4 `INVENTORY` (type `0x73`)
 

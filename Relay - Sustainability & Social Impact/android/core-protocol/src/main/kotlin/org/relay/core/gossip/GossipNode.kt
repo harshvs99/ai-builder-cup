@@ -154,15 +154,16 @@ class GossipNode(
 
     /**
      * Re-send our INVENTORY on one link (or all links). Peers answer with whatever we lack, so this
-     * advances TTL-exhausted packets one more hop and repairs losses. The Android app should call
-     * [resync] periodically (suggested: every 30 s) and when a screen of needs is opened.
+     * advances TTL-exhausted packets one more hop and repairs losses. Each resync also re-sends our HELLO, so a
+     * lost HELLO heals and neighbours keep a fresh gateway distance (or learn it is gone). The Android app should
+     * call [resync] periodically (suggested: every 30 s) and when a screen of needs is opened.
      */
     fun resync(linkId: String? = null) = locked { out ->
         expireLocked(out)
         if (linkId != null) {
-            if (links.containsKey(linkId)) sendInventory(out, linkId)
+            if (links.containsKey(linkId)) { sendHello(out, linkId); sendInventory(out, linkId) }
         } else {
-            for (id in links.keys.toList()) sendInventory(out, id)
+            for (id in links.keys.toList()) { sendHello(out, id); sendInventory(out, id) }
         }
     }
 
@@ -433,8 +434,9 @@ class GossipNode(
         var best = HelloCodec.HOPS_UNKNOWN
         for (st in links.values) {
             val h = st.hello?.hopsToGateway ?: continue
-            if (h == HelloCodec.HOPS_UNKNOWN) continue
-            val cand = minOf(h + 1, HelloCodec.HOPS_MAX)
+            // A neighbour at the cap is a stale loop (phones feeding each other's value + 1), not a real route.
+            if (h >= HelloCodec.HOPS_MAX) continue
+            val cand = h + 1
             if (best == HelloCodec.HOPS_UNKNOWN || cand < best) best = cand
         }
         return best

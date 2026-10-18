@@ -448,12 +448,55 @@ final class GossipTests: XCTestCase {
         XCTAssertEqual(1, h.node.hopsToGateway) // min(0,3)+1
         h.node.linkDown("L1")
         XCTAssertEqual(4, h.node.hopsToGateway)
-        // unknown stays unknown, cap at 0xFE
+        // unknown stays unknown; 0xFD+1 reaches the 0xFE cap; a neighbour AT the cap is a stale loop and is ignored
         let h2 = SoloHarness(); h2.node.linkUp("A")
         let p3 = NodeId.random()
         h2.node.onFrame("A", hello(p3, p3, 0, 0xFF)); XCTAssertEqual(0xFF, h2.node.hopsToGateway)
         let p4 = NodeId.random(); h2.node.linkUp("B")
-        h2.node.onFrame("B", hello(p4, p4, 0, 0xFE)); XCTAssertEqual(0xFE, h2.node.hopsToGateway)
+        h2.node.onFrame("B", hello(p4, p4, 0, 0xFD)); XCTAssertEqual(0xFE, h2.node.hopsToGateway)
+        let h3 = SoloHarness(); h3.node.linkUp("A")
+        let p5 = NodeId.random()
+        h3.node.onFrame("A", hello(p5, p5, 0, 0xFE)); XCTAssertEqual(0xFF, h3.node.hopsToGateway)
+    }
+
+    func testResyncResendsHelloAndInventoryOnEveryLink() {
+        let h = SoloHarness()
+        h.node.linkUp("L1"); h.node.linkUp("L2"); h.clearSent()
+        h.node.resync()
+        for l in ["L1", "L2"] {
+            XCTAssertEqual(1, h.sentTo(l, FrameTypes.hello).count)
+            XCTAssertFalse(h.sentTo(l, FrameTypes.inventory).isEmpty)
+        }
+        h.clearSent()
+        h.node.resync("L2")
+        XCTAssertEqual(1, h.sentTo("L2", FrameTypes.hello).count)
+        XCTAssertTrue(h.sentTo("L1").isEmpty)
+    }
+
+    func testGatewayLessLoopDecaysToUnknownInsteadOfSettlingAt254() {
+        let net = TestNet()
+        net.chain(["g", "a", "b"])
+        net.connect("b", "c"); net.connect("c", "a") // a-b-c triangle: the stale-value loop
+        net.node("g").node.isGateway = true
+        net.runUntilIdle()
+        XCTAssertEqual(1, net.node("a").node.hopsToGateway)
+        net.disconnect("g", "a")
+        net.runUntilIdle()
+        for n in ["a", "b", "c"] { XCTAssertEqual(0xFF, net.node(n).node.hopsToGateway, n) }
+    }
+
+    func testResyncHealsALostHelloAndReachesAGatewayThatReturns() {
+        let net = TestNet()
+        net.chain(["g", "a", "b"])
+        net.node("g").node.isGateway = true
+        net.runUntilIdle()
+        XCTAssertEqual(2, net.node("b").node.hopsToGateway)
+        net.disconnect("g", "a"); net.runUntilIdle()
+        XCTAssertEqual(0xFF, net.node("b").node.hopsToGateway)
+        net.connect("g", "a"); net.runUntilIdle()
+        net.resyncRound()
+        XCTAssertEqual(1, net.node("a").node.hopsToGateway)
+        XCTAssertEqual(2, net.node("b").node.hopsToGateway)
     }
 
     func testGatewayFlagReannouncesAndForcesHopsZero() {

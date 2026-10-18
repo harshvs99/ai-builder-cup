@@ -442,12 +442,55 @@ class GossipTest {
         assertEquals(1, h.node.hopsToGateway) // min(0,3)+1
         h.node.linkDown("L1")
         assertEquals(4, h.node.hopsToGateway)
-        // unknown stays unknown, cap at 0xFE
+        // unknown stays unknown; 0xFD+1 reaches the 0xFE cap; a neighbour AT the cap is a stale loop and is ignored
         val h2 = SoloHarness(); h2.node.linkUp("A")
         val p3 = NodeId.random()
         h2.node.onFrame("A", hello(p3, p3, 0, 0xFF)); assertEquals(0xFF, h2.node.hopsToGateway)
         val p4 = NodeId.random(); h2.node.linkUp("B")
-        h2.node.onFrame("B", hello(p4, p4, 0, 0xFE)); assertEquals(0xFE, h2.node.hopsToGateway)
+        h2.node.onFrame("B", hello(p4, p4, 0, 0xFD)); assertEquals(0xFE, h2.node.hopsToGateway)
+        val h3 = SoloHarness(); h3.node.linkUp("A")
+        val p5 = NodeId.random()
+        h3.node.onFrame("A", hello(p5, p5, 0, 0xFE)); assertEquals(0xFF, h3.node.hopsToGateway)
+    }
+
+    @Test fun resyncResendsHelloAndInventoryOnEveryLink() {
+        val h = SoloHarness()
+        h.node.linkUp("L1"); h.node.linkUp("L2"); h.clearSent()
+        h.node.resync()
+        for (l in listOf("L1", "L2")) {
+            assertEquals(1, h.sentTo(l, FrameTypes.HELLO).size)
+            assertTrue(h.sentTo(l, FrameTypes.INVENTORY).isNotEmpty())
+        }
+        h.clearSent()
+        h.node.resync("L2")
+        assertEquals(1, h.sentTo("L2", FrameTypes.HELLO).size)
+        assertTrue(h.sentTo("L1").isEmpty())
+    }
+
+    @Test fun gatewayLessLoopDecaysToUnknownInsteadOfSettlingAt254() {
+        val net = TestNet()
+        net.chain(listOf("g", "a", "b"))
+        net.connect("b", "c"); net.connect("c", "a") // a-b-c triangle: the stale-value loop
+        net.node("g").node.isGateway = true
+        net.runUntilIdle()
+        assertEquals(1, net.node("a").node.hopsToGateway)
+        net.disconnect("g", "a")
+        net.runUntilIdle()
+        for (n in listOf("a", "b", "c")) assertEquals(n, 0xFF, net.node(n).node.hopsToGateway)
+    }
+
+    @Test fun resyncHealsALostHelloAndReachesAGatewayThatReturns() {
+        val net = TestNet()
+        net.chain(listOf("g", "a", "b"))
+        net.node("g").node.isGateway = true
+        net.runUntilIdle()
+        assertEquals(2, net.node("b").node.hopsToGateway)
+        net.disconnect("g", "a"); net.runUntilIdle()
+        assertEquals(0xFF, net.node("b").node.hopsToGateway)
+        net.connect("g", "a"); net.runUntilIdle()
+        net.resyncRound()
+        assertEquals(1, net.node("a").node.hopsToGateway)
+        assertEquals(2, net.node("b").node.hopsToGateway)
     }
 
     @Test fun gatewayFlagReannouncesAndForcesHopsZero() {

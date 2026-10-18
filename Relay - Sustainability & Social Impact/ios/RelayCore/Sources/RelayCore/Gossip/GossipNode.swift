@@ -167,15 +167,16 @@ public final class GossipNode: @unchecked Sendable {
     }
 
     /// Re-send our INVENTORY on one link (or all links). Peers answer with whatever we lack, so this
-    /// advances TTL-exhausted packets one more hop and repairs losses. The app should call `resync` periodically
-    /// (suggested: every 30 s) and when a screen of needs is opened.
+    /// advances TTL-exhausted packets one more hop and repairs losses. Each resync also re-sends our HELLO, so a
+    /// lost HELLO heals and neighbours keep a fresh gateway distance (or learn it is gone). The app should call
+    /// `resync` periodically (suggested: every 30 s) and when a screen of needs is opened.
     public func resync(_ linkId: String? = nil) {
         locked { out in
             expireLocked(out)
             if let linkId {
-                if links[linkId] != nil { sendInventory(out, linkId) }
+                if links[linkId] != nil { sendHello(out, linkId); sendInventory(out, linkId) }
             } else {
-                for id in linkOrder { sendInventory(out, id) }
+                for id in linkOrder { sendHello(out, id); sendInventory(out, id) }
             }
         }
     }
@@ -433,8 +434,9 @@ public final class GossipNode: @unchecked Sendable {
         var best = HelloCodec.hopsUnknown
         for id in linkOrder {
             guard let h = links[id]?.hello?.hopsToGateway else { continue }
-            if h == HelloCodec.hopsUnknown { continue }
-            let cand = min(h + 1, HelloCodec.hopsMax)
+            // A neighbour at the cap is a stale loop (phones feeding each other's value + 1), not a real route.
+            if h >= HelloCodec.hopsMax { continue }
+            let cand = h + 1
             if best == HelloCodec.hopsUnknown || cand < best { best = cand }
         }
         return best
