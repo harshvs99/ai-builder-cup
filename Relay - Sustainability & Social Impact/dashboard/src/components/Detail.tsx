@@ -2,7 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { Team, Ticket } from '../types';
 import { formatRelative } from '../lib/time';
-import { accuracyLabel, hasMeshEstimate, isMappable, meshEstimateLabel } from '../lib/location';
+import {
+  accuracyLabel,
+  canLocateByLandmark,
+  hasMapsEstimate,
+  hasMeshEstimate,
+  isMappable,
+  mapsEstimateText,
+  mapsLink,
+  meshEstimateLabel,
+} from '../lib/location';
+import { photoTagChips } from '../lib/photoTags';
+import { evidenceFileName, saveBlob } from '../lib/recover';
 import {
   capitalise,
   clockTime,
@@ -67,6 +78,19 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
     );
   const onTheWay = () => run('onTheWay', () => api.onTheWay(t.ticket_no));
   const resolve = () => run('resolve', () => api.resolve(t.ticket_no));
+  const locate = () => run('locate', () => api.locate(t.ticket_no));
+  // The pack needs the operator key, so it is fetched and saved as a blob rather than opened as a link.
+  const downloadEvidence = async () => {
+    setBusy('evidence');
+    setError(null);
+    try {
+      saveBlob(await api.ticketEvidence(t.ticket_no), evidenceFileName('ticket', t.ticket_no));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
   const propose = () =>
     run('propose', async () => {
       await api.proposeDispatch(t.ticket_no);
@@ -105,6 +129,7 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
   const order = t.dispatch?.order_en ?? t.proposal?.order_en ?? t.dispatch_draft?.en ?? null;
   const orderLocal = t.proposal?.order_local ?? t.dispatch_draft?.local ?? null;
   const eligible = teams.filter((tm) => tm.status !== 'off');
+  const tagChips = photoTagChips(t.photo_tags);
 
   return (
     <section className="detail panel" aria-label={`Request ${ticketRef(t.ticket_no)}`}>
@@ -149,6 +174,27 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
           </p>
         )}
 
+        {hasMapsEstimate(t) && t.geo && (
+          <p className="est-line">
+            <span className="approx-badge" title="Estimated from the landmark text, not a GPS fix">Approximate</span>{' '}
+            Approx. location: {mapsEstimateText(t.geo).place && <b>{mapsEstimateText(t.geo).place}</b>}
+            {mapsEstimateText(t.geo).place ? ' — ' : ''}{mapsEstimateText(t.geo).rest}{' '}
+            {mapsLink(t.geo) && (
+              <a className="link" href={mapsLink(t.geo)!} target="_blank" rel="noopener">Open in Google Maps</a>
+            )}
+            <span className="muted small block">
+              Google Maps · {t.geo.lat.toFixed(4)}, {t.geo.lon.toFixed(4)}. Confirm with the ward office before sending a team.
+            </span>
+          </p>
+        )}
+        {canLocateByLandmark(t) && (
+          <p>
+            <button type="button" className="btn ghost sm" disabled={!!busy} onClick={locate}>
+              {busy === 'locate' ? 'Locating…' : 'Locate with Maps'}
+            </button>
+          </p>
+        )}
+
         <h3>Mesh path</h3>
         <p className="path">
           <i className="dot ok" aria-hidden /> Requester's phone <span aria-hidden>→</span> {t.max_hops} hop{t.max_hops === 1 ? '' : 's'}{' '}
@@ -159,6 +205,21 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
           {firstPacket ? `uploaded ${clockTime(firstPacket.received_at)}` : 'uploaded'}
           {delays.length ? ` · ${formatMinutes(Math.min(...delays) / 60)} phone to upload` : ''} · identities hidden
         </p>
+
+        {tagChips.length > 0 && (
+          <>
+            <h3>Photo tags</h3>
+            <ul className="tag-chips" aria-label="Photo tags">
+              {tagChips.map((c) => (
+                <li key={c.tag} className={`tag-chip sev-${c.severity}`}>
+                  {c.label}
+                  {t.report_count > 1 && <span className="tag-count" title={`${c.count} of ${t.report_count} reports`}>×{c.count}</span>}
+                </li>
+              ))}
+            </ul>
+            <p className="muted small">From the requester's photo, classified on the phone. Only tags travel; no image was sent.</p>
+          </>
+        )}
 
         <h3>Dispatch</h3>
         <div className="dispatch-card">
@@ -263,6 +324,10 @@ export function Detail({ ticket: t, teams, seen, nowSec, onClose, onCentre, onCh
         </div>
         <div className="foot-row">
           <button type="button" className="link" onClick={onClose}>Close</button>
+          <button type="button" className="link small" disabled={!!busy} onClick={downloadEvidence}
+            title="Self-contained record of this request for the state or insurers (JSON, with a SHA-256 digest)">
+            {busy === 'evidence' ? 'Preparing…' : 'Evidence pack'}
+          </button>
           <span className="muted small keys">A approve · D delivered · J / K next</span>
         </div>
       </div>

@@ -70,6 +70,34 @@ export function toFeatures(tickets: readonly Ticket[], selected: number | null):
 }
 
 // ---------------------------------------------------------------------------------------------
+// Google Maps estimates: a place found from the landmark text. Never a fix; shown in the detail
+// panel only (with the Google Maps credit the grounding terms require), not plotted.
+// ---------------------------------------------------------------------------------------------
+
+/** True for a ticket with NO GPS fix whose geo came from Google Maps grounding. */
+export function hasMapsEstimate(t: Ticket): boolean {
+  return !isMappable(t) && t.geo?.source === 'gemini_maps';
+}
+
+/** The Google Maps link of an estimate if it is a plain https URL, else null (never render anything else as a link). */
+export function mapsLink(g: Geo): string | null {
+  const u = g.maps_uri?.trim();
+  return u && /^https:\/\//i.test(u) ? u : null;
+}
+
+/** "Approx. location: Pipili Bus Stand — found on Google Maps from the landmark “pipili bus stand”". */
+export function mapsEstimateText(g: Geo): { place: string | null; rest: string } {
+  const name = g.name?.trim() || null;
+  const q = g.query?.trim();
+  return { place: name, rest: `found on Google Maps${q ? ` from the landmark “${q}”` : ''}` };
+}
+
+/** A no-fix ticket with a landmark and no mesh estimate can be placed from its landmark on demand. */
+export function canLocateByLandmark(t: Ticket): boolean {
+  return !isMappable(t) && !!t.landmark?.trim() && t.geo?.source !== 'mesh';
+}
+
+// ---------------------------------------------------------------------------------------------
 // Mesh estimates: an approximation from nearby relay phones' location hints. Never a GPS fix, so
 // none of this feeds isMappable / mappableTickets / countWithoutLocation.
 // ---------------------------------------------------------------------------------------------

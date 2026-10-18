@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     -- JSON {from, to, reason}: category corrected at triage
     reclass            TEXT,
     -- JSON {question key: answer key}: intake answers (first report wins)
-    answers            TEXT
+    answers            TEXT,
+    -- JSON {tag key: number of reports that carried it}: on-device photo tags (no pixels ever reach the backend)
+    photo_tags         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_open ON tickets(status, category);
 
@@ -441,9 +443,10 @@ class SqliteStore:
     def ticket_for_msg(self, msg_id: str) -> int | None:
         return self._linked_ticket(msg_id)
 
-    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+    def set_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
         with self.tx() as c:
-            if self.get_ticket(ticket_no) is None:
+            current = self.get_ticket(ticket_no)
+            if current is None or (geo.get("source") != "mesh" and "geo" not in keep_mesh_geo(current.get("geo"), {"geo": geo})):
                 return False
             fixed = c.execute(
                 "SELECT 1 FROM ticket_packets tp JOIN packets p ON p.msg_id = tp.msg_id "

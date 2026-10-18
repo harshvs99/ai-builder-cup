@@ -330,6 +330,17 @@ code { font-family: var(--mono); font-size: 12px; }
   .page { padding: 18px 16px 32px; }
 }
 
+/* Photo tags: what the requester's phone saw in a photo (no image is ever sent) */
+.photo-ind { margin-left: 6px; font-size: 11px; opacity: 0.7; }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0 0 6px; padding: 0; }
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--panel-2);
+}
+.tag-chip.sev-life { border-color: var(--life); color: var(--life); }
+.tag-chip.sev-hazard { border-color: var(--urgent); color: var(--warn); }
+.tag-count { font: 600 11px var(--mono); color: var(--muted); }
+
 /* Mesh-estimated position: approximate, never a GPS fix */
 .approx-badge {
   display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 650;
@@ -350,6 +361,16 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .est-marker.selected { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--panel); }
 .est-marker.dispatched { opacity: 0.5; }
+
+/* Recover: damage map, area table, report */
+.recover-map { position: relative; height: 380px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.recover-legend { position: absolute; left: 10px; bottom: 10px; z-index: 2; list-style: none; margin: 0; }
+.recover-selected { margin-top: 10px; font-size: 13px; }
+.grid tr.row-selected td { background: var(--sel); }
+.card .row-actions { margin-top: 10px; }
+@media (max-width: 760px) {
+  .recover-map { height: 300px; }
+}
 
 /* Ready view forms */
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }

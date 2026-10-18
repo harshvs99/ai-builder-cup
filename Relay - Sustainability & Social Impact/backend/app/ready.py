@@ -74,7 +74,7 @@ from pydantic import BaseModel, Field
 
 from . import districts, languages
 from .cluster import haversine_m
-from .geocode import PURI_BBOX
+from .districts import PURI_BBOX
 from .store import Store
 from .textgen import TextGen, call_json
 

@@ -8,7 +8,7 @@ transaction) and the pipeline code is identical for both:
   * ``approve_ticket``  OPEN -> DISPATCHED plus one DISPATCHED ack per distinct origin
   * ``advance_ticket``  DISPATCHED -> ON_THE_WAY -> RESOLVED plus one ack per distinct origin
   * ``update_ticket_if_unchanged``  compare-and-set used by the Gemini enrichment phase
-  * ``set_mesh_geo``    guarded write of a mesh location estimate onto a ticket with no GPS fix
+  * ``set_geo``         guarded write of a location estimate (mesh, or an on-demand landmark one) onto a no-fix ticket
 
 ``ingest`` calls back into the pipeline (``plan``) with the candidate tickets the store read
 inside its transaction. ``plan`` must be a pure function of its argument: Firestore may run
@@ -43,13 +43,13 @@ TICKET_COLUMNS = {
     "priority_reason", "status", "dispatch_draft_en", "dispatch_draft_local",
     "first_reported_at", "max_hops", "created_at", "updated_at",
     # JSON objects, null when unset: estimated location from a landmark; category correction;
-    # intake answers {question key: answer key}
-    "geo", "reclass", "answers",
+    # intake answers {question key: answer key}; photo tags {tag key: reports that carried it}
+    "geo", "reclass", "answers", "photo_tags",
     # base64 float16 unit vector of "{category}: {item}" for embedding-based clustering (see embed.py); null if unset
     "item_vec",
 }
 # Columns added after the first release: SQLite adds them to existing databases on connect.
-JSON_COLUMNS = ("geo", "reclass", "answers")
+JSON_COLUMNS = ("geo", "reclass", "answers", "photo_tags")
 TEXT_COLUMNS = ("item_vec",)  # plain nullable TEXT columns added the same way
 
 # Ticket status -> the statuses it may be entered from (DISPATCHED comes from ``approve_ticket``).
@@ -175,10 +175,11 @@ class Store(Protocol):
         """The ticket a NEED was triaged into, or None (unknown NEED, or recorded but not triaged yet)."""
         ...
 
-    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
-        """Atomically set ``geo`` (a ``source: "mesh"`` record) on the ticket unless it does not exist or any of its
-        packets carries a GPS fix (``loc_acc != 0``): a real fix is never overwritten or shadowed. Replaces a
-        landmark estimate. True if written."""
+    def set_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+        """Atomically set ``geo`` on the ticket unless it does not exist or any of its packets carries a GPS fix
+        (``loc_acc != 0``): a real fix is never overwritten or shadowed. A ``source: "mesh"`` record replaces a
+        landmark estimate; a landmark record (gazetteer / gemini_maps) never replaces a mesh one (``keep_mesh_geo``).
+        True if written."""
         ...
 
     # ------------------------------------------------------------------ control-room broadcasts (SPEC 5.6)

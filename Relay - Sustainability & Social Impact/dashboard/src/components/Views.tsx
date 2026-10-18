@@ -104,7 +104,7 @@ export function TeamsView({ teams, tickets, nowSec, onOpen }: {
 
 // ---------------------------------------------------------------------------- Situation report
 
-function Kpi({ label, value, note, tone }: { label: string; value: string | number; note?: string; tone?: string }) {
+export function Kpi({ label, value, note, tone }: { label: string; value: string | number; note?: string; tone?: string }) {
   return (
     <div className={`kpi ${tone ?? ''}`}>
       <span className="kpi-label">{label}</span>

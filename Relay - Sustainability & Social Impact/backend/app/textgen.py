@@ -69,7 +69,8 @@ def textgen_from_env(
     timeout_s: float = 15.0,
 ) -> TextGen | None:
     """Same switch as ``agent_from_env`` (Vertex wins over an API key); ``None`` = no model.
-    The model name comes from ``model_var``, else ``default_model``, else ``GEMINI_MODEL``, else Flash."""
+    The model name comes from ``model_var``, else ``default_model``, else ``GEMINI_MODEL``, else Flash;
+    ``timeout_s`` is the client's own request timeout (longer writers, e.g. a Pro-tier report, raise it)."""
     env = os.environ if env is None else env
     model = env.get(model_var) or default_model or env.get("GEMINI_MODEL") or DEFAULT_MODEL
     use_vertex = env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1")

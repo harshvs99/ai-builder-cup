@@ -1,4 +1,4 @@
-"""Relay mesh wire codec (protocol/SPEC.md, sections 3 and 5; NEED payload v1 and v2, LOC_HINT).
+"""Relay mesh wire codec (protocol/SPEC.md, sections 3 and 5; NEED payload v1, v2 and v3, LOC_HINT).
 
 Strict by design: every decoder raises ``CodecError`` (and nothing else) on any input that
 the spec says to drop. Callers at a trust boundary (``/v1/sync``) catch ``CodecError`` and
@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 PROTOCOL_VERSION = 1
 NEED_VERSION_ANSWERS = 2  # NEED payload_version 2 = v1 layout + 3 answer bytes (SPEC 5.1)
+NEED_VERSION_PHOTO = 3  # NEED payload_version 3 = v1 layout + 3 answer bytes + photo_tags u16 (SPEC 5.1)
 ANSWER_SLOTS = 3
 
 TYPE_NEED = 0x70
@@ -75,6 +76,17 @@ QUESTION_BANK: dict[int, tuple[str, dict[str, int]]] = {
 }
 _QUESTION_IDS = {key: qid for qid, (key, _) in QUESTION_BANK.items()}
 
+# Photo tag table (SPEC 5.1): bit -> JSON key. The phone classifies a photo on-device into these and only the
+# 16-bit mask travels, never pixels. Mirrors the Kotlin/Swift tables; checked against ``photo_tag_bank`` in
+# protocol/vectors.json. Bits are never renumbered; bit 15 is reserved and must be 0.
+PHOTO_TAG_NAMES = (
+    "floodwater", "house_damaged", "house_collapsed", "roof_damaged", "person_injured", "people_stranded",
+    "road_blocked", "tree_fallen", "power_line_down", "boat_damaged", "crops_damaged", "livestock_lost",
+    "vehicle_damaged", "fire", "landslide",
+)
+PHOTO_TAGS_MASK = (1 << len(PHOTO_TAG_NAMES)) - 1  # every defined bit; bit 15 is reserved
+_PHOTO_TAG_BITS = {k: i for i, k in enumerate(PHOTO_TAG_NAMES)}
+
 _NEED_FIXED = struct.Struct(">B8s8sIBBBBiiBB")  # 35 bytes
 _ACK_FIXED = struct.Struct(">B8s8s8sIBH")  # 32 bytes (+1 length byte for text)
 _HELLO = struct.Struct(">B8sBBH")
@@ -130,6 +142,22 @@ def answers_from_json(d: dict[str, str]) -> tuple[tuple[int, int], ...]:
             raise CodecError(f"unknown answer {key}={answer!r}")
         out.append((qid, QUESTION_BANK[qid][1][answer]))
     return tuple(out)
+
+
+def photo_tags_to_json(mask: int) -> list[str]:
+    """Bitmask -> tag keys in bit order, e.g. 0x21 -> ["floodwater", "people_stranded"]."""
+    return [k for i, k in enumerate(PHOTO_TAG_NAMES) if mask >> i & 1]
+
+
+def photo_tags_from_json(keys: list[str]) -> int:
+    """Inverse of ``photo_tags_to_json``; raises CodecError for a key outside the table."""
+    mask = 0
+    for key in keys:
+        bit = _PHOTO_TAG_BITS.get(key)
+        if bit is None:
+            raise CodecError(f"unknown photo tag {key!r}")
+        mask |= 1 << bit
+    return mask
 
 
 def _lp(s: str, limit: int) -> bytes:
@@ -277,6 +305,8 @@ class Need:
     summary: str
     # (question id, answer value) pairs, at most 3; empty = encoded as a v1 payload
     answers: tuple[tuple[int, int], ...] = ()
+    # bitmask over PHOTO_TAG_NAMES; 0 = no photo (v1/v2 payload)
+    photo_tags: int = 0
 
     @classmethod
     def make(cls, *, lat: float, lon: float, **kw) -> "Need":
@@ -316,15 +346,20 @@ def encode_need(n: Need) -> bytes:
             raise CodecError("unknown question id or answer value")
     if len({q for q, _ in answers}) != len(answers):
         raise CodecError("duplicate question id")
+    _u("photo_tags", n.photo_tags, 16)
+    if n.photo_tags & ~PHOTO_TAGS_MASK:
+        raise CodecError("photo_tags uses a reserved bit")
+    version = NEED_VERSION_PHOTO if n.photo_tags else NEED_VERSION_ANSWERS if answers else PROTOCOL_VERSION
     return (
         _NEED_FIXED.pack(
-            NEED_VERSION_ANSWERS if answers else PROTOCOL_VERSION, n.msg_id, n.origin_node, n.created_at, n.category, n.urgency,
+            version, n.msg_id, n.origin_node, n.created_at, n.category, n.urgency,
             n.people, n.vuln_flags, n.lat_e5, n.lon_e5, n.loc_acc, n.lang,
         )
         + _lp(n.item, MAX_ITEM)
         + _lp(n.landmark, MAX_LANDMARK)
         + _lp(n.summary, MAX_SUMMARY)
-        + (bytes([(q << 3) | v for q, v in answers] + [0] * (ANSWER_SLOTS - len(answers))) if answers else b"")
+        + (bytes([(q << 3) | v for q, v in answers] + [0] * (ANSWER_SLOTS - len(answers))) if version > PROTOCOL_VERSION else b"")
+        + (struct.pack(">H", n.photo_tags) if n.photo_tags else b"")
     )
 
 
@@ -334,7 +369,7 @@ def decode_need(payload: bytes) -> Need:
         raise CodecError("NEED payload too short")
     (ver, msg_id, origin, created_at, category, urgency, people, vuln, lat_e5, lon_e5,
      loc_acc, lang) = _NEED_FIXED.unpack_from(payload, 0)
-    if ver not in (PROTOCOL_VERSION, NEED_VERSION_ANSWERS):
+    if ver not in (PROTOCOL_VERSION, NEED_VERSION_ANSWERS, NEED_VERSION_PHOTO):
         raise CodecError("unsupported NEED payload version")
     if category > 6 or urgency > 3 or loc_acc > 5 or lang > 5:
         raise CodecError("enum field out of range")
@@ -343,9 +378,11 @@ def decode_need(payload: bytes) -> Need:
     landmark, off = _read_lp(payload, off, MAX_LANDMARK)
     summary, off = _read_lp(payload, off, MAX_SUMMARY)
     answers: list[tuple[int, int]] = []
-    if ver == NEED_VERSION_ANSWERS:
-        if len(payload) - off != ANSWER_SLOTS:
-            raise CodecError("v2 NEED needs exactly 3 answer bytes")
+    photo_tags = 0
+    if ver != PROTOCOL_VERSION:
+        tail = ANSWER_SLOTS + (2 if ver == NEED_VERSION_PHOTO else 0)
+        if len(payload) - off != tail:
+            raise CodecError(f"v{ver} NEED needs exactly {tail} bytes after the summary")
         empty = False
         for b in payload[off:off + ANSWER_SLOTS]:
             off += 1
@@ -357,12 +394,17 @@ def decode_need(payload: bytes) -> Need:
                     or any(q == qid for q, _ in answers):
                 raise CodecError("invalid answer byte")
             answers.append((qid, value))
-        if not answers:
+        if not answers and ver == NEED_VERSION_ANSWERS:
             raise CodecError("v2 NEED without answers")
+        if ver == NEED_VERSION_PHOTO:
+            (photo_tags,) = struct.unpack_from(">H", payload, off)
+            off += 2
+            if photo_tags == 0 or photo_tags & ~PHOTO_TAGS_MASK:
+                raise CodecError("v3 NEED needs photo tags and no reserved bit")
     if off != len(payload):
         raise CodecError("trailing bytes in NEED payload")
     return Need(msg_id, origin, created_at, category, urgency, people, vuln, lat_e5, lon_e5,
-                loc_acc, lang, item, landmark, summary, tuple(answers))
+                loc_acc, lang, item, landmark, summary, tuple(answers), photo_tags)
 
 
 # --------------------------------------------------------------------------------------

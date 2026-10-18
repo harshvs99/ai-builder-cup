@@ -24,7 +24,7 @@ import math
 import re
 from typing import Any
 
-from .codec import CATEGORY_NAMES, LANG_CODES, Need, answers_to_json
+from .codec import CATEGORY_NAMES, LANG_CODES, Need, answers_to_json, photo_tags_to_json
 from .embed import SIMILARITY_THRESHOLD, cosine, decode_vec, encode_vec
 
 MAX_DISTANCE_M = 200.0
@@ -114,6 +114,8 @@ def new_ticket_fields(
     }
     if need.answers:
         fields["answers"] = answers_to_json(need.answers)
+    if need.photo_tags:
+        fields["photo_tags"] = {k: 1 for k in photo_tags_to_json(need.photo_tags)}
     if item_vec is not None and need.item.strip() and (enc := encode_vec(item_vec)):
         fields["item_vec"] = enc
     return fields
@@ -154,4 +156,10 @@ def merge_fields(
     extra = {k: v for k, v in answers_to_json(need.answers).items() if k not in have}
     if extra:
         upd["answers"] = {**have, **extra}
+    # photo tags: a count per tag of the reports that carried it (an observation by each phone, not a verified fact)
+    if need.photo_tags:
+        counts = dict(ticket.get("photo_tags") or {})
+        for k in photo_tags_to_json(need.photo_tags):
+            counts[k] = counts.get(k, 0) + 1
+        upd["photo_tags"] = counts
     return upd
