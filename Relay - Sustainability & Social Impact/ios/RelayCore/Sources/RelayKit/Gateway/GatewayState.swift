@@ -4,7 +4,7 @@ import Foundation
 /// `file` may be nil for an in-memory instance. A corrupt file loads as empty state. File format is Android's:
 /// `{"cursor": n, "uploaded": ["hex", ...]}`.
 public final class GatewayState: @unchecked Sendable {
-    private struct Disk: Codable { var cursor: Int64; var uploaded: [String] }
+    private struct Disk: Codable { var cursor: Int64; var uploaded: [String]; var ann_cursor: Int64? }
 
     private let file: URL?
     private let maxRemembered: Int
@@ -12,6 +12,7 @@ public final class GatewayState: @unchecked Sendable {
     private var order: [String] = []
     private var uploaded = Set<String>()
     private var cursor: Int64 = 0
+    private var annCursor: Int64 = 0
 
     public init(file: URL?, maxRemembered: Int = 10_000) {
         self.file = file
@@ -20,6 +21,14 @@ public final class GatewayState: @unchecked Sendable {
     }
 
     public func ackCursor() -> Int64 { lock.lock(); defer { lock.unlock() }; return cursor }
+    /// The backend's `announcement_cursor` (SPEC 5.7): where this gateway's ANNOUNCEMENT feed stands.
+    public func announcementCursor() -> Int64 { lock.lock(); defer { lock.unlock() }; return annCursor }
+    public func setAnnouncementCursor(_ value: Int64) {
+        lock.lock(); defer { lock.unlock() }
+        if value == annCursor { return }
+        annCursor = value
+        save()
+    }
     public func isUploaded(_ msgIdHex: String) -> Bool { lock.lock(); defer { lock.unlock() }; return uploaded.contains(msgIdHex) }
     public func uploadedCount() -> Int { lock.lock(); defer { lock.unlock() }; return uploaded.count }
 
@@ -52,7 +61,7 @@ public final class GatewayState: @unchecked Sendable {
         do {
             let e = JSONEncoder()
             e.outputFormatting = [.sortedKeys]
-            try AtomicFiles.write(f, [UInt8](try e.encode(Disk(cursor: cursor, uploaded: order))))
+            try AtomicFiles.write(f, [UInt8](try e.encode(Disk(cursor: cursor, uploaded: order, ann_cursor: annCursor))))
         } catch {
             // retried on next change
         }
@@ -62,6 +71,7 @@ public final class GatewayState: @unchecked Sendable {
         guard let f = file, let bytes = AtomicFiles.readOrNull(f) else { return }
         guard let d = try? JSONDecoder().decode(Disk.self, from: Data(bytes)) else { return }
         cursor = d.cursor
+        annCursor = d.ann_cursor ?? 0 // files from before ANNOUNCEMENT have none
         for id in d.uploaded where uploaded.insert(id).inserted { order.append(id) }
     }
 }

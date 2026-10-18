@@ -17,6 +17,8 @@ final class ReadyCenter {
 
     @ObservationIgnored let store: ReadyStore
     /// Set by `AppModel`: connectivity, position, language and household at the moment of a refresh, plus the backend to ask.
+    /// Called after a refresh so the announcements list (same refresh) can follow; set by `AppModel`.
+    @ObservationIgnored var afterRefresh: (@MainActor (RefreshTrigger) async -> Void)?
     @ObservationIgnored var context: (@MainActor () -> (input: RefreshInput, backend: String, key: String))?
 
     init(directory: URL) {
@@ -57,6 +59,7 @@ final class ReadyCenter {
         }.value
         needsDistrict = result.needsDistrict
         reload()
+        await afterRefresh?(trigger) // the control room's announcements for this district, then one notification per new message
         return result
     }
 }

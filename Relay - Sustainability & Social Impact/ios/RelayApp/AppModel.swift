@@ -89,6 +89,8 @@ final class AppModel {
     private let skipFixWait = Broadcaster<Bool>(false)
     /// Ready mode (pack, plan, household, banner): see `ReadyCenter`.
     let ready: ReadyCenter
+    /// The control room's announcements: see `AnnouncementCenter`.
+    let announcements: AnnouncementCenter
     @ObservationIgnored private let readyDelegate = ReadyNotificationDelegate()
     /// Demo builds (every Debug build, or `RELAY_DEMO_SHELTERS = YES`) may show a demo shelter list, with a "Demo" badge; Release builds never do.
     let demoBuild: Bool
@@ -116,6 +118,9 @@ final class AppModel {
         let repository = MeshRepository(
             dataDirectory: AppModel.dataDirectory(), settings: settings,
             logSink: { relayLogger.info("\($0, privacy: .public)") })
+        let readyCenter = ReadyCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
+        let announcementCenter = AnnouncementCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
+        let readyStore = readyCenter.store
         let transport = CoreBluetoothTransport()
         let log: @Sendable (String) -> Void = { [weak repository] in repository?.log($0) }
         // Mesh-assisted location (SPEC 5.5): the engine reads this phone's latest fix from its own queue, and asks the
@@ -125,7 +130,8 @@ final class AppModel {
         let engine = MeshEngine(
             repository: repository, transport: transport, syncClient: SyncClient(),
             hintFix: { latestFix.relayFix() },
-            requestFix: { Task { @MainActor in _ = location.start() } })
+            requestFix: { Task { @MainActor in _ = location.start() } },
+            district: { readyStore.load().district })
 
         self.repository = repository
         self.engine = engine
@@ -138,7 +144,8 @@ final class AppModel {
         self.villagerStatus = VillagerStatus.from(repository.snapshot.status, now: currentTimeMs())
         self.permissions = Permissions(location: location)
         self.demoBuild = buildConfig.demoShelters || AppModel.isDebug
-        self.ready = ReadyCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
+        self.ready = readyCenter
+        self.announcements = announcementCenter
         // The Bluetooth prompt needs the mesh started; Permissions calls back into the model for that.
         permissions.startBluetooth = { [weak self] in self?.startMesh() }
         speaker.speed = settings.current.voiceSpeed
@@ -148,6 +155,23 @@ final class AppModel {
             let fix = self.locationFix
             return (RefreshInput(connected: self.internetAvailable, lat: fix?.lat, lon: fix?.lon, lang: s.effectiveLanguage.tag, household: s.household),
                     s.backendUrl, s.deviceKey)
+        }
+        let packetStore = repository.packetStore
+        announcementCenter.heldProvider = { AnnouncementBoard.heldFrom(packetStore) }
+        announcementCenter.context = { [weak self] in
+            guard let self else { return (nil, .en, "", "", false) }
+            return (self.ready.snapshot.district, self.settings.effectiveLanguage, self.settings.backendUrl, self.settings.deviceKey, self.internetAvailable)
+        }
+        announcementCenter.reloadHeld()
+        readyCenter.afterRefresh = { [weak announcementCenter] trigger in
+            await announcementCenter?.fetch(trigger)
+            await announcementCenter?.notifyNew()
+        }
+        engine.onAnnouncement = { [weak announcementCenter] _ in
+            Task { @MainActor in
+                announcementCenter?.reloadHeld()
+                await announcementCenter?.notifyNew()
+            }
         }
         readyDelegate.onOpenReady = { [weak self] in Task { @MainActor in self?.ready.openRequested = true } }
         UNUserNotificationCenter.current().delegate = readyDelegate

@@ -27,10 +27,13 @@ public protocol ReadyApi: Sendable {
     func audio(_ audioUrl: String) throws -> [UInt8]?
     /// `GET /v1/public/shelters?district=` (no key) → the body, or nil when nothing is published yet (404).
     func publicShelters(_ district: String) throws -> String?
+    /// `GET /v1/announcements/active?district=` (device key) → the body. Phones with signal poll it with the Ready refresh (contract section 5.1).
+    func activeAnnouncements(_ district: String) throws -> String?
 }
 
 extension ReadyApi {
     public func publicShelters(_ district: String) throws -> String? { nil }
+    public func activeAnnouncements(_ district: String) throws -> String? { nil }
 }
 
 /// `ReadyApi` over the injectable `HTTPTransport` (real `URLSession` by default). Blocking; call from a worker queue.
@@ -75,6 +78,10 @@ public final class HttpReadyApi: ReadyApi {
     public func publicShelters(_ district: String) throws -> String? {
         let r = try request("GET", "/v1/public/shelters?district=" + Self.encode(district), nil, okStatuses: [404], sendKey: false)
         return r.status == 404 ? nil : String(decoding: r.body, as: UTF8.self)
+    }
+
+    public func activeAnnouncements(_ district: String) throws -> String? {
+        String(decoding: try request("GET", "/v1/announcements/active?district=" + Self.encode(district), nil).body, as: UTF8.self)
     }
 
     private func request(_ method: String, _ path: String, _ body: [UInt8]?, okStatuses: Set<Int> = [], sendKey: Bool = true) throws -> HTTPResponse {

@@ -31,11 +31,16 @@ public struct SyncResponse: Equatable, Sendable {
     public var broadcasts: [[UInt8]]
     /// Present only when the backend reports hints (it adds `hints` when the upload held any); nil otherwise.
     public var hints: HintCounts?
+    /// ANNOUNCEMENT payloads (SPEC 5.7) for the district the request named; every gateway originates them into the mesh. Empty = none.
+    public var announcements: [[UInt8]]
+    /// The cursor to send next time, or nil when the response had none (an older backend).
+    public var announcementCursor: Int64?
 
     public init(accepted: Int, duplicates: Int, rejected: Int, acks: [[UInt8]], ackCursor: Int64, hints: HintCounts? = nil,
-                broadcasts: [[UInt8]] = []) {
+                broadcasts: [[UInt8]] = [], announcements: [[UInt8]] = [], announcementCursor: Int64? = nil) {
         self.accepted = accepted; self.duplicates = duplicates; self.rejected = rejected
         self.acks = acks; self.ackCursor = ackCursor; self.hints = hints; self.broadcasts = broadcasts
+        self.announcements = announcements; self.announcementCursor = announcementCursor
     }
 }
 
@@ -85,6 +90,9 @@ public final class SyncClient: Sendable {
         let gateway_node: String
         let frames: [String]
         let ack_cursor: Int64
+        /// Optional request fields (SPEC 5.7): either one asks the backend for ANNOUNCEMENT payloads; nil values are left out of the JSON.
+        let district: String?
+        let announcement_cursor: Int64?
     }
 
     private struct HintsBody: Decodable {
@@ -99,11 +107,13 @@ public final class SyncClient: Sendable {
         let rejected: Int?
         let acks: [String]?
         let broadcasts: [String]?
+        let announcements: [String]?
+        let announcement_cursor: Int64?
         let ack_cursor: Int64
         /// A malformed `hints` value (string, array, null) is ignored, not a failure.
         let hints: HintsBody?
 
-        enum CodingKeys: String, CodingKey { case accepted, duplicates, rejected, acks, broadcasts, ack_cursor, hints }
+        enum CodingKeys: String, CodingKey { case accepted, duplicates, rejected, acks, broadcasts, announcements, announcement_cursor, ack_cursor, hints }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -113,12 +123,16 @@ public final class SyncClient: Sendable {
             acks = try c.decodeIfPresent([String].self, forKey: .acks)
             // A malformed `broadcasts` value is ignored, like `hints`: it must never fail the ACKs next to it.
             broadcasts = (try? c.decodeIfPresent([String].self, forKey: .broadcasts)) ?? nil
+            // like `broadcasts`: a malformed value is ignored and must never fail the ACKs next to it
+            announcements = (try? c.decodeIfPresent([String].self, forKey: .announcements)) ?? nil
+            announcement_cursor = (try? c.decodeIfPresent(Int64.self, forKey: .announcement_cursor)) ?? nil
             ack_cursor = try c.decode(Int64.self, forKey: .ack_cursor)
             hints = try? c.decodeIfPresent(HintsBody.self, forKey: .hints)
         }
     }
 
-    public func sync(_ cfg: SyncConfig, gatewayNode: [UInt8], frames: [[UInt8]], ackCursor: Int64) throws -> SyncResponse {
+    public func sync(_ cfg: SyncConfig, gatewayNode: [UInt8], frames: [[UInt8]], ackCursor: Int64,
+                     district: String? = nil, announcementCursor: Int64? = nil) throws -> SyncResponse {
         let body: [UInt8]
         do {
             let enc = JSONEncoder()
@@ -126,7 +140,7 @@ public final class SyncClient: Sendable {
             body = [UInt8](try enc.encode(RequestBody(
                 gateway_node: Hex.encode(gatewayNode),
                 frames: frames.map { Data($0).base64EncodedString() }, // standard alphabet, padded, no line wrapping
-                ack_cursor: ackCursor)))
+                ack_cursor: ackCursor, district: district, announcement_cursor: announcementCursor)))
         } catch {
             throw SyncException("cannot build request: \(error)")
         }
@@ -171,7 +185,9 @@ public final class SyncClient: Sendable {
         return SyncResponse(accepted: r.accepted ?? 0, duplicates: r.duplicates ?? 0, rejected: r.rejected ?? 0,
                             acks: acks, ackCursor: r.ack_cursor,
                             hints: r.hints.map { HintCounts(accepted: $0.accepted ?? 0, duplicates: $0.duplicates ?? 0, rejected: $0.rejected ?? 0) },
-                            broadcasts: broadcasts)
+                            broadcasts: broadcasts,
+                            announcements: (r.announcements ?? []).compactMap { Data(base64Encoded: $0).map { [UInt8]($0) } },
+                            announcementCursor: r.announcement_cursor)
     }
 
     /// Convenience for tests and callers holding the body as text.

@@ -15,7 +15,7 @@ struct HomeScreen: View {
         NowClock { now in
             let home = HomeModel.make(
                 villager: model.villagerStatus, area: model.settings.areaLabel, needs: model.myNeeds, now: now, strings: strings)
-            content(home)
+            content(home, now)
                 .sheet(isPresented: $showHelp) { HelpSheet(help: home.help) }
         }
         .navigationTitle(strings.home.title)
@@ -35,10 +35,11 @@ struct HomeScreen: View {
         }
     }
 
-    private func content(_ home: HomeModel) -> some View {
+    private func content(_ home: HomeModel, _ now: Int64) -> some View {
         ScrollView {
             VStack(spacing: Theme.Space.xl) {
                 headerLine(home)
+                announcementCards(now: now)
                 readyBanner()
                 statusCard(home)
                 sheltersRow()
@@ -60,6 +61,33 @@ struct HomeScreen: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(home.headerLine)
+    }
+
+    /// "Message from the control room": newest first, at most 3, dismissible; the text is already in the person's language.
+    @ViewBuilder
+    private func announcementCards(now: Int64) -> some View {
+        let r = strings.ready
+        let cards = model.announcements.cards(nowMs: now, district: model.ready.snapshot.district, lang: model.settings.effectiveLanguage)
+        ForEach(cards) { c in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(r.announcementTitle).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button { model.announcements.dismiss(c.announcementId) } label: {
+                        Image(systemName: "xmark").frame(width: Theme.Size.minTouch, height: Theme.Size.minTouch).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(r.dismissAnnouncement)
+                }
+                Text(c.text).font(.body)
+                Button { model.speak(c.text, lang: c.lang) } label: {
+                    Image(systemName: "speaker.wave.2.fill").frame(width: Theme.Size.minTouch, height: Theme.Size.minTouch).contentShape(Rectangle())
+                }
+                .accessibilityLabel(r.hearAnnouncement)
+            }
+            .padding(.leading, Theme.Space.l).padding(.vertical, Theme.Space.s).padding(.trailing, Theme.Space.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Palette.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
+        }
     }
 
     /// The cyclone warning banner (only while the stored pack has an active warning): severity colour, headline,

@@ -100,6 +100,11 @@ public struct ReadyStrings: Equatable, Sendable {
     public var settingsHouseholdHelp: String { t("Tell Relay who is at home so your evacuation plan fits.", "Relay को बताएँ कि घर में कौन है, ताकि निकलने की योजना सही बने।") }
     public var settingsReady: String { t("Get ready", "तैयारी करें") }
 
+    // ---- announcements ("Message from the control room")
+    public var announcementTitle: String { t("Message from the control room", "कंट्रोल रूम का संदेश") }
+    public var dismissAnnouncement: String { t("Dismiss message", "संदेश हटाएँ") }
+    public var hearAnnouncement: String { t("Hear this message", "यह संदेश सुनें") }
+
     // ---- shelters
     public var sheltersTitle: String { t("Shelters", "आश्रय") }
     public var sheltersRow: String { t("Shelters", "आश्रय") }
