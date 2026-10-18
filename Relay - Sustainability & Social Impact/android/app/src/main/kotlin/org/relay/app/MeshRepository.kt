@@ -7,6 +7,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.relay.app.ble.BleTransport
+import org.relay.app.ble.DutyCycle
 import org.relay.app.gateway.GatewayState
 import org.relay.app.gateway.SyncHealth
 import org.relay.app.store.FilePacketStore
@@ -46,6 +47,15 @@ data class MeshStatus(
     val pendingUploads: Int = 0,
     /** Outcome of the gateway's most recent backend sync (meaningful while [isGateway]). */
     val syncHealth: SyncHealth = SyncHealth(),
+    /** Battery level 0..100, or -1 when unknown. UI: show next to the mesh-hours estimate. */
+    val batteryPercent: Int = -1,
+    val charging: Boolean = false,
+    /** Current scan duty mode; `scanMode.label` is a ready-to-show description. */
+    val scanMode: DutyCycle.Mode = DutyCycle.Mode.NORMAL,
+    /** Estimated mesh hours left at the current duty mode; null while charging or battery unknown. */
+    val meshHoursRemaining: Double? = null,
+    /** Last peers with a successful exchange (node id hex), newest first. */
+    val recentPeerIds: List<String> = emptyList(),
 )
 
 /**

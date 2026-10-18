@@ -3,6 +3,7 @@ package org.relay.app
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
+import org.relay.app.ble.RecentPeers
 import org.relay.core.payload.Lang
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +72,11 @@ class AppSettings(ctx: Context) {
         _flow.value = next
         for (l in listeners) try { l(next) } catch (_: Exception) {}
     }
+
+    /** The last peers with a successful exchange (see RecentPeers). Stored outside [Settings]: no listener fires. */
+    var recentPeers: List<RecentPeers.Peer>
+        get() = RecentPeers.parse(prefs.getString("recent_peers", null))
+        set(v) { prefs.edit().putString("recent_peers", RecentPeers.serialize(v)).apply() }
 
     fun addListener(l: (Settings) -> Unit) { listeners.add(l) }
     fun removeListener(l: (Settings) -> Unit) { listeners.remove(l) }

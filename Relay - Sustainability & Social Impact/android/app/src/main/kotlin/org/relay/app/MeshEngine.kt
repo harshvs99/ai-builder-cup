@@ -1,6 +1,10 @@
 package org.relay.app
 
+import android.app.Activity
+import android.app.Application
 import android.bluetooth.BluetoothAdapter
+import android.os.BatteryManager
+import android.os.Bundle
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -8,6 +12,9 @@ import android.content.IntentFilter
 import androidx.core.content.ContextCompat
 import org.relay.app.ble.BlePermissions
 import org.relay.app.ble.BleTransport
+import org.relay.app.ble.DutyCycle
+import org.relay.app.ble.MeshEnergy
+import org.relay.app.ble.RecentPeers
 import org.relay.app.gateway.GatewayManager
 import org.relay.app.gateway.GatewaySyncer
 import org.relay.app.gateway.SyncClient
@@ -21,6 +28,7 @@ import org.relay.core.gossip.ExecutorScheduler
 import org.relay.core.gossip.GossipListener
 import org.relay.core.gossip.GossipNode
 import org.relay.core.gossip.LinkSender
+import org.relay.core.gossip.PushPlanner
 import org.relay.core.gossip.WallClock
 import org.relay.core.ids.Hex
 import org.relay.core.payload.Ack
@@ -44,7 +52,36 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
     private val executor = ScheduledThreadPoolExecutor(2) { r -> Thread(r, "relay-engine").also { it.isDaemon = true } }
         .also { it.removeOnCancelPolicy = true }
 
-    private val transport = BleTransport(ctx, nodeId, this) { repo.settings.current.allowlist }
+    private val recentPeers = RecentPeers(repo.settings.recentPeers) { repo.settings.recentPeers = it }
+
+    // Power state for the scan duty cycle, refreshed every second by publish().
+    @Volatile private var batteryPct = -1
+    @Volatile private var charging = false
+    @Volatile private var foreground = false
+    private var startedActivities = 0
+
+    private fun dutyMode(): DutyCycle.Mode = DutyCycle.choose(batteryPct, charging, foreground)
+
+    private val transport = BleTransport(ctx, nodeId, this, { repo.settings.current.allowlist }, recentPeers, ::dutyMode)
+
+    private val lifecycle = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityStarted(activity: Activity) { synchronized(this@MeshEngine) { startedActivities++; foreground = true } }
+        override fun onActivityStopped(activity: Activity) { synchronized(this@MeshEngine) { startedActivities = maxOf(0, startedActivities - 1); foreground = startedActivities > 0 } }
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+        override fun onActivityResumed(activity: Activity) {}
+        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+        override fun onActivityDestroyed(activity: Activity) {}
+    }
+
+    private fun readBattery() {
+        val i = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return
+        val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        batteryPct = if (level >= 0 && scale > 0) level * 100 / scale else -1
+        val status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+    }
 
     val node = GossipNode(
         nodeId = nodeId,
@@ -55,6 +92,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         random = Random(),
         listener = this,
         appVersion = 1,
+        pushBudgetBytes = PushPlanner.DEFAULT_BUDGET_BYTES,
     )
 
     private val syncer = GatewaySyncer(
@@ -122,6 +160,8 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         repo.log("engine: starting (node ${Hex.encode(nodeId)})")
         ContextCompat.registerReceiver(ctx, btReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED)
         repo.settings.addListener(settingsListener)
+        (ctx as? Application)?.registerActivityLifecycleCallbacks(lifecycle)
+        readBattery()
         transport.start()
         gateway.start()
         // SPEC section 6.6: re-send INVENTORY on every live link every 30 s. Hourly expiry of 72 h-old packets.
@@ -141,6 +181,7 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
         repo.log("engine: stopping")
         repo.settings.removeListener(settingsListener)
         try { ctx.unregisterReceiver(btReceiver) } catch (_: Exception) {}
+        (ctx as? Application)?.unregisterActivityLifecycleCallbacks(lifecycle)
         gateway.stop()
         transport.shutdown()
         executor.shutdownNow()
@@ -242,6 +283,8 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
                 PeerInfo(id, h?.let { Hex.encode(it.nodeId) }, h?.isGateway == true, h?.hopsToGateway ?: 0xFF)
             }
             val all = store.all()
+            readBattery()
+            val mode = dutyMode()
             repo.publishStatus(
                 MeshStatus(
                     serviceRunning = true,
@@ -258,6 +301,11 @@ class MeshEngine(context: Context) : LinkSender, GossipListener, BleTransport.Ev
                     lastSyncError = lastSyncError,
                     pendingUploads = if (node.isGateway) syncer.pendingNeedKeys().size else 0,
                     syncHealth = syncHealth,
+                    batteryPercent = batteryPct,
+                    charging = charging,
+                    scanMode = mode,
+                    meshHoursRemaining = MeshEnergy.hoursRemaining(batteryPct, charging, mode),
+                    recentPeerIds = recentPeers.all().map { it.nodeIdHex },
                 ),
             )
         } catch (e: Exception) {

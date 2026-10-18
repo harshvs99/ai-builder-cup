@@ -32,6 +32,9 @@ class GossipNode(
     private val random: Random = Random(),
     private val listener: GossipListener,
     private val appVersion: Int = 1,
+    /** Max raw bytes pushed per inventory diff (see [PushPlanner]); the remainder follows after [pushContinueMs]. */
+    private val pushBudgetBytes: Int = Int.MAX_VALUE,
+    private val pushContinueMs: Long = 2_000,
 ) {
     companion object {
         const val SEEN_CAPACITY = 10_000
@@ -323,15 +326,34 @@ class GossipNode(
         st.accChunkCount = -1
         st.accReceived = HashSet()
         st.accIds = HashSet()
-        val now = clock.nowMs()
-        var pushed = 0
-        for (p in store.all()) {
-            if (p.type != FrameTypes.NEED && p.type != FrameTypes.ACK) continue
-            if (peerSet.contains(p.key)) continue
-            out.send(linkId, FrameCodec.withTimestamp(p.raw, now))
-            pushed++
+        pushBatch(out, linkId, st)
+    }
+
+    /**
+     * Push the next capped batch of what the peer lacks (ACKs, then NEEDs newest first). Pushed keys are
+     * recorded in [LinkState.peerKeys] so flooding does not repeat them. A remainder is continued after
+     * [pushContinueMs] on the same link, without waiting for the next 30 s inventory exchange.
+     */
+    private fun pushBatch(out: Out, linkId: String, st: LinkState) {
+        val candidates = store.all().filter {
+            (it.type == FrameTypes.NEED || it.type == FrameTypes.ACK) && !st.peerKeys.contains(it.key)
         }
-        if (pushed > 0) out.log("inventory diff: pushed $pushed frame(s) to $linkId")
+        if (candidates.isEmpty()) return
+        val plan = PushPlanner.plan(candidates, st.hello?.nodeId, pushBudgetBytes)
+        val now = clock.nowMs()
+        for (p in plan.batch) {
+            out.send(linkId, FrameCodec.withTimestamp(p.raw, now))
+            st.peerKeys.add(p.key)
+        }
+        out.log("inventory diff: pushed ${plan.batch.size} frame(s) to $linkId" +
+            if (plan.rest.isNotEmpty()) ", ${plan.rest.size} deferred" else "")
+        if (plan.rest.isNotEmpty()) {
+            out.actions += {
+                scheduler.schedule(pushContinueMs) {
+                    locked { o -> if (links[linkId] === st) pushBatch(o, linkId, st) }
+                }
+            }
+        }
     }
 
     private fun sendHello(out: Out, linkId: String) {

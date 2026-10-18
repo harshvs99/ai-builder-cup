@@ -44,6 +44,9 @@ class BleTransport(
     private val myNodeId: ByteArray,
     private val events: Events,
     private val allowlist: () -> String,
+    private val recentPeers: RecentPeers = RecentPeers(),
+    /** Current scan duty mode (battery / foreground aware); read on every tick. */
+    private val duty: () -> DutyCycle.Mode = { DutyCycle.Mode.NORMAL },
 ) : LinkSender {
 
     interface Events {
@@ -61,6 +64,7 @@ class BleTransport(
         val centralLinks: Int,
         val peripheralLinks: Int,
         val connecting: String?,
+        val dutyMode: DutyCycle.Mode = DutyCycle.Mode.NORMAL,
     )
 
     private val ctx: Context = context.applicationContext
@@ -88,6 +92,11 @@ class BleTransport(
     private var serverChar: BluetoothGattCharacteristic? = null
     private var serviceReady = false
     private var lastHousekeeping = 0L
+    /** Scanner may not start before this time (duty-cycle idle, throttle, failure retry). */
+    private var scanNotBefore = 0L
+    private var scanStartedAt = 0L
+    /** Until this time, scan results that are not recent peers wait while a recent peer is unlinked. */
+    private var preferUntil = 0L
 
     private fun now(): Long = SystemClock.elapsedRealtime()
     private fun log(msg: String) = events.onLog(msg)
@@ -96,7 +105,11 @@ class BleTransport(
 
     fun start() { handler.post { startInternal() } }
 
-    fun stop() { handler.post { stopInternal("stop requested") } }
+    /**
+     * Stop because Bluetooth went off. The adapter restart resets the stack's scan accounting [assumption], so the
+     * app-side throttle is reset too: otherwise a Bluetooth toggle storm would leave scanning blocked for 30 s.
+     */
+    fun stop() { handler.post { stopInternal("stop requested"); scanThrottle.reset() } }
 
     /** Stop and release the worker thread. The transport cannot be restarted afterwards. */
     fun shutdown() {
@@ -106,7 +119,7 @@ class BleTransport(
         }
     }
 
-    fun info(): Info = Info(running, scanning, advertising, diagCentral, diagPeripheral, diagConnecting)
+    fun info(): Info = Info(running, scanning, advertising, diagCentral, diagPeripheral, diagConnecting, duty())
 
     private fun updateDiag() {
         diagCentral = central.size
@@ -125,6 +138,9 @@ class BleTransport(
         }
         running = true
         log("BLE: starting transport")
+        closeServer() // never leak a server from an earlier run
+        scanNotBefore = 0
+        preferUntil = now() + RecentPeers.PREFER_WINDOW_MS
         openServer()
         startScan()
         handler.postDelayed(tickRunnable, TICK_MS)
@@ -136,7 +152,6 @@ class BleTransport(
         running = false
         handler.removeCallbacks(tickRunnable)
         handler.removeCallbacks(readvertiseRunnable)
-        handler.removeCallbacks(scanRetryRunnable)
         stopScan()
         stopAdvertising()
         for (c in central.values.toList()) teardownCentral(c, "transport stopped", backoffFailure = false, immediateClose = true)
@@ -145,6 +160,8 @@ class BleTransport(
         registry.clear()
         ignored.clear()
         seenAt.clear()
+        backoff.clear() // a restarted transport starts clean: stale per-MAC delays would block the re-link
+        scanNotBefore = 0
         connectingMac = null
         serviceReady = false
         updateDiag()
@@ -161,7 +178,7 @@ class BleTransport(
         val mac = linkId.substring(2)
         if (linkId.startsWith("c:")) {
             val c = central[mac]
-            if (c == null || c.state != CState.UP) { log("send: no live link $linkId; frame dropped"); return }
+            if (c == null || c.state != SetupPhase.UP) { log("send: no live link $linkId; frame dropped"); return }
             if (frame.size > c.mtu - BleConstants.ATT_OVERHEAD) {
                 log("send: frame ${frame.size}B exceeds mtu ${c.mtu}-3 on $linkId; dropped"); return
             }
@@ -194,7 +211,7 @@ class BleTransport(
             return
         }
         when (val d = registry.onHello(linkId, nodeId)) {
-            LinkRegistry.Decision.Keep -> {}
+            LinkRegistry.Decision.Keep -> recentPeers.record(link.mac, hex)
             is LinkRegistry.Decision.CloseThis -> {
                 log("duplicate-link: closing $linkId (${d.reason})")
                 backoff.blockUntil(link.mac, now() + BleConstants.DUPLICATE_IGNORE_MS)
@@ -227,10 +244,9 @@ class BleTransport(
     private fun tick() {
         val t = now()
         for (c in central.values.toList()) {
-            if (c.state != CState.UP && t > c.setupDeadline) {
-                teardownCentral(c, "setup timeout in state ${c.state}", backoffFailure = true); continue
-            }
             c.queue.tick()
+            val abort = LinkHealth.setupAbortReason(c.state, t - c.stateSince, t - c.createdAt, c.queue.consecutiveTimeouts)
+            if (abort != null) { teardownCentral(c, abort, backoffFailure = true); continue }
             if (c.queue.consecutiveTimeouts >= 3) teardownCentral(c, "3 consecutive GATT timeouts", backoffFailure = true)
         }
         for (p in peripheral.values.toList()) {
@@ -245,9 +261,9 @@ class BleTransport(
             backoff.prune(t)
             ignored.entries.removeAll { it.value <= t }
             if (seenAt.size > 64) seenAt.clear()
-            if (!scanning) startScan()
             if (serviceReady && !advertising) startAdvertising()
         }
+        driveScan(t)
         updateDiag()
     }
 
@@ -275,18 +291,28 @@ class BleTransport(
         }
     }
 
-    private val scanRetryRunnable = Runnable { if (running && !scanning) startScan() }
+    private fun scheduleScanRetry(delayMs: Long) { scanNotBefore = now() + delayMs }
 
-    private fun scheduleScanRetry(delayMs: Long) {
-        handler.removeCallbacks(scanRetryRunnable)
-        handler.postDelayed(scanRetryRunnable, delayMs)
+    /** Duty cycle: end the scan window when its time is up, start the next one when the idle time is over. */
+    private fun driveScan(t: Long) {
+        val mode = duty()
+        if (scanning) {
+            val window = mode.scanMs ?: return
+            if (t - scanStartedAt >= window) {
+                stopScan()
+                scanNotBefore = t + mode.idleMs
+            }
+        } else if (t >= scanNotBefore || mode.scanMs == null) {
+            if (mode.scanMs == null) scanNotBefore = 0
+            startScan()
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun startScan() {
         if (!running || scanning) return
-        if (!BlePermissions.hasScan(ctx)) { log("BLE: no scan permission"); return }
-        val scanner = btManager?.adapter?.bluetoothLeScanner ?: run { log("BLE: no scanner"); return }
+        if (!BlePermissions.hasScan(ctx)) { log("BLE: no scan permission"); scheduleScanRetry(10_000); return }
+        val scanner = btManager?.adapter?.bluetoothLeScanner ?: run { log("BLE: no scanner"); scheduleScanRetry(10_000); return }
         val t = now()
         if (!scanThrottle.tryAcquire(t)) {
             val wait = scanThrottle.waitMs(t) + 250
@@ -299,9 +325,11 @@ class BleTransport(
         try {
             scanner.startScan(listOf(filter), settings, scanCallback)
             scanning = true
-            log("BLE: scan started")
+            scanStartedAt = t
+            log("BLE: scan started (${duty().label})")
         } catch (e: SecurityException) {
             log("BLE: scan start denied: $e")
+            scheduleScanRetry(10_000)
         } catch (e: Exception) {
             log("BLE: scan start error: $e")
             scheduleScanRetry(10_000)
@@ -324,6 +352,8 @@ class BleTransport(
         if (!running) return
         val mac = device.address ?: return
         if (hint != null && !acceptHint(hint)) return
+        val hintHex = hint?.let { Hex.encode(it) }
+        if (recentPeers.shouldDefer(now(), preferUntil, mac, hintHex) { registry.isNodeConnected(it) }) return
         if (connectingMac != null) return // one connection attempt at a time
         if (central.containsKey(mac)) return
         if (central.size >= BleConstants.MAX_CENTRAL_LINKS) return
@@ -358,18 +388,18 @@ class BleTransport(
         return true
     }
 
-    private fun pendingCount(): Int = central.values.count { it.state != CState.UP } + peripheral.values.count { !it.up }
+    private fun pendingCount(): Int = central.values.count { it.state != SetupPhase.UP } + peripheral.values.count { !it.up }
 
     // ================================================================== central role connections
 
-    private enum class CState { CONNECTING, MTU, DISCOVERING, SUBSCRIBING, UP }
-
     private inner class CentralConn(val mac: String, val gatt: BluetoothGatt) {
         val linkId = "c:$mac"
-        var state = CState.CONNECTING
+        var state = SetupPhase.CONNECTING
+            set(v) { field = v; stateSince = now() }
+        val createdAt = now()
+        var stateSince = createdAt
         var mtu = BleConstants.DEFAULT_MTU
         var characteristic: BluetoothGattCharacteristic? = null
-        val setupDeadline = now() + BleConstants.SETUP_TIMEOUT_MS
         val queue = GattOpQueue(now = ::now, log = { m -> log("[$linkId] $m") })
         /** Notifications that raced ahead of the CCCD write callback; replayed right after linkUp. */
         val earlyFrames = ArrayList<ByteArray>()
@@ -444,18 +474,18 @@ class BleTransport(
             return
         }
         if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
-            if (c.state != CState.CONNECTING) return
-            c.state = CState.MTU
+            if (c.state != SetupPhase.CONNECTING) return
+            c.state = SetupPhase.MTU
             c.queue.enqueue(MtuOp(gatt))
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
-            teardownCentral(c, "connection state status=$status newState=$newState", backoffFailure = c.state != CState.UP)
+            teardownCentral(c, "connection state status=$status newState=$newState", backoffFailure = c.state != SetupPhase.UP)
         }
     }
 
     private fun onCentralMtu(gatt: BluetoothGatt, mtu: Int, status: Int) {
         val c = connFor(gatt) ?: return
         c.queue.onComplete()
-        if (c.state != CState.MTU) return
+        if (c.state != SetupPhase.MTU) return
         c.mtu = mtu
         log("BLE: ${c.linkId} mtu=$mtu status=$status")
         if (status != BluetoothGatt.GATT_SUCCESS || mtu < BleConstants.MIN_MTU) {
@@ -463,14 +493,14 @@ class BleTransport(
             teardownCentral(c, "mtu too small", backoffFailure = true)
             return
         }
-        c.state = CState.DISCOVERING
+        c.state = SetupPhase.DISCOVERING
         c.queue.enqueue(DiscoverOp(gatt))
     }
 
     private fun onCentralServices(gatt: BluetoothGatt, status: Int) {
         val c = connFor(gatt) ?: return
         c.queue.onComplete()
-        if (c.state != CState.DISCOVERING) return
+        if (c.state != SetupPhase.DISCOVERING) return
         val ch = if (status == BluetoothGatt.GATT_SUCCESS) {
             gatt.getService(BleConstants.SERVICE_UUID)?.getCharacteristic(BleConstants.CHAR_UUID)
         } else null
@@ -479,19 +509,19 @@ class BleTransport(
             return
         }
         c.characteristic = ch
-        c.state = CState.SUBSCRIBING
+        c.state = SetupPhase.SUBSCRIBING
         c.queue.enqueue(SubscribeOp(gatt, ch))
     }
 
     private fun onCentralDescriptorWrite(gatt: BluetoothGatt, status: Int) {
         val c = connFor(gatt) ?: return
         c.queue.onComplete()
-        if (c.state != CState.SUBSCRIBING) return
+        if (c.state != SetupPhase.SUBSCRIBING) return
         if (status != BluetoothGatt.GATT_SUCCESS) {
             teardownCentral(c, "CCCD write failed status=$status", backoffFailure = true)
             return
         }
-        c.state = CState.UP
+        c.state = SetupPhase.UP
         if (connectingMac == c.mac) connectingMac = null
         backoff.onSuccess(c.mac)
         registry.add(c.linkId, c.mac, LinkRole.CENTRAL)
@@ -510,8 +540,8 @@ class BleTransport(
     private fun onCentralFrame(gatt: BluetoothGatt, value: ByteArray) {
         val c = connFor(gatt) ?: return
         when (c.state) {
-            CState.UP -> events.onFrame(c.linkId, value)
-            CState.SUBSCRIBING -> if (c.earlyFrames.size < 64) c.earlyFrames.add(value)
+            SetupPhase.UP -> events.onFrame(c.linkId, value)
+            SetupPhase.SUBSCRIBING -> if (c.earlyFrames.size < 64) c.earlyFrames.add(value)
             else -> {}
         }
     }
@@ -523,12 +553,14 @@ class BleTransport(
     private fun teardownCentral(c: CentralConn, reason: String, backoffFailure: Boolean, immediateClose: Boolean = false) {
         if (central[c.mac] !== c) return
         central.remove(c.mac)
-        val wasUp = c.state == CState.UP
+        val wasUp = c.state == SetupPhase.UP
         c.queue.clear()
         if (connectingMac == c.mac) connectingMac = null
         if (wasUp) {
+            val node = registry.get(c.linkId)?.nodeIdHex
             registry.remove(c.linkId)
             events.onLinkDown(c.linkId)
+            if (running && node != null && recentPeers.all().any { it.nodeIdHex == node }) preferUntil = now() + RecentPeers.PREFER_WINDOW_MS
         }
         val delay = if (backoffFailure || wasUp) backoff.onFailure(c.mac, now()) else 0L
         log("BLE: closing ${c.linkId} ($reason)" + if (delay > 0) "; retry in ${delay}ms" else "")
@@ -840,8 +872,10 @@ class BleTransport(
         peripheral.remove(p.mac)
         p.queue.clear()
         if (p.up) {
+            val node = registry.get(p.linkId)?.nodeIdHex
             registry.remove(p.linkId)
             events.onLinkDown(p.linkId)
+            if (running && node != null && recentPeers.all().any { it.nodeIdHex == node }) preferUntil = now() + RecentPeers.PREFER_WINDOW_MS
         }
         log("BLE: closing ${p.linkId} ($reason)")
         cancelServerConnection(p.device)

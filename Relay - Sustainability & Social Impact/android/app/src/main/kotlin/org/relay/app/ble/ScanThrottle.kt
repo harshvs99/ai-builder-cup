@@ -22,6 +22,9 @@ class ScanThrottle(
         return maxOf(0L, starts.first() + windowMs - now)
     }
 
+    /** Forget all recorded starts (the Bluetooth stack was restarted). */
+    @Synchronized fun reset() { starts.clear() }
+
     private fun prune(now: Long) {
         while (starts.isNotEmpty() && now - starts.first() >= windowMs) starts.removeFirst()
     }

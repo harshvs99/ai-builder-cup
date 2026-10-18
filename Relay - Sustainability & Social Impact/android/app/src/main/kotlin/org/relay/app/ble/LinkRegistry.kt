@@ -22,8 +22,13 @@ class LinkRegistry(private val myId: ByteArray) {
     }
 
     private val links = LinkedHashMap<String, Link>()
-    private val macToNode = HashMap<String, String>()
+    /** MAC -> node id, access-ordered and bounded: peers rotate their MAC, so entries would otherwise pile up. */
+    private val macToNode = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > MAX_MAC_ENTRIES
+    }
     private val myIdHex = Hex.encode(myId)
+
+    companion object { const val MAX_MAC_ENTRIES = 64 }
 
     @Synchronized fun add(linkId: String, mac: String, role: LinkRole) {
         links[linkId] = Link(linkId, mac, role)
@@ -34,6 +39,7 @@ class LinkRegistry(private val myId: ByteArray) {
     @Synchronized fun clear() { links.clear(); macToNode.clear() }
 
     @Synchronized fun get(linkId: String): Link? = links[linkId]
+    @Synchronized fun knownMacCount(): Int = macToNode.size
     @Synchronized fun all(): List<Link> = links.values.toList()
     @Synchronized fun total(): Int = links.size
     @Synchronized fun centralCount(): Int = links.values.count { it.role == LinkRole.CENTRAL }
