@@ -155,7 +155,7 @@ def test_ticket_without_vector_uses_rule_then_gets_one(make_client):
     send(c, item="ଇନସୁଲିନ", lat=20.29626)                # old tickets have no vector: rule only
     assert len(tickets(c)) == 3
     send(c, item="insulin", lat=20.29613)                # equal text merges and back-fills the vector
-    stored = [t for t in c.app.state.store.list_tickets() if t["item"] == "insulin"][0]
+    stored = [t for t, _ in c.app.state.store.list_tickets_with_links() if t["item"] == "insulin"][0]
     assert stored["item_vec"]
     send(c, item="इंसुलिन", lat=20.29612)                # nearest is ticket 1: now merges by similarity
     by_item = {t["item"]: t["report_count"] for t in tickets(c)}
