@@ -33,6 +33,24 @@ adb -s RZCY21LMG0J push models/gemma-4-E2B-it.litertlm /sdcard/Android/data/org.
 ```
 `models/` is gitignored. The app loads `<externalFilesDir>/gemma-4-E2B-it.litertlm`; nothing is bundled in the APK.
 
+### Optional: Gemma 3 270M (text only)
+The eval also runs "Gemma 3 270M on reference text" (`gemma270_text` in results.jsonl) when a 270M file is in the same
+directory; without it that row is simply skipped. Prompt: `Prompt.SYSTEM_SMALL` (short system prompt, category enum spelled out,
+two worked examples - Latin-script Odia and Odia script - JSON only, temperature 0). Text only; no audio input.
+**TODO (not verified offline, nothing was downloaded):** confirm the litert-community repo and exact file name of the Gemma 3 270M
+LiteRT-LM export on https://huggingface.co/litert-community (likely a repo like `gemma-3-270m-it-litert-lm` with an int8 `.litertlm`;
+do not trust this guess), then fix `ModelSpec.G270M.fileName` in `GemmaRunner.kt`. Until then the app uses any `*270m*.litertlm`
+it finds in the files dir, so the push below works whatever the file is called. Record its sha256 here once checked.
+```bash
+mkdir -p models && curl -L -C - -o models/gemma3-270m-it.litertlm \
+  "https://huggingface.co/litert-community/<VERIFIED-REPO>/resolve/main/<VERIFIED-FILE>.litertlm"   # fill in after checking
+adb -s RZCY21LMG0J push models/gemma3-270m-it.litertlm /sdcard/Android/data/org.relay.voicespike/files/   # after the app has run once
+```
+The same permission gotcha as E2B applies (push, then `chmod 777` if the app logs EACCES). `summary.txt` then carries two warm-up lines
+(`warm-up E2B: load ... first turn ...`, `warm-up 270M: load ... first turn ...`): load ms is `Engine.initialize()`, first turn is
+the cold row-0 text request. The 270M engine is loaded after E2B inside the eval and closed after it. The 270M row uses the same
+backend preference as E2B (GPU, then CPU); force CPU with `--es backend cpu` if GPU init is slow for such a small model.
+
 ## Guided recording (default screen) - build a labelled test set
 The app opens on **Record**: 34 prompts (15 English in Indian-English phrasing, 15 Hindi in Devanagari, 4 Hinglish in Latin
 script; all 7 categories, all 5 vulnerability flags, counts, landmarks with and without "near", negation and implicit-meaning
@@ -101,7 +119,50 @@ Per clip, `results.jsonl` has: `gemma_audio` (raw output, parsed JSON, `valid`, 
 `gemma_text` (same prompt on `reference_transcript`), `rule` (`RuleExtractor` on `reference_transcript`), `expected`,
 `audio_seconds`, and PSS (MB) after each Gemma run. The model is loaded once per batch. The screen is kept on.
 Valid = a JSON object with all keys, legal enums, numeric urgency/people; clamps and byte-truncations are recorded as
-`repairs` and do not count as invalid. `summarize.py` prints per-language tables for the three systems plus the miss list.
+`repairs` and do not count as invalid. `summarize.py` prints per-language tables for the systems (plus Gemma 3 270M when present) and the miss list.
+
+Hybrid (per-field merge of Gemma and rules) analysis, offline, on any results.jsonl:
+```bash
+python3 -I eval/hybrid.py eval/work/guided_run1/results.jsonl                       # Gemma-on-audio + rules
+python3 -I eval/hybrid.py eval/work/<run>/results.jsonl --gemma gemma270_text       # 270M + rules (also gemma_text)
+```
 
 macOS has voices only for en_IN and hi_IN (Rishi, Tara, Lekha); or/tl/war/ceb cannot be synthesized here, so those need
 real recordings (record mode) or a text-only manifest entry (omit `file`).
+
+## Results so far (guided_run1: 34 labelled clips, S24 FE, GPU)
+Baseline, `eval/summarize.py` on `eval/work/guided_run1/results.jsonl` (cat/item/lmk/urg/ppl are hits out of 34):
+
+| system | cat | item | lmk | urg+-1 | ppl | vulnF1 | valid | p50 |
+|---|---|---|---|---|---|---|---|---|
+| Gemma 4 E2B on audio | 29 | 28 | 19 | 29 | 28 | 0.82 | 30/34 | 5.7 s |
+| Gemma 4 E2B on reference text | 27 | 26 | 18 | 27 | 26 | 0.77 | 27/34 | 4.8 s |
+| RuleExtractor on reference text | 23 | 13 | 28 | 34 | 26 | 0.83 | n/a | 1 ms |
+
+Hybrid, `eval/hybrid.py` (Gemma-on-audio + RuleExtractor; when Gemma's JSON is invalid the clip falls back to the rules):
+
+| policy | cat | item | lmk | urg+-1 | ppl | vulnF1 | Gemma valid |
+|---|---|---|---|---|---|---|---|
+| gemma, else rules | 33 | 30 | 23 | 33 | 31 | 0.86 | 30/34 |
+| merge A: Gemma cat/item/vuln, rules lmk/urg/ppl | 33 | 30 | 28 | 34 | 26 | 0.86 | 30/34 |
+| merge B (*): Gemma cat/item/ppl, rules lmk/urg/vuln | 33 | 30 | 28 | 34 | 31 | 0.83 | 30/34 |
+| oracle per field (upper bound, not a policy) | 33 | 31 | 32 | 34 | 33 | 0.96 | |
+
+Reading it: Gemma wins category and item (+6 and +15 over rules), rules win landmark (+9) and urgency (+5); the merge keeps both
+(33 / 30 / 28 / 34 vs the best single system 29 / 28 / 28 / 34 per field). People and vuln are a wash (merge B is picked per field on
+the same clips, so (*) is selection on the test set). Latency is unchanged: a merge costs the Gemma call plus ~1 ms, so E2B hybrid is
+still ~5.7 s p50 and misses the product's "filled card under ~6 s end to end" and 1.5 s warm-up gate (E2B loads in 3.6 s, first turn 4.5 s).
+
+**Caveat, the hybrid numbers are optimistic.** The `rule` outputs in results.jsonl are `RuleExtractor` run on the *reference
+transcript* (the sentence the speaker was asked to read), not on a speech recognizer's transcript. With a real on-device ASR (Odia and
+Hindi especially) the rules' landmark/urgency/people hits will drop, and every merge row takes those fields from the rules. Treat
+merge A as an upper estimate for the rules half until rules are scored on ASR output (or on Gemma's own `transcript`, which the
+free-form screen already shows). Also n=34, one speaker, two languages (no Odia clips yet).
+
+### Decision rule for the app
+1. Ship the rules (`RuleExtractor`) as the always-present fallback: instant, offline, no model file, and the best on landmark/urgency.
+2. Enable a model only if, measured on the demo phone with the same clips and merged with the rules (merge A or B, rules on ASR or
+   Gemma-transcript input rather than reference text), it beats rules-only on category AND item, without losing landmark or urgency under
+   the merge (merge >= rules on both), AND the warm-up check passes: engine load + first turn within the 1.5 s gate on the demo phone.
+3. Otherwise stay on rules. E2B currently fails step 2's warm-up check; the 270M (untested: no run yet, model file not downloaded)
+   has to pass the same bar, and per PLAN.md it is expected to need fine-tuning before it beats rules on category/item.

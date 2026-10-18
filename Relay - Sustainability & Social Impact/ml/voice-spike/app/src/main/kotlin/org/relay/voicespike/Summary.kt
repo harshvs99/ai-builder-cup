@@ -144,17 +144,31 @@ object Summary {
     fun readRows(results: File): List<JSONObject> =
         results.readLines().map { it.trim() }.filter { it.isNotEmpty() }.map { JSONObject(it) }.filter { !it.has("fatal") }
 
+    /** Warm-up line(s): model load ms and the first turn (row 0) of each model. First turn = cold prefill, no cache. */
+    private fun warmup(rows: List<JSONObject>): String {
+        val r0 = rows[0]
+        fun first(key: String): String =
+            r0.optJSONObject(key)?.optJSONObject("latency_ms")?.let { "${it.opt("total")} ms (first token ${it.opt("first_token")} ms)" } ?: "-"
+        val sb = StringBuilder("warm-up E2B: load ${r0.opt("model_load_ms")} ms, first turn on text row 0: ${first("gemma_text")}")
+        if (rows.any { it.has("gemma270_text") || it.has("small_load_ms") })
+            sb.append("\nwarm-up 270M: load ${r0.opt("small_load_ms")} ms (${r0.optString("small_backend")}), first turn: ${first("gemma270_text")}")
+        return sb.toString()
+    }
+
     /** Plain-text tables (monospace-friendly) + misses for the audio system. */
     fun build(rows: List<JSONObject>): String {
         if (rows.isEmpty()) return "no rows"
         val sb = StringBuilder()
         val m = rows[0]
         sb.append("clips=${rows.size} backend=${m.optString("backend")} load=${m.opt("model_load_ms")} ms\n")
-        val systems = listOf("gemma_audio" to "Gemma on AUDIO", "gemma_text" to "Gemma on reference TEXT", "rule" to "RuleExtractor on TEXT")
+        sb.append(warmup(rows)).append('\n')
+        val systems = listOf("gemma_audio" to "Gemma on AUDIO", "gemma_text" to "Gemma on reference TEXT",
+            "gemma270_text" to "Gemma 3 270M on reference TEXT", "rule" to "RuleExtractor on TEXT")
         for ((key, title) in systems) {
             val by = java.util.TreeMap<String, MutableList<JSONObject>>()
             for (r in rows) {
                 if (key == "gemma_audio" && r.optString("file").isEmpty()) continue
+                if (key == "gemma270_text" && !r.has(key)) continue
                 if (key != "gemma_audio" && r.optString("reference_transcript").isEmpty()) continue
                 by.getOrPut(r.optString("lang", "?")) { ArrayList() } += r
             }

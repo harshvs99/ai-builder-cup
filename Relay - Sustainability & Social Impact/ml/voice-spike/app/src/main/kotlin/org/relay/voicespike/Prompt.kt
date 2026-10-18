@@ -38,6 +38,30 @@ Input: "no blankets and it is very cold, there are old people with us"
 Output: {"transcript":"no blankets and it is very cold, there are old people with us","lang":"en","category":"OTHER","urgency":2,"people":0,"vuln":["ELDERLY"],"item":"blanket","landmark":"","summary":"no blankets, cold, elderly present"}
 """.trim()
 
+    /**
+     * Short-model discipline for Gemma 3 270M (text only): a few hundred tokens of instruction instead of ~1.2k, the category
+     * enum spelled out with one-line meanings, two worked examples (Latin-script Odia, Odia script), JSON only.
+     * TODO(native speaker): the Odia example sentences were drafted by the model, not by a speaker; have one check them.
+     */
+    val SYSTEM_SMALL = """
+Turn a disaster survivor's help request into ONE JSON object. Output only the JSON, nothing else.
+Keys, all always present: {"transcript":"<the text unchanged>","lang":"en|hi|or","category":"<one of the 7 below>","urgency":0-3,"people":<integer>,"vuln":[],"item":"<one English noun>","landmark":"<English place noun or empty>","summary":"<short English>"}
+category must be exactly one of:
+MEDICAL (pain, bleeding, fever, labour, medicine) | RESCUE (trapped, stranded, cannot get out) | WATER (drinking water) | FOOD | SHELTER (roof, tent, blankets) | MISSING_PERSON | OTHER
+urgency: 3 life-threatening now, 2 urgent medical or children/elderly/pregnant affected, 1 needs help soon, 0 information only.
+people: headcount said or meant, 0 if unknown. vuln: any of ELDERLY, CHILD, PREGNANT, INJURED, TRAPPED, else [].
+item: for RESCUE, WATER, FOOD, SHELTER use that word; for MEDICAL the thing asked for (medicine, insulin). landmark without near/behind/by.
+Examples:
+Input: "amey chaari jana chhata upare phasi achhu, pani badhuchi, school pakhare"
+Output: {"transcript":"amey chaari jana chhata upare phasi achhu, pani badhuchi, school pakhare","lang":"or","category":"RESCUE","urgency":3,"people":4,"vuln":["TRAPPED"],"item":"rescue","landmark":"school","summary":"4 trapped on roof, water rising"}
+Input: "ମୋ ମା'ଙ୍କୁ ଔଷଧ ଦରକାର, ସେ ଚାଲି ପାରୁନାହାନ୍ତି, ଆମେ ସ୍କୁଲ ପାଖରେ ଅଛୁ"
+Output: {"transcript":"ମୋ ମା'ଙ୍କୁ ଔଷଧ ଦରକାର, ସେ ଚାଲି ପାରୁନାହାନ୍ତି, ଆମେ ସ୍କୁଲ ପାଖରେ ଅଛୁ","lang":"or","category":"MEDICAL","urgency":2,"people":1,"vuln":[],"item":"medicine","landmark":"school","summary":"mother needs medicine, cannot walk"}
+""".trim()
+
+    /** Ends with "Output:" so a small model continues straight into the JSON. */
+    fun textInstructionSmall(text: String, @Suppress("UNUSED_PARAMETER") langHint: String): String =
+        "Input: \"$text\"\nOutput:"
+
     fun audioInstruction(langHint: String): String =
         "The attached audio is a short voice message from a disaster survivor (language hint: $langHint). " +
             "Listen to it, transcribe it, and output ONLY the JSON object."

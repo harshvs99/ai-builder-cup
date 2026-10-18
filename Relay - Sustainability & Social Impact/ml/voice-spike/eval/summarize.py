@@ -145,8 +145,16 @@ def main(paths, diff_all=False):
         return
     meta = rows[0]
     print(f"clips={len(rows)}  backend={meta.get('backend')}  model_load_ms={meta.get('model_load_ms')}\n")
+    def first(key):
+        lat = ((meta.get(key) or {}).get("latency_ms")) or {}
+        return f"{lat.get('total')} ms (first token {lat.get('first_token')} ms)" if lat else "-"
+
+    print(f"warm-up E2B: load {meta.get('model_load_ms')} ms, first turn on text row 0: {first('gemma_text')}")
+    if any("gemma270_text" in r or "small_load_ms" in r for r in rows):
+        print(f"warm-up 270M: load {meta.get('small_load_ms')} ms ({meta.get('small_backend')}), first turn: {first('gemma270_text')}")
+    print()
     systems = [("gemma_audio", "Gemma 4 E2B on AUDIO (no ASR)"), ("gemma_text", "Gemma 4 E2B on reference TEXT"),
-               ("rule", "RuleExtractor on reference TEXT")]
+               ("gemma270_text", "Gemma 3 270M on reference TEXT"), ("rule", "RuleExtractor on reference TEXT")]
     for key, title in systems:
         by = defaultdict(list)
         for r in rows:
@@ -154,6 +162,8 @@ def main(paths, diff_all=False):
                 continue  # text-only entry, no audio to evaluate
             if key != "gemma_audio" and not r.get("reference_transcript"):
                 continue
+            if key == "gemma270_text" and key not in r:
+                continue  # 270M file was not pushed for this run
             by[r.get("lang", "?")].append(r)
         if not by:
             continue

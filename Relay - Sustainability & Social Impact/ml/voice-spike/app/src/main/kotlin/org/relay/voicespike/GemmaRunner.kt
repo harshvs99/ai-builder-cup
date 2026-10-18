@@ -18,6 +18,37 @@ import java.util.concurrent.TimeUnit
 
 const val TAG = "VoiceSpike"
 
+/** One on-device model: where its file lives, whether it takes audio, and which prompt it gets. */
+class ModelSpec(
+    val name: String,
+    /** Exact file name under the app's external files dir; if absent, [fileContains] is tried. */
+    val fileName: String,
+    /** Fallback: first *.litertlm whose lower-cased name contains this (null = no fallback). */
+    val fileContains: String?,
+    val audio: Boolean,
+    val system: String,
+    val textInstruction: (String, String) -> String,
+) {
+    fun resolve(dir: File?): File {
+        val exact = File(dir, fileName)
+        if (exact.exists() || fileContains == null) return exact
+        val hit = dir?.listFiles()?.firstOrNull { it.name.lowercase().let { n -> fileContains in n && n.endsWith(".litertlm") } }
+        return hit ?: exact
+    }
+
+    companion object {
+        val E2B = ModelSpec("Gemma 4 E2B", "gemma-4-E2B-it.litertlm", null, true, Prompt.SYSTEM, Prompt::textInstruction)
+
+        /**
+         * Gemma 3 270M, text only. TODO(verify before the first download): the litert-community repo name and file name are
+         * NOT verified offline. Check https://huggingface.co/litert-community for the Gemma 3 270M LiteRT-LM repo and its exact
+         * .litertlm file (there may be several quantisations; prefer int8/q8), then set [fileName] to match. Until then any
+         * *.litertlm in the external files dir whose name contains "270m" is picked up.
+         */
+        val G270M = ModelSpec("Gemma 3 270M", "gemma3-270m-it.litertlm", "270m", false, Prompt.SYSTEM_SMALL, Prompt::textInstructionSmall)
+    }
+}
+
 data class LoadInfo(val ok: Boolean, val backend: String, val loadMs: Long, val note: String)
 
 data class RunResult(
@@ -32,14 +63,17 @@ data class RunResult(
     val fellBack: Boolean,
 )
 
-/** Loads Gemma once, then runs one fresh Conversation per request (no history carry-over). */
-class GemmaRunner(private val ctx: Context) {
+/**
+ * Loads Gemma once, then runs one fresh Conversation per request (no history carry-over).
+ * [spec] selects the model file and the prompt: [ModelSpec.E2B] (audio + text) or [ModelSpec.G270M] (text only).
+ */
+class GemmaRunner(private val ctx: Context, private val spec: ModelSpec = ModelSpec.E2B) {
     @Volatile private var engine: Engine? = null
     @Volatile var backend: String = "none"; private set
     @Volatile var lastLoad: LoadInfo? = null; private set
     private val lock = Any()
 
-    fun modelFile(): File = File(ctx.getExternalFilesDir(null), "gemma-4-E2B-it.litertlm")
+    fun modelFile(): File = spec.resolve(ctx.getExternalFilesDir(null))
     fun isLoaded() = engine != null
 
     /** [pref] = "gpu" (try GPU, fall back to CPU) or "cpu". */
@@ -55,7 +89,7 @@ class GemmaRunner(private val ctx: Context) {
                 val cfg = EngineConfig(
                     modelPath = model.absolutePath,
                     backend = if (b == "gpu") Backend.GPU() else Backend.CPU(),
-                    audioBackend = Backend.CPU(), // Gallery: audio executor must be CPU for Gemma 3n/4
+                    audioBackend = if (spec.audio) Backend.CPU() else null, // Gallery: audio executor must be CPU for Gemma 3n/4
                     maxNumTokens = 3072,
                     cacheDir = ctx.cacheDir.absolutePath,
                 )
@@ -99,7 +133,7 @@ class GemmaRunner(private val ctx: Context) {
         try {
             val conv = e.createConversation(
                 ConversationConfig(
-                    systemInstruction = Contents.of(Prompt.SYSTEM),
+                    systemInstruction = Contents.of(spec.system),
                     samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0),
                     maxOutputToken = 400,
                     extraContext = mapOf("enable_thinking" to false),
@@ -108,11 +142,11 @@ class GemmaRunner(private val ctx: Context) {
             val convMs = SystemClock.elapsedRealtime() - t0
             conv.use {
                 val parts = ArrayList<Content>()
-                if (wav != null) {
+                if (wav != null && spec.audio) {
                     parts += Content.AudioBytes(wav)
                     parts += Content.Text(Prompt.audioInstruction(langHint))
                 } else {
-                    parts += Content.Text(Prompt.textInstruction(text ?: "", langHint))
+                    parts += Content.Text(spec.textInstruction(text ?: "", langHint))
                 }
                 val sb = StringBuilder()
                 val done = CountDownLatch(1)

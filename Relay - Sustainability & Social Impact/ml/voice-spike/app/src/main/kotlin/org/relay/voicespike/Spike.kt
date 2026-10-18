@@ -52,6 +52,18 @@ object Spike {
         runner ?: GemmaRunner(ctx.applicationContext).also { runner = it }
     }
 
+    private var smallRunner: GemmaRunner? = null
+
+    /** Gemma 3 270M, text only (see [ModelSpec.G270M]); a separate engine, loaded only by the eval. */
+    fun smallRunner(ctx: Context): GemmaRunner = synchronized(this) {
+        smallRunner ?: GemmaRunner(ctx.applicationContext, ModelSpec.G270M).also { smallRunner = it }
+    }
+
+    fun processTextSmall(ctx: Context, text: String, lang: String): Outcome {
+        val r = smallRunner(ctx).run(null, text, lang)
+        return Outcome(r, NeedJson.parse(r.raw))
+    }
+
     fun ui(f: (UiState) -> UiState) = state.update(f)
 
     fun ensureLoaded(ctx: Context): LoadInfo {
