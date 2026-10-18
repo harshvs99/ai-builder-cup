@@ -97,4 +97,12 @@ class RequestDetailLogicTest {
         assertEquals("LIVE", last.tag)
         assertTrue(last.subtitle!!.contains("Expected by"))
     }
+
+    @Test fun expectedByOnlyOnCurrentStep() {
+        val s = stringsFor(Lang.EN)
+        val n = dispatched.withAck(AckStatus.ON_THE_WAY, 42, "On the way", 30, t0 + 3_000)
+        val rows = timelineFor(n, t0 + 4_000, s)
+        assertEquals(1, rows.count { it.subtitle?.contains("Expected by") == true })
+        assertTrue(rows.last().subtitle!!.contains("Expected by"))
+    }
 }

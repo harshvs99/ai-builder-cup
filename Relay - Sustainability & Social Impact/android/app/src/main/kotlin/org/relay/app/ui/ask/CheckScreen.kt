@@ -3,7 +3,10 @@ package org.relay.app.ui.ask
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -43,7 +46,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -226,6 +231,10 @@ fun CheckContent(
     val common = s.common
     val sending = phase != SendPhase.IDLE
 
+    val density = LocalDensity.current
+    // Height of the pinned Send area; the scroll content ends with this much padding so nothing sits under it.
+    var sendAreaHeight by remember { mutableStateOf(0.dp) }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         StepTopAppBar(s.ask.checkTitle, onBack = onBack, stepText = s.ask.stepCounter(2, 3))
         Column(
@@ -263,7 +272,7 @@ fun CheckContent(
                         }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             q.options.forEach { o ->
-                                SimpleChip(o.label(lang), draft.answers[q.id] == o.value) { onAnswer(q.id, o.value) }
+                                SimpleChip(o.label(lang), draft.answers[q.id] == o.value, compact = true) { onAnswer(q.id, o.value) }
                             }
                         }
                     }
@@ -280,11 +289,14 @@ fun CheckContent(
             }
 
             PillButton(s.ask.changeSomething, onChangeSomething, style = PillStyle.Outlined, enabled = !sending)
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.height(sendAreaHeight))
         }
+    }
 
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).navigationBarsPadding(),
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.background)
+                .onSizeChanged { sendAreaHeight = with(density) { it.height.toDp() } }
+                .padding(horizontal = 16.dp, vertical = 8.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             PillButton(

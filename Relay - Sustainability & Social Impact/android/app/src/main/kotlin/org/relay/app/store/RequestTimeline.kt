@@ -54,7 +54,8 @@ object RequestTimeline {
                 Key.TEAM_ON_THE_WAY -> need.onTheWayAtMs
                 Key.DELIVERED -> need.resolvedAtMs
             }
-            val hasEta = (key == Key.HELP_COMING || key == Key.TEAM_ON_THE_WAY) && need.etaAtMs > 0
+            // "Expected by" only on the current step; an earlier done step does not repeat it.
+            val hasEta = current && (key == Key.HELP_COMING || key == Key.TEAM_ON_THE_WAY) && need.etaAtMs > 0
             Step(
                 key = key,
                 state = if (current) State.CURRENT else State.DONE,
@@ -62,7 +63,7 @@ object RequestTimeline {
                 etaAtMs = if (hasEta) need.etaAtMs else 0,
                 urgency = if (key == Key.SEEN_BY_CONTROL_ROOM) need.urgency else null,
                 live = key == Key.TEAM_ON_THE_WAY && current,
-                etaOverdue = hasEta && current && now > need.etaAtMs,
+                etaOverdue = hasEta && now > need.etaAtMs,
             )
         }
     }

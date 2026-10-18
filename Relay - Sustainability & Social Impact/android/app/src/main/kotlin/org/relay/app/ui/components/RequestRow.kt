@@ -2,10 +2,14 @@ package org.relay.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +24,7 @@ import org.relay.app.store.MyNeed
 import org.relay.app.store.RequestTimeline
 import org.relay.app.ui.i18n.CommonStrings
 import org.relay.app.ui.i18n.LocalStrings
+import org.relay.app.ui.theme.RelayTheme
 import org.relay.core.payload.Category
 import org.relay.core.payload.Lang
 
@@ -44,12 +49,13 @@ fun RequestRow(need: MyNeed, now: Long, onClick: () -> Unit, modifier: Modifier 
     val title = requestTitle(need, c)
     val line = c.rowStatusLine(RequestTimeline.latest(need, now), now)
     val trailing = requestTrailing(need, c)
-    SectionCard(
-        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = "$title. $line. $trailing" },
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 72.dp).clickable(onClick = onClick)
+                .semantics(mergeDescendants = true) { contentDescription = "$title. $line. $trailing" }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             CategoryIcon(need.category, closed = need.isClosed)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -57,12 +63,13 @@ fun RequestRow(need: MyNeed, now: Long, onClick: () -> Unit, modifier: Modifier 
                 Text(line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
-            if (need.isClosed) {
-                Text(trailing, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                UrgencyBadge(need.urgency, text = trailing)
-            }
+            val loud = !need.isClosed && need.urgency >= 2
+            Text(
+                trailing, style = MaterialTheme.typography.labelSmall,
+                color = if (loud) RelayTheme.colors.warningText else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -80,7 +87,7 @@ private fun sample(item: String, cat: Category, urgency: Int, ack: Int = -1, can
 @Composable
 private fun RowsDemo() {
     val now = System.currentTimeMillis()
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column {
         RequestRow(sample("Drinking water", Category.WATER, 2), now, {})
         RequestRow(sample("", Category.MEDICAL, 3, ack = 0), now, {})
         RequestRow(sample("Rice and dal", Category.FOOD, 1, ack = 3), now, {})

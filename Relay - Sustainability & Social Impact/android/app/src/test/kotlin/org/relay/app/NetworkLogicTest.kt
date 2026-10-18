@@ -94,6 +94,18 @@ class NetworkLogicTest {
         )
     }
 
+    @Test fun batteryTileLabelFollowsCharging() {
+        val charging = NetworkStats.from(MeshStatus(charging = true, meshHoursRemaining = 12.0), 0, 0)
+        assertTrue(MeshHoursText.labelIsBattery(charging))
+        assertEquals(MeshHoursText.Value.Charging, MeshHoursText.of(charging))
+        val onBattery = NetworkStats.from(MeshStatus(charging = false, meshHoursRemaining = 12.0), 0, 0)
+        assertFalse(MeshHoursText.labelIsBattery(onBattery))
+        assertEquals(MeshHoursText.Value.Hours(12), MeshHoursText.of(onBattery))
+        val unknown = NetworkStats.from(MeshStatus(charging = false, meshHoursRemaining = null), 0, 0)
+        assertFalse(MeshHoursText.labelIsBattery(unknown))
+        assertEquals(MeshHoursText.Value.Unknown, MeshHoursText.of(unknown))
+    }
+
     @Test fun meshHoursFromEnergyModel() {
         // 60 % battery at the NORMAL duty mode: 60 / (1.0 + 0.4 + 2.6 * 0.2) = 31.25 h.
         val h = org.relay.app.ble.MeshEnergy.hoursRemaining(60, false, org.relay.app.ble.DutyCycle.Mode.NORMAL)!!

@@ -152,10 +152,10 @@ Empty state: "No requests yet. Press the yellow button on Home to ask for help."
   "Gateway · 2 hops"). Collapse to You — Gateway when this phone is 1 hop away; show only You (as gateway) when this
   phone is the gateway; show You — "?" when no gateway is known.
 - 2×2 tiles: "Phones nearby" (peer count), "Carried for neighbours" (stored NEED/ACK frames not originated here),
-  "Waiting to pass on" (frames not yet delivered/uploaded), "Battery used today" (from the mesh energy estimate, shown
-  green; or "Mesh hours left" when that is what is available).
+  "Waiting to pass on" (frames not yet delivered/uploaded), battery: "Mesh hours left" ("about N h", shown green; "—" when
+  unknown), or "Battery — Charging" while the phone is charging.
 - Toggles card: "Act as a gateway when online — Uploads everyone's requests the moment this phone gets signal."
-  (inverse of today's "Pretend offline"); "Carry messages in the background — Bluetooth only. About 3% battery a day."
+  (inverse of today's "Pretend offline"); "Carry messages in the background — Bluetooth only. Uses some battery."
   (runs the foreground service when the app is closed).
 
 ## 8. Settings

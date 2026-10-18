@@ -137,11 +137,11 @@ internal fun RequestDetailContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                RequestLogic.title(need, s.common), style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.semantics { heading() },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    RequestLogic.title(need, s.common), style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
                 if (!need.isClosed) UrgencyBadge(need.urgency)
                 else Text(
                     if (need.cancelled) s.common.statusCancelled else s.common.statusClosed,
@@ -168,17 +168,17 @@ internal fun RequestDetailContent(
         }
 
         if (!need.isClosed) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillButton(s.request.addToRequest, onAdd, style = PillStyle.Tonal)
-                TextButton(
-                    onClick = { confirming = true },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                ) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { confirming = true }) {
                     Text(
                         s.request.cancelRequest, style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                PillButton(s.request.addToRequest, onAdd, style = PillStyle.Tonal, fillWidth = false)
             }
         }
     }

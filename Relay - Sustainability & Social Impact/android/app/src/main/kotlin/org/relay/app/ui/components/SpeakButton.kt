@@ -1,5 +1,6 @@
 package org.relay.app.ui.components
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -19,14 +20,14 @@ import androidx.compose.ui.unit.dp
 fun SpeakButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     AssistChip(
         onClick = onClick,
-        label = { Text(label, style = MaterialTheme.typography.labelLarge) },
-        modifier = modifier,
-        leadingIcon = { Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
+        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+        modifier = modifier.height(32.dp),
+        leadingIcon = { Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp)) },
         shape = MaterialTheme.shapes.small,
         colors = AssistChipDefaults.assistChipColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            leadingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ),
         border = null,
     )

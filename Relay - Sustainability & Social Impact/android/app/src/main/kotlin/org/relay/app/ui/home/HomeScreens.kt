@@ -296,7 +296,7 @@ private fun HomeContent(
         if (recent.isEmpty()) {
             Text(s.home.noRequestsShort, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column {
                 recent.forEach { RequestRow(it, now, { onOpenRequest(it.msgIdHex) }) }
             }
         }
@@ -357,7 +357,7 @@ private fun RequestSection(title: String, items: List<MyNeed>, now: Long, onOpen
         title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp).semantics { heading() },
     )
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column {
         items.forEach { n -> RequestRow(n, now, { onOpen(n.msgIdHex) }) }
     }
 }

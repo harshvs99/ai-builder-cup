@@ -123,8 +123,9 @@ internal fun NetworkContent(
         }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TileRow(s.phonesNearby, stats.phonesNearby.toString(), s.carriedForNeighbours, stats.carriedForNeighbours.toString())
-            // "Battery used today" needs a measured per-day figure; until there is one this shows the estimate we have.
-            TileRow(s.waitingToPassOn, stats.waitingToPassOn.toString(), s.meshHoursLeft, hours, RelayTheme.colors.success)
+            // No measured per-day battery figure exists; the tile shows the estimate we have, or "Charging".
+            val batteryLabel = if (MeshHoursText.labelIsBattery(stats)) s.batteryLabel else s.meshHoursLeft
+            TileRow(s.waitingToPassOn, stats.waitingToPassOn.toString(), batteryLabel, hours, RelayTheme.colors.success)
         }
 
         SectionCard(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {

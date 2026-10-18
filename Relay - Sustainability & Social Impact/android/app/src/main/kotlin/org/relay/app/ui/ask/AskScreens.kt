@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -344,12 +345,13 @@ internal fun CategoryChip(label: String, category: Category, selected: Boolean, 
 }
 
 @Composable
-internal fun SimpleChip(label: String, selected: Boolean, onClick: () -> Unit) {
+/** [compact]: 40 dp tall instead of the 48 dp touch-friendly default (quick-question answers). */
+internal fun SimpleChip(label: String, selected: Boolean, compact: Boolean = false, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
         label = { Text(label, style = MaterialTheme.typography.labelLarge) },
-        modifier = Modifier.heightIn(min = 48.dp),
+        modifier = if (compact) Modifier.height(40.dp) else Modifier.heightIn(min = 48.dp),
         shape = MaterialTheme.shapes.small,
         colors = chipColors(),
     )

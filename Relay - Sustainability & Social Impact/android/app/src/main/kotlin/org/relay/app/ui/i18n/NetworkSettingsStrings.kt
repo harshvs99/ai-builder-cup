@@ -95,9 +95,10 @@ class NetworkSettingsStrings(private val lang: Lang) {
         lang, "Waiting to pass on", "आगे भेजने की प्रतीक्षा में", "ଆଗକୁ ପଠାଇବାକୁ ଅପେକ୍ଷାରେ", "Naghihintay maipasa", "Naghuhulat pa maipasa",
     ) // needs native review
     val meshHoursLeft get() = tr(lang, "Mesh hours left", "मेश के घंटे बाकी", "ମେଶ୍ ଘଣ୍ଟା ବାକି", "Oras ng mesh na natitira", "Oras han mesh nga nahibilin") // needs native review
-    fun hoursValue(hours: Int): String = tr(lang, "$hours h", "$hours घं", "$hours ଘଂ", "$hours oras", "$hours oras") // needs native review
+    fun hoursValue(hours: Int): String = tr(lang, "about $hours h", "लगभग $hours घं", "ପ୍ରାୟ $hours ଘଂ", "mga $hours oras", "mga $hours oras") // needs native review
     val hoursUnder1 get() = tr(lang, "< 1 h", "< 1 घं", "< 1 ଘଂ", "< 1 oras", "< 1 oras") // needs native review
     val charging get() = tr(lang, "Charging", "चार्ज हो रहा है", "ଚାର୍ଜ ହେଉଛି", "Nagcha-charge", "Nagcha-charge") // needs native review
+    val batteryLabel get() = tr(lang, "Battery", "बैटरी", "ବ୍ୟାଟେରୀ", "Baterya", "Baterya") // needs native review
     val unknownValue get() = "—"
 
     // toggles
@@ -115,8 +116,8 @@ class NetworkSettingsStrings(private val lang: Lang) {
         "Magdala ng mensahe sa background", "Magdara hin mensahe ha background",
     ) // needs native review
     val carryToggleHelp get() = tr(
-        lang, "Bluetooth only. About 3% battery a day.", "सिर्फ़ ब्लूटूथ। लगभग 3% बैटरी प्रतिदिन।",
-        "କେବଳ ବ୍ଲୁଟୁଥ୍। ଦିନକୁ ପ୍ରାୟ 3% ବ୍ୟାଟେରୀ।", "Bluetooth lang. Mga 3% ng baterya kada araw.", "Bluetooth la. Mga 3% han baterya kada adlaw.",
+        lang, "Bluetooth only. Uses some battery.", "सिर्फ़ ब्लूटूथ। कुछ बैटरी लगती है।",
+        "କେବଳ ବ୍ଲୁଟୁଥ୍। କିଛି ବ୍ୟାଟେରୀ ଲାଗେ।", "Bluetooth lang. Gumagamit ng kaunting baterya.", "Bluetooth la. Gumagamit hin gutiay nga baterya.",
     ) // needs native review
 
     // ---------------------------------------------------------------- Settings: groups

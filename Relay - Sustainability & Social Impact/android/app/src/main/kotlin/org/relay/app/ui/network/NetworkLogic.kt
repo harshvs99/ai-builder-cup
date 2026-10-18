@@ -121,6 +121,9 @@ object MeshHoursText {
         data class Hours(val n: Int) : Value
     }
 
+    /** While charging the tile reads "Charging" / "Battery"; otherwise "about N h" / "Mesh hours left" ("—" when unknown). */
+    fun labelIsBattery(stats: NetworkStats): Boolean = stats.charging
+
     fun of(stats: NetworkStats): Value = when {
         stats.charging -> Value.Charging
         stats.meshHoursLeft == null -> Value.Unknown
