@@ -90,7 +90,7 @@ function peopleRadius(people: number): number {
 }
 
 /** OSM raster restyled per theme: muted in light, inverted (hue kept) in dark. */
-function rasterPaint(theme: Theme) {
+export function rasterPaint(theme: Theme) {
   return theme === 'dark'
     ? { 'raster-brightness-min': 0.92, 'raster-brightness-max': 0.08, 'raster-saturation': -0.55, 'raster-hue-rotate': 180, 'raster-contrast': 0.1 }
     : { 'raster-brightness-min': 0.05, 'raster-brightness-max': 1, 'raster-saturation': -0.7, 'raster-hue-rotate': 0, 'raster-contrast': -0.05 };

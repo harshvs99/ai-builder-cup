@@ -23,7 +23,7 @@ class FakeClient:
 
 def facts(**kw):
     base = dict(category="MEDICAL", item="insulin", landmark="school", summary="needs insulin",
-                lat=20.29612, lon=85.82451, urgency=2, people=1, vuln_flags=1, lang="or",
+                lat=20.29612, lon=85.82451, urgency=2, people=1, vuln_flags=1, lang="hi",
                 report_count=1, hours_waiting=0.2)
     base.update(kw)
     return TicketFacts(**base)
@@ -50,6 +50,27 @@ def test_deterministic_dispatch_format():
     assert a.dispatch_en == ("[P2] MEDICAL — insulin for 1 person (elderly). "
                              "Location: 20.29612, 85.82451 near school. Reports: 1. Waiting: 0.2 h.")
     assert a.tier_adjust == 0 and a.priority_reason == f.score().reason
+
+
+def test_requester_language_not_enabled_gets_english_and_no_model_translation():
+    f = facts(lang="or")  # Odia is off by default
+    agent_client = FakeClient(GOOD)
+    a = GeminiAgent(agent_client).assess(f, f.score())
+    assert a.dispatch_local == a.dispatch_en == f"[{f.score().tier}] {GOOD['dispatch_en']}"
+    assert "translated into English" in agent_client.prompts[0]
+    d = DeterministicAgent().assess(f, f.score())
+    assert d.dispatch_local == d.dispatch_en
+
+
+def test_dormant_language_is_translated_once_enabled(monkeypatch):
+    monkeypatch.setenv("RELAY_LANGS", "en,hi,or")
+    f = facts(lang="or")
+    agent_client = FakeClient(GOOD)
+    a = GeminiAgent(agent_client).assess(f, f.score())
+    assert a.dispatch_local == f"[{f.score().tier}] {GOOD['dispatch_local']}"
+    assert "translated into Odia" in agent_client.prompts[0]
+    d = DeterministicAgent().assess(f, f.score())
+    assert d.dispatch_local == "[EN] " + d.dispatch_en
 
 
 def test_local_draft_equals_english_for_en_requesters():
@@ -203,7 +224,7 @@ def test_vertex_defaults_location_global_and_model_flash_latest(monkeypatch):
     seen = _capture_genai(monkeypatch)
     agent_from_env({"GOOGLE_GENAI_USE_VERTEXAI": "TRUE", "GOOGLE_CLOUD_PROJECT": "p"})
     (_, kw), = seen
-    assert kw["location"] == "global" and kw["model"] == "gemini-flash-latest"
+    assert kw["location"] == "global" and kw["model"] == "gemini-3.8-flash"
 
 
 def test_vertex_wins_over_api_key_and_false_switch_is_off(monkeypatch):

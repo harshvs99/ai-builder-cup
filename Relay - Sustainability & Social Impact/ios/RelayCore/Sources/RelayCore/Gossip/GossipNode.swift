@@ -148,6 +148,24 @@ public final class GossipNode: @unchecked Sendable {
         }
     }
 
+    /// An ANNOUNCEMENT frame this node holds, with when it first stored it (the 10-minute language fallback counts from there).
+    public struct HeldAnnouncement: Sendable {
+        public let announcement: Announcement
+        public let frame: Frame
+        public let receivedAtMs: Int64
+    }
+
+    /// Control-room announcements (SPEC 5.7) still inside their life, as stored (carried) by this node.
+    public func storedAnnouncements() -> [HeldAnnouncement] {
+        guarded {
+            let nowSec = clock.nowMs() / 1000
+            return store.all().filter { $0.type == FrameTypes.announcement }.compactMap { p in
+                guard let f = FrameCodec.decode(p.raw), let a = AnnouncementCodec.decode(f.payload), a.isLive(nowSec: nowSec) else { return nil }
+                return HeldAnnouncement(announcement: a, frame: f, receivedAtMs: p.expiryBasisMs)
+            }
+        }
+    }
+
     public func storedAcks() -> [(Ack, Frame)] {
         guarded {
             store.all().filter { $0.type == FrameTypes.ack }.compactMap { p in
@@ -194,7 +212,7 @@ public final class GossipNode: @unchecked Sendable {
         }
     }
 
-    /// Drop NEED/ACK/LOC_HINT frames older than 72 h from the store. Seen-set keys stay until LRU eviction.
+    /// Drop NEED/ACK/LOC_HINT/ANNOUNCEMENT frames older than 72 h (BROADCAST: 24 h after issue) from the store. Seen-set keys stay until LRU eviction.
     public func expire() { locked { out in expireLocked(out) } }
 
     @discardableResult
@@ -251,6 +269,22 @@ public final class GossipNode: @unchecked Sendable {
         return fresh ? frame : nil
     }
 
+    /// Originate an ANNOUNCEMENT (SPEC 5.7) into the mesh: a gateway does this for every payload `/v1/sync` returns. Returns nil when
+    /// this node already holds it (its dedupe key is in the seen-set) or it is outside its life, so repeating a list is free.
+    @discardableResult
+    public func originateAnnouncement(_ a: Announcement) throws -> Frame? {
+        if !a.isLive(nowSec: clock.nowMs() / 1000) { return nil }
+        let frame = Frame(type: FrameTypes.announcement, ttl: Self.initialTtl, timestampMs: clock.nowMs(),
+                          senderId: nodeId, payload: try AnnouncementCodec.encode(a))
+        let raw = try FrameCodec.encode(frame)
+        var fresh = false
+        locked { out in
+            fresh = !isKnown(a.keyHex)
+            acceptAnnouncement(out, a, frame, raw, fromLink: nil)
+        }
+        return fresh ? frame : nil
+    }
+
     /// Entry point for every whole frame received on [linkId]. Never fails on malformed input.
     public func onFrame(_ linkId: String, _ bytes: [UInt8]) {
         handleFrame(linkId, bytes)
@@ -296,6 +330,12 @@ public final class GossipNode: @unchecked Sendable {
                 // Outside its life: neither stored nor relayed, so a stale declaration cannot circulate for ever.
                 if !b.isLive(nowSec: now / 1000) { log(out, "dropped expired broadcast \(b.idHex)"); return }
                 acceptBroadcast(out, b, frame, bytes, fromLink: linkId)
+            case FrameTypes.announcement:
+                if !knownVersion { return acceptOpaque(out, frame, bytes, linkId) }
+                guard let a = AnnouncementCodec.decode(frame.payload) else { reject(); return }
+                // Past its end or older than 72 h: neither stored nor relayed. An unknown district is still relayed (SPEC 5.7).
+                if !a.isLive(nowSec: now / 1000) { log(out, "dropped expired announcement \(a.idHex)"); return }
+                acceptAnnouncement(out, a, frame, bytes, fromLink: linkId)
             case FrameTypes.hello:
                 guard let hello = HelloCodec.decode(frame.payload), hello.nodeId == frame.senderId else { reject(); return }
                 onHello(out, linkId, hello)
@@ -361,6 +401,17 @@ public final class GossipNode: @unchecked Sendable {
                                expiryBasisMs: b.issuedAt * 1000 - (Self.expiryMs - Self.broadcastTtlMs)))
         statsValue.broadcastsDelivered += 1
         out.actions.append { [listener] in listener.onBroadcast(b, frame: frame, fromLink: fromLink) }
+        scheduleFlood(out, frame, raw, key, fromLink)
+    }
+
+    private func acceptAnnouncement(_ out: Out, _ a: Announcement, _ frame: Frame, _ raw: [UInt8], fromLink: String?) {
+        let key = a.keyHex
+        if let fromLink { links[fromLink]?.peerKeys.insert(key) }
+        if isKnown(key) { statsValue.duplicates += 1; return }
+        markSeen(key)
+        store.put(StoredPacket(key: key, type: FrameTypes.announcement, raw: raw, expiryBasisMs: clock.nowMs()))
+        statsValue.announcementsDelivered += 1
+        out.actions.append { [listener] in listener.onAnnouncement(a, frame: frame, fromLink: fromLink) }
         scheduleFlood(out, frame, raw, key, fromLink)
     }
 
@@ -432,7 +483,8 @@ public final class GossipNode: @unchecked Sendable {
     /// [pushContinueMs] on the same link, without waiting for the next 30 s inventory exchange.
     private func pushBatch(_ out: Out, _ linkId: String, _ st: LinkState) {
         let candidates = store.all().filter {
-            ($0.type == FrameTypes.need || $0.type == FrameTypes.ack || $0.type == FrameTypes.locHint || $0.type == FrameTypes.broadcast)
+            ($0.type == FrameTypes.need || $0.type == FrameTypes.ack || $0.type == FrameTypes.locHint || $0.type == FrameTypes.broadcast ||
+                $0.type == FrameTypes.announcement)
                 && !st.peerKeys.contains($0.key)
         }
         if candidates.isEmpty { return }

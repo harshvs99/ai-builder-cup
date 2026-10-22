@@ -11,6 +11,8 @@ public struct SyncOutcome: Equatable, Sendable {
     public var acksOriginated: Int
     /// Control-room broadcasts this round put into the mesh for the first time (already-held ones are not counted).
     public var broadcastsOriginated: Int
+    /// Control-room announcements this round put into the mesh for the first time.
+    public var announcementsOriginated: Int
     public var error: String?
     /// How many of the `uploaded` frames were LOC_HINTs (the rest are NEEDs).
     public var hintsUploaded: Int
@@ -19,9 +21,10 @@ public struct SyncOutcome: Equatable, Sendable {
 
     public init(ok: Bool, uploaded: Int = 0, accepted: Int = 0, duplicates: Int = 0, rejected: Int = 0,
                 acksOriginated: Int = 0, broadcastsOriginated: Int = 0, error: String? = nil, hintsUploaded: Int = 0,
-                hintsAccepted: Int? = nil) {
+                hintsAccepted: Int? = nil, announcementsOriginated: Int = 0) {
         self.ok = ok; self.uploaded = uploaded; self.accepted = accepted; self.duplicates = duplicates
         self.rejected = rejected; self.acksOriginated = acksOriginated; self.broadcastsOriginated = broadcastsOriginated
+        self.announcementsOriginated = announcementsOriginated
         self.error = error
         self.hintsUploaded = hintsUploaded; self.hintsAccepted = hintsAccepted
     }
@@ -40,6 +43,8 @@ public final class GatewaySyncer: @unchecked Sendable {
     private let config: @Sendable () -> SyncConfig
     private let log: @Sendable (String) -> Void
     private let maxFramesPerSync: Int
+    /// The district id this gateway is in (last Ready pack or the one the person chose), or nil when unknown.
+    private let district: @Sendable () -> String?
     private let syncLock = NSRecursiveLock()
     private let flagLock = NSLock()
     private var moreWaitingValue = false
@@ -47,10 +52,10 @@ public final class GatewaySyncer: @unchecked Sendable {
     public init(
         node: GossipNode, store: any PacketStore, state: GatewayState, client: SyncClient,
         config: @escaping @Sendable () -> SyncConfig, log: @escaping @Sendable (String) -> Void = { _ in },
-        maxFramesPerSync: Int = 100
+        maxFramesPerSync: Int = 100, district: @escaping @Sendable () -> String? = { nil }
     ) {
         self.node = node; self.store = store; self.state = state; self.client = client
-        self.config = config; self.log = log; self.maxFramesPerSync = maxFramesPerSync
+        self.config = config; self.log = log; self.maxFramesPerSync = maxFramesPerSync; self.district = district
     }
 
     /// True if more NEED or LOC_HINT frames are waiting after the last round (caller may re-run immediately).
@@ -75,7 +80,8 @@ public final class GatewaySyncer: @unchecked Sendable {
         let hintsInBatch = batch.filter { $0.type == FrameTypes.locHint }.count
         moreWaiting = pending.count > batch.count
         do {
-            let resp = try client.sync(config(), gatewayNode: node.nodeId, frames: batch.map { $0.raw }, ackCursor: state.ackCursor())
+            let resp = try client.sync(config(), gatewayNode: node.nodeId, frames: batch.map { $0.raw }, ackCursor: state.ackCursor(),
+                                       district: district(), announcementCursor: state.announcementCursor())
             var originated = 0
             for payload in resp.acks {
                 guard let ack = AckCodec.decode(payload) else {
@@ -98,6 +104,19 @@ public final class GatewaySyncer: @unchecked Sendable {
                     bcasts += 1
                 }
             }
+            // Announcements (SPEC 5.7): originated like ACKs; originating one already held is a no-op. The cursor advances afterwards.
+            var anns = 0
+            for payload in resp.announcements {
+                guard let a = AnnouncementCodec.decode(payload) else {
+                    log("sync: backend returned an undecodable ANNOUNCEMENT payload; skipped")
+                    continue
+                }
+                if try node.originateAnnouncement(a) != nil {
+                    log("originating ANNOUNCEMENT \(a.idHex) \(a.lang.tag) \(a.status)")
+                    anns += 1
+                }
+            }
+            if let c = resp.announcementCursor { state.setAnnouncementCursor(c) }
             // Only after ACKs are safely in the store do we advance the cursor / mark frames uploaded.
             state.markUploaded(batch.map { $0.key })
             state.setAckCursor(resp.ackCursor)
@@ -107,7 +126,7 @@ public final class GatewaySyncer: @unchecked Sendable {
                 + "rejected=\(resp.rejected) acks=\(originated) ack_cursor=\(resp.ackCursor)\(hintNote)")
             return SyncOutcome(ok: true, uploaded: batch.count, accepted: resp.accepted, duplicates: resp.duplicates,
                                rejected: resp.rejected, acksOriginated: originated, broadcastsOriginated: bcasts,
-                               hintsUploaded: hintsInBatch, hintsAccepted: resp.hints?.accepted)
+                               hintsUploaded: hintsInBatch, hintsAccepted: resp.hints?.accepted, announcementsOriginated: anns)
         } catch {
             moreWaiting = false
             let msg = (error as? SyncException)?.message ?? "\(type(of: error)): \(error)"

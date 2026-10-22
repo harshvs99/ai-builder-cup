@@ -1,6 +1,7 @@
 package org.relay.core.gossip
 
 import org.relay.core.payload.Ack
+import org.relay.core.payload.Announcement
 import org.relay.core.payload.Broadcast
 import org.relay.core.payload.Hello
 import org.relay.core.payload.LocHint
@@ -30,6 +31,8 @@ interface GossipListener {
     fun onLocHint(hint: LocHint, frame: Frame, fromLink: String?) {}
     /** A control-room BROADCAST (SPEC 5.6) was stored for the first time; [fromLink] is null for one this node originated. */
     fun onBroadcast(broadcast: Broadcast, frame: Frame, fromLink: String?) {}
+    /** A control-room ANNOUNCEMENT (SPEC 5.7) was stored for the first time; [fromLink] is null for one this node originated. */
+    fun onAnnouncement(announcement: Announcement, frame: Frame, fromLink: String?) {}
     fun onPeerHello(linkId: String, hello: Hello) {}
     fun onLog(msg: String) {}
 }
@@ -62,12 +65,12 @@ object DuplicateLinkPolicy {
         org.relay.core.ids.NodeId.compare(myId, peerId) < 0
 }
 
-/** One stored NEED/ACK/LOC_HINT/BROADCAST frame. [raw] is the encoded frame as received (or originated). */
+/** One stored NEED/ACK/LOC_HINT/BROADCAST/ANNOUNCEMENT frame. [raw] is the encoded frame as received (or originated). */
 class StoredPacket(
     val key: String,
     val type: Int,
     val raw: ByteArray,
-    /** NEED: created_at in ms. ACK and LOC_HINT: first-stored time in ms. Expiry is `basis + 72 h`. */
+    /** NEED: created_at in ms. ACK, LOC_HINT and ANNOUNCEMENT: first-stored time in ms. Expiry is `basis + 72 h`. */
     val expiryBasisMs: Long,
 )
 
@@ -111,4 +114,5 @@ data class GossipStats(
     val acksDelivered: Long = 0,
     val locHintsDelivered: Long = 0,
     val broadcastsDelivered: Long = 0,
+    val announcementsDelivered: Long = 0,
 )

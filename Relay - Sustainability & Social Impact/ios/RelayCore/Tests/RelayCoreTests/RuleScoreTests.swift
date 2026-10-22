@@ -9,7 +9,9 @@ import XCTest
 ///    trailing Hindi "के पास" dropped) then exact or difflib ratio >= 0.8
 /// Prints the table and every miss (and writes it to the temp directory) and fails if any field drops below the
 /// floor recorded after the lexicon work, so a lexicon edit cannot silently regress. The floors are identical to
-/// the Android `RuleScoreTest`; do not lower them.
+/// the Android `RuleScoreTest`; do not lower them. Rows in a language the extractor has no lexicon for (Bengali,
+/// Bhojpuri: labelled ahead of the work) are scored and listed under their own heading, but the floors apply to the
+/// shipped languages only, so a missing lexicon is visible without turning every unrelated lexicon edit red.
 final class RuleScoreTests: XCTestCase {
 
     private struct Exp {
@@ -166,7 +168,11 @@ final class RuleScoreTests: XCTestCase {
 
     func testScoreRuleExtractorPerField() throws {
         var report = ""
-        let g = score(try guided(), "guided_prompts.json (34)", &report)
+        let all = try guided()
+        let shipped = all.filter { !Self.noLexicon.contains($0.lang) }
+        let ahead = all.filter { Self.noLexicon.contains($0.lang) }
+        let g = score(shipped, "guided_prompts.json, shipped languages (34)", &report)
+        _ = score(ahead, "guided_prompts.json, languages without a lexicon yet (not part of the floors)", &report)
         let s = score(try sentences(), "sentences.csv (8)", &report)
         try? report.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("rule-eval.txt"),
                           atomically: true, encoding: .utf8)
@@ -182,6 +188,7 @@ final class RuleScoreTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(g.f1, Self.floorF1, "vuln F1 \(g.f1)")
     }
 
+    private static let noLexicon: Set<String> = ["bn", "bho"]
     private static let floorCat = 34
     private static let floorItem = 34
     private static let floorLmk = 34

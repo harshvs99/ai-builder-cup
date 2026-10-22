@@ -39,7 +39,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from . import cluster, priority, reclass, templates
+from . import cluster, embed, languages, priority, reclass, templates
 from .codec import (
     CATEGORY_NAMES,
     INITIAL_TTL,
@@ -49,7 +49,8 @@ from .codec import (
     Need,
     encode_ack,
 )
-from .geocode import Gazetteer, Geocoder, default_gazetteer, geocoder_from_env
+from .districts import District
+from .geocode import Gazetteer, Geocoder, default_gazetteer, gateway_district, geocoder_from_env
 from .location import add_no_fix_note, best_loc_acc
 from .meshgeo import HintView
 from .meshgeo import estimate as mesh_estimate
@@ -135,7 +136,7 @@ def with_location_note(reason: str, f: TicketFacts) -> str:
 
 def local_draft_fallback(en: str, lang: str) -> str:
     """No dispatch-draft translation templates exist: reuse English, marked as untranslated."""
-    return en if lang == "en" else f"[EN] {en}"
+    return en if languages.effective(lang) == "en" else f"[EN] {en}"
 
 
 # --------------------------------------------------------------------------------------
@@ -186,7 +187,7 @@ class GenaiClient:
     """
 
     def __init__(
-        self, api_key: str | None = None, model: str = "gemini-flash-latest", timeout_s: float = 8.0, *,
+        self, api_key: str | None = None, model: str = "gemini-3.8-flash", timeout_s: float = 8.0, *,
         vertexai: bool = False, project: str | None = None, location: str | None = None,
     ):
         from google.genai import types
@@ -225,7 +226,6 @@ class GenaiClient:
         return resp.text or ""
 
 
-_LANG_NAMES = {"en": "English", "hi": "Hindi", "or": "Odia", "tl": "Tagalog", "war": "Waray", "ceb": "Cebuano"}
 _TIER_PREFIX = re.compile(r"^\s*\[P[1-4]\]\s*")
 _ANY_TIER_TAG = re.compile(r"\[P[1-4]\]")  # also finds the tag behind a "[EN] " marker
 
@@ -319,7 +319,7 @@ class GeminiAgent:
                 en_body = None
         dispatch_en = f"[{tier}] {en_body}" if en_body else build_dispatch(facts, tier)
 
-        if facts.lang == "en":
+        if languages.effective(facts.lang) == "en":  # requester language not enabled: English, no translation
             dispatch_local = dispatch_en
         else:
             local_body = _clean_text(data.get("dispatch_local"), 800)
@@ -354,7 +354,7 @@ class GeminiAgent:
                 'this ticket has NO GPS fix: write "Location: unknown (no GPS fix)" verbatim, add the landmark '
                 "if any, and give no coordinates,"
             ),
-            lang_name=_LANG_NAMES.get(facts.lang, "English"),
+            lang_name=languages.name(languages.effective(facts.lang)),
             category=facts.category,
             categories=", ".join(CATEGORY_NAMES),
         )
@@ -375,7 +375,7 @@ def agent_from_env(env: dict[str, str] | None = None) -> Agent:
     location from ``GOOGLE_CLOUD_PROJECT`` / ``GOOGLE_CLOUD_LOCATION``) or ``GEMINI_API_KEY``
     is set. Vertex wins if both are present. Otherwise the deterministic agent."""
     env = os.environ if env is None else env
-    model = env.get("GEMINI_MODEL") or "gemini-flash-latest"
+    model = env.get("GEMINI_MODEL") or "gemini-3.8-flash"
     use_vertex = env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1")
     key = env.get("GEMINI_API_KEY")
     try:
@@ -458,9 +458,11 @@ def sanitize_reported_at(created_at: int, received_at: int) -> int:
 class TriagePipeline:
     def __init__(
         self, store: Store, agent: Agent | None = None, clock=time.time, enrich_budget_s: float = 20.0,
-        gazetteer: Gazetteer | None = None, geocoder: Geocoder | None = None,
+        gazetteer: Gazetteer | None = None, geocoder: Geocoder | None = None, embedder: embed.Embedder | None = None,
     ):
         self.store = store
+        self.embedder = embedder
+        self.embed_threshold = embed.threshold_from_env()
         self.agent: Agent = agent or DeterministicAgent()
         self.clock = clock
         self.enrich_budget_s = enrich_budget_s
@@ -493,15 +495,16 @@ class TriagePipeline:
             packet = self.to_packet(it, now_i)
             hops, reported_at = packet.hops, packet.reported_at
             lookup = None
+            need_vec = None
             if need.loc_acc != 0:
                 # cluster under the category the ticket will carry, so a reclassified ticket is found
-                lookup = (
-                    reclass.effective_category(CATEGORY_NAMES[need.category], need.item),
-                    reported_at, cluster.MAX_AGE_WINDOW_S,
-                )
+                category = reclass.effective_category(CATEGORY_NAMES[need.category], need.item)
+                lookup = (category, reported_at, cluster.MAX_AGE_WINDOW_S)
+                # embedded BEFORE the transaction (bounded; None on any failure -> text rule only)
+                need_vec = embed.embed_item(self.embedder, category, need.item)
             out = self.store.ingest(
                 packet=packet, gateway_node=gateway_node,
-                received_at=now_i, lookup=lookup, plan=self._planner(need, hops, reported_at, now),
+                received_at=now_i, lookup=lookup, plan=self._planner(need, hops, reported_at, now, need_vec),
             )
             if out.status == "duplicate":
                 res.duplicates += 1
@@ -565,7 +568,7 @@ class TriagePipeline:
                 return False
             rows = self.store.hints_for([p["msg_id"] for p in packets])
             geo = mesh_estimate([HintView.from_row(r) for r in rows])
-            return geo is not None and self.store.set_mesh_geo(ticket_no, geo)
+            return geo is not None and self.store.set_geo(ticket_no, geo)
         except Exception:
             log.exception("mesh location estimate failed for ticket %s", ticket_no)
             return False
@@ -578,16 +581,17 @@ class TriagePipeline:
         )
 
     # ------------------------------------------------------------------
-    def _planner(self, need: Need, hops: int, reported_at: int, now: float):
+    def _planner(self, need: Need, hops: int, reported_at: int, now: float, need_vec: list[float] | None = None):
         """The deterministic part of phase 1 for one packet, as a pure function of the
         candidate tickets (the store may call it again if its transaction is retried)."""
         now_i = int(now)
         msg_hex = need.msg_id.hex()
 
         def plan(candidates: list[dict[str, Any]]) -> Plan:
-            match = cluster.find_match(candidates, need) if need.loc_acc != 0 else None
+            found = cluster.find_match_reason(candidates, need, need_vec, self.embed_threshold)
+            match = found[0] if found else None
             if match is None:
-                fields = cluster.new_ticket_fields(need, hops, reported_at, now_i)
+                fields = cluster.new_ticket_fields(need, hops, reported_at, now_i, need_vec)
                 rc = reclass.deterministic(fields["category"], need.item)
                 if rc:
                     fields.update(category=rc["to"], reclass=rc)
@@ -595,7 +599,8 @@ class TriagePipeline:
                     fields["geo"] = geo
                 row = dict(fields)
             else:
-                fields = cluster.merge_fields(match, need, hops, reported_at, now_i)
+                fields = cluster.merge_fields(match, need, hops, reported_at, now_i, need_vec)
+                log.info("merged NEED %s into ticket %s: %s", msg_hex, match["ticket_no"], found[1])
                 row = {**match, **fields}
             # No-fix packets never merge, and a merge needs a fix, so a merged ticket has one
             facts = TicketFacts.from_row(row, now, has_location=match is not None or need.loc_acc != 0)
@@ -640,21 +645,35 @@ class TriagePipeline:
             "updated_at": now_i,
         }
 
+    def ticket_district(
+        self, packets: list[dict[str, Any]], everyone: list[tuple[dict[str, Any], list[dict[str, Any]]]] | None = None
+    ) -> District | None:
+        """The district of a no-fix ticket (its ``packets`` from ``Store.ticket_packets``), judged from the gateways that
+        carried it; None when those gateways uploaded nothing with a GPS fix. ``everyone`` is
+        ``Store.list_tickets_with_links()`` if the caller already has it."""
+        if everyone is None:
+            everyone = self.store.list_tickets_with_links()
+        return gateway_district(everyone, {p["gateway_node"] for p in packets})
+
     def _enrich(self, ticket_nos: list[int], budget_s: float) -> None:
         deadline = time.monotonic() + budget_s
         now = self.clock()
         rows = [r for n in ticket_nos if (r := self.store.get_ticket(n)) is not None]
         rows.sort(key=lambda r: -r["priority_score"])
+        everyone: list[tuple[dict[str, Any], list[dict[str, Any]]]] | None = None  # read once, only if a landmark needs it
         for r in rows:
             if time.monotonic() >= deadline:
                 log.warning("agent enrichment budget exhausted; remaining tickets keep deterministic output")
                 break
             try:
-                has_fix = best_loc_acc(p["loc_acc"] for p in self.store.ticket_packets(r["ticket_no"])) != 0
+                packets = self.store.ticket_packets(r["ticket_no"])
+                has_fix = best_loc_acc(p["loc_acc"] for p in packets) != 0
                 fields: dict[str, Any] = {}
                 # An estimate for a landmark the gazetteer did not know. Never for a ticket with a fix.
                 if not has_fix and not r.get("geo") and r["landmark"] and self.geocoder.name != "none":
-                    if geo := self.geocoder.locate(r["landmark"]):
+                    if everyone is None:
+                        everyone = self.store.list_tickets_with_links()
+                    if geo := self.geocoder.locate(r["landmark"], self.ticket_district(packets, everyone)):
                         fields["geo"] = geo
                 if self.agent.enriches:
                     fields.update(self._assess_fields(r, has_fix, now))

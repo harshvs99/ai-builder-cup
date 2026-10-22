@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build and deploy Relay to a GCP project.
 #   ./infra/deploy.sh <PROJECT_ID> [REGION]
-# Env: RELAY_AUTO_APPROVE=1 skips the terraform confirmation prompts.
+# Env: GEMINI_API_KEY (required, paid-tier AI Studio key; stored in Secret Manager)
+#      RELAY_AUTO_APPROVE=1 skips the terraform confirmation prompts.
 set -euo pipefail
 
 PROJECT_ID="${1:-}"
@@ -16,6 +17,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 require_tools
 require_auth
+require_gemini_key
 gcloud projects describe "${PROJECT_ID}" >/dev/null 2>&1 \
   || die "Project ${PROJECT_ID} not found or not accessible."
 

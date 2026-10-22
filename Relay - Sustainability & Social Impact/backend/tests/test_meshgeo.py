@@ -252,9 +252,9 @@ def test_a_ticket_with_a_gps_fix_never_gets_a_mesh_estimate(make_client):
     assert sync(c, [hint_frame(need, RELAY_A, (p.lat, p.lon))]).json()["hints"]["accepted"] == 1
     t = ticket(c)
     assert "geo" not in t and (t["lat"], t["lon"], t["has_location"]) == (20.29612, 85.82451, True)
-    assert c.app.state.store.set_mesh_geo(101, {"lat": 1.0, "lon": 1.0, "source": "mesh", "radius_m": 110, "hint_count": 1}) is False
+    assert c.app.state.store.set_geo(101, {"lat": 1.0, "lon": 1.0, "source": "mesh", "radius_m": 110, "hint_count": 1}) is False
     assert "geo" not in ticket(c)
-    assert c.app.state.store.set_mesh_geo(999, {"lat": 1.0}) is False
+    assert c.app.state.store.set_geo(999, {"lat": 1.0}) is False
 
 
 def test_bad_hints_are_rejected_and_counted(make_client):

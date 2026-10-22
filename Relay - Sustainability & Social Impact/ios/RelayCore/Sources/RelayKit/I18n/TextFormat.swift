@@ -12,6 +12,10 @@ public func tr(_ lang: Lang, _ en: String, _ hi: String, _ or: String, _ tl: Str
     }
 }
 
+/// Text for a string added after the language freeze: English and Hindi only. Hindi is a draft for native review; Odia,
+/// Filipino and Waray (hidden, pending review) show the English text rather than an invented translation.
+public func trEnHi(_ lang: Lang, _ en: String, _ hi: String) -> String { lang == .hi ? hi : en }
+
 /// Plural rule of the app languages, for "1 person" / "N people". Pure.
 public enum Plural {
     /// True when [n] takes the singular form. Hindi treats 0 as singular too; the rest are n == 1.

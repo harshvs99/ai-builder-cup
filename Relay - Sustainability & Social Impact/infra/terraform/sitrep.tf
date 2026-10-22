@@ -1,4 +1,5 @@
-# Hourly situation report: Cloud Scheduler calls POST /v1/sitreps/run on the relay service.
+# Hourly situation report: Cloud Scheduler calls POST /v1/sitreps/run on the relay service, which
+# writes one report per district (in parallel; Pro first, then the Flash fallback).
 #
 # NOT APPLIED. Added for review; `terraform plan` it before the next deploy.
 #

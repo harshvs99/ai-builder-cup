@@ -1,5 +1,8 @@
+import { parseLanguages, type Language } from './lib/languages';
 import { loadOperatorKey } from './lib/operatorKey';
-import type { Broadcast, BroadcastArea, DeclarationDraft, DisasterKey, Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type {
+  Announcement, Broadcast, BroadcastArea, DeclarationDraft, DisasterKey, CapImportResult, DamageMap, Gateway, NewWarning, PlanRequest, ReadyPlan, ReadyShelter, ReadyWarning, RecoverReport, ShelterEntry, ShelterList, ShelterPublishResult, Sitrep, Stats, Team, Ticket,
+} from './types';
 
 export class ApiError extends Error {
   /** HTTP status, or 0 for network failures. */
@@ -54,6 +57,18 @@ export function createClient(base: string, operatorKey?: string | null) {
     }
   }
 
+  /** A file download (evidence pack): fetched with the operator key, so it cannot be a bare link. */
+  async function requestBlob(path: string): Promise<Blob> {
+    let res: Response;
+    try {
+      res = await fetch(`${root}${path}`, operatorKey ? { headers: { 'X-Operator-Key': operatorKey } } : undefined);
+    } catch (e) {
+      throw new ApiError(0, `Backend unreachable (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.blob();
+  }
+
   return {
     async listTickets(signal?: AbortSignal): Promise<Ticket[]> {
       const body = await request<{ tickets?: Ticket[] }>('/v1/tickets', { signal });
@@ -73,6 +88,10 @@ export function createClient(base: string, operatorKey?: string | null) {
     resolve(no: number): Promise<Ticket> {
       return request<Ticket>(`/v1/tickets/${no}/resolve`, { method: 'POST' });
     },
+    /** Estimate a no-fix ticket's position from its landmark now (gazetteer, then Google Maps). */
+    locate(no: number): Promise<Ticket> {
+      return request<Ticket>(`/v1/tickets/${no}/locate`, { method: 'POST' });
+    },
     /** Propose a team for one open ticket; other tickets' proposals are left alone. */
     proposeDispatch(ticketNo: number): Promise<{ proposals: unknown[] }> {
       return request(`/v1/dispatch/propose?ticket_no=${ticketNo}`, { method: 'POST' });
@@ -84,17 +103,86 @@ export function createClient(base: string, operatorKey?: string | null) {
       const body = await request<{ gateways?: Gateway[] }>('/v1/gateways', { signal });
       return Array.isArray(body?.gateways) ? body.gateways : [];
     },
-    /** null when no sitrep has been generated yet. */
-    async latestSitrep(signal?: AbortSignal): Promise<Sitrep | null> {
+    /** The district's newest sitrep; null when none has been generated yet. */
+    async latestSitrep(district: string, signal?: AbortSignal): Promise<Sitrep | null> {
       try {
-        return await request<Sitrep>('/v1/sitreps/latest', { signal });
+        return await request<Sitrep>(`/v1/sitreps/latest?district=${encodeURIComponent(district)}`, { signal });
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;
       }
     },
-    runSitrep(): Promise<Sitrep> {
-      return request<Sitrep>('/v1/sitreps/run', { method: 'POST' });
+    runSitrep(district: string): Promise<Sitrep> {
+      return request<Sitrep>(`/v1/sitreps/run?district=${encodeURIComponent(district)}`, { method: 'POST' });
+    },
+    /** The language registry (no auth); null if the body does not look right. */
+    async listLanguages(signal?: AbortSignal): Promise<Language[] | null> {
+      return parseLanguages(await request<unknown>('/v1/languages', { signal }));
+    },
+    createAnnouncement(body: { district: string; text: string; source_lang?: string }): Promise<Announcement> {
+      return request<Announcement>('/v1/announcements', post(body));
+    },
+    async listAnnouncements(signal?: AbortSignal): Promise<Announcement[]> {
+      const body = await request<{ announcements?: Announcement[] }>('/v1/announcements', { signal });
+      return Array.isArray(body?.announcements) ? body.announcements : [];
+    },
+    /** `langs` omitted = every language whose status is ok; `edits` = operator-corrected texts. */
+    approveAnnouncement(id: number, body: { langs?: string[]; edits?: Record<string, string> }): Promise<Announcement> {
+      return request<Announcement>(`/v1/announcements/${id}/approve`, post(body));
+    },
+    withdrawAnnouncement(id: number): Promise<Announcement> {
+      return request<Announcement>(`/v1/announcements/${id}/withdraw`, { method: 'POST' });
+    },
+    async listWarnings(district: string, signal?: AbortSignal): Promise<ReadyWarning[]> {
+      const body = await request<{ warnings?: ReadyWarning[] }>(`/v1/ready/warnings?district=${encodeURIComponent(district)}`, { signal });
+      return Array.isArray(body?.warnings) ? body.warnings : [];
+    },
+    issueWarning(body: NewWarning): Promise<ReadyWarning> {
+      return request<ReadyWarning>('/v1/ready/warnings', post(body));
+    },
+    cancelWarning(id: number): Promise<ReadyWarning> {
+      return request<ReadyWarning>(`/v1/ready/warnings/${id}/cancel`, { method: 'POST' });
+    },
+    importCap(district: string, capXml: string): Promise<CapImportResult> {
+      return request<CapImportResult>('/v1/ready/warnings/import-cap', post({ district, cap_xml: capXml }));
+    },
+    async listShelters(district: string, signal?: AbortSignal): Promise<ReadyShelter[]> {
+      const body = await request<{ shelters?: ReadyShelter[] }>(`/v1/ready/shelters?district=${encodeURIComponent(district)}`, { signal });
+      return Array.isArray(body?.shelters) ? body.shelters : [];
+    },
+    async listShelterLists(district: string, signal?: AbortSignal): Promise<ShelterList[]> {
+      const body = await request<{ lists?: ShelterList[] }>(`/v1/ready/shelter-lists?district=${encodeURIComponent(district)}`, { signal });
+      return Array.isArray(body?.lists) ? body.lists : [];
+    },
+    /** Gemini + Google Search drafts the district's official shelter list (slow: up to a minute). */
+    discoverShelters(district: string): Promise<ShelterList> {
+      return request<ShelterList>('/v1/ready/shelter-lists/discover', post({ district }));
+    },
+    createShelterList(district: string, entries: Partial<ShelterEntry>[] = []): Promise<ShelterList> {
+      return request<ShelterList>('/v1/ready/shelter-lists', post({ district, entries }));
+    },
+    saveShelterList(id: number, entries: ShelterEntry[]): Promise<ShelterList> {
+      return request<ShelterList>(`/v1/ready/shelter-lists/${id}`, { ...post({ entries }), method: 'PATCH' });
+    },
+    publishShelterList(id: number, note = ''): Promise<ShelterPublishResult> {
+      return request<ShelterPublishResult>(`/v1/ready/shelter-lists/${id}/publish`, post({ note }));
+    },
+    previewPlan(body: PlanRequest): Promise<ReadyPlan> {
+      return request<ReadyPlan>('/v1/ready/plan/preview', post(body));
+    },
+    /** Damage map by village for a district id or "all". */
+    getDamage(district: string, signal?: AbortSignal): Promise<DamageMap> {
+      return request<DamageMap>(`/v1/recover/damage?district=${encodeURIComponent(district)}`, { signal });
+    },
+    /** Relief and insurer report, generated now and not stored. */
+    recoverReport(district: string): Promise<RecoverReport> {
+      return request<RecoverReport>(`/v1/recover/report?district=${encodeURIComponent(district)}`, { method: 'POST' });
+    },
+    ticketEvidence(no: number): Promise<Blob> {
+      return requestBlob(`/v1/recover/evidence/${no}?download=1`);
+    },
+    areaEvidence(areaId: string, district: string): Promise<Blob> {
+      return requestBlob(`/v1/recover/evidence?area=${encodeURIComponent(areaId)}&district=${encodeURIComponent(district)}&download=1`);
     },
     getStats(signal?: AbortSignal): Promise<Stats> {
       return request<Stats>('/v1/stats', { signal });

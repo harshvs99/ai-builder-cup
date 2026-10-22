@@ -88,7 +88,7 @@ padding); ignore `IS_RSR`. A rejected frame is dropped silently and never relaye
 (timestamp, sender, recipient, payload and signature unchanged). Frames with `ttl <= 1` on
 arrival are stored but not flooded onward.
 
-**Initial TTL:** 7 for `NEED`, `ACK` and `LOC_HINT`; 1 for `HELLO` and `INVENTORY` (never relayed).
+**Initial TTL:** 7 for `NEED`, `ACK`, `LOC_HINT`, `BROADCAST` and `ANNOUNCEMENT`; 1 for `HELLO` and `INVENTORY` (never relayed).
 
 ---
 
@@ -105,22 +105,26 @@ and has used up to `0x2C`; we will ask its maintainers to reserve `0x70–0x7F`.
 | `0x73` | `INVENTORY` | none | 1 | no | n/a |
 | `0x74` | `LOC_HINT` | none (broadcast) | 7 | yes | `hint_key` (§5.5) |
 | `0x75` | `BROADCAST` | none (broadcast) | 7 | yes | `bcast_id` (§5.6) |
+| `0x76` | `ANNOUNCEMENT` | none (broadcast) | 7 | yes | first 8 bytes of SHA-256(`announcement_id` ‖ `lang` ‖ `status`) (§5.7) |
 
-Any other type (including `LOC_HINT` or `BROADCAST` on a build that predates it): decoded, not processed, deduplicated by its opaque key (§5), and relayed if
+Any other type (including `LOC_HINT`, `BROADCAST` or `ANNOUNCEMENT` on a build that predates it): decoded, not processed, deduplicated by its opaque key (§5), and relayed if
 `ttl > 1` (forward compatibility). Not stored.
 
 ---
 
 ## 5. Payloads
 
-Every payload starts with a 1-byte `payload_version`: `0x01` for every type, plus `0x02` for `NEED`
-(§5.1, intake answers). A `NEED` or `ACK` with any other `payload_version` is treated like an unknown type (§4):
+Every payload starts with a 1-byte `payload_version`: `0x01` for every type, plus `0x02` and `0x03` for `NEED`
+(§5.1, intake answers; photo tags). A `NEED` or `ACK` with any other `payload_version` is treated like an unknown type (§4):
 relayed if `ttl > 1`, never stored or shown.
 
 **Upgrade consequence of NEED v2:** a build that predates v2 sees `payload_version = 2` as unknown, so it
 **relays** the frame (opaque key, at most once per node) but does **not** show, store or upload it; a gateway on an
 old build therefore never uploads a v2 NEED. Encoders emit v1 whenever a NEED has no answers, so v1 traffic is
 unaffected; only a NEED that carries answers needs a v2-aware gateway somewhere on its path to reach the backend.
+The same holds for **NEED v3** (photo tags): a build that predates v3 relays it but does not show, store or upload
+it, so a NEED that carries photo tags needs a v3-aware gateway somewhere on its path. Encoders emit v1 / v2 whenever
+there are no tags, so earlier traffic is unaffected.
 
 **Opaque key** (for unknown types and unknown payload versions): the first 8 bytes of
 SHA-256 over `type ‖ sender_id ‖ timestamp_ms (8 bytes BE) ‖ payload`. It goes in the same
@@ -130,7 +134,7 @@ seen-set, so opaque frames are relayed at most once per node.
 
 ```
 size field
-1    payload_version   = 0x01 (no answers) or 0x02 (v1 layout + 3 answer bytes, below)
+1    payload_version   = 0x01 (no answers), 0x02 (v1 layout + 3 answer bytes, below) or 0x03 (v2 layout + photo tags)
 8    msg_id            random 64-bit, end-to-end identity and dedupe key
 8    origin_node       node_id of the requester (ACKs are addressed here)
 4    created_at        unix seconds, u32
@@ -179,11 +183,35 @@ OTHER has no questions. Question text per language (en, hi, or, tl, war) lives i
 model or the rules only ever choose a question id. A new question needs a new id, and a new answer value on an
 existing question needs a new `payload_version` (decoders reject what they do not know).
 
-Encoders emit **v1 when there are no answers and v2 when there is at least one**. Decoders (Kotlin and Python) accept
-both. Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
+**`payload_version = 0x03`** is exactly the v1 layout (with the version byte set to 3), then the **3 answer bytes**
+(same rules as v2, except that all three may be empty), then **`photo_tags`**, a `u16` big-endian bitmask. Max v3
+payload 118 + 3 + 2 = **123 bytes**, frame 22 + 123 = **145 bytes** (≤ 182; the vector `need_v3_max_size` pins it).
+
+```
+bit  key                bit  key                bit  key
+0    floodwater         6    road_blocked       12   vehicle_damaged
+1    house_damaged      7    tree_fallen        13   fire
+2    house_collapsed    8    power_line_down    14   landslide
+3    roof_damaged       9    boat_damaged       15   reserved, must be 0
+4    person_injured     10   crops_damaged
+5    people_stranded    11   livestock_lost
+```
+The tag table is fixed data, never renumbered; `protocol/vectors.json` carries it as `photo_tag_bank` and every
+codec's tests check their table against it. A new tag needs a new bit, and bit 15 stays reserved until a new
+`payload_version` defines it.
+
+**Privacy: tags only, never pixels.** The photo is classified **on the phone** into this vocabulary and discarded;
+the image is never sent over the mesh or to the backend, so "no names, no numbers, no pixels" holds. A tag is what the
+phone's classifier saw, an observation and not a verified assessment: the backend counts the reports that carried a
+tag and shows it to the operator as context, and never lets it change a priority score.
+
+Encoders emit **v1 when there are no answers and no tags, v2 when there is at least one answer and no tags, and v3
+when there is any tag (with or without answers)**. Decoders (Kotlin, Swift and Python) accept all three. Validation on decode: `category ≤ 6`, `urgency ≤ 3`, `loc_acc ≤ 5`, `lang ≤ 5`, string lengths
 within limits, valid UTF-8, no trailing bytes; for v2 additionally exactly 3 answer bytes, every non-empty byte a
 known question id with a value that question defines, no duplicate id, no occupied slot after an empty one, and at
-least one answer (all-empty v2 is invalid). Invalid → drop.
+least one answer (all-empty v2 is invalid). For v3: exactly 3 answer bytes (same checks, but all-empty is valid) and
+exactly 2 `photo_tags` bytes, nonzero (`photo_tags == 0` is invalid; encoders send v1 / v2 instead) with bit 15 clear.
+Invalid → drop.
 
 ### 5.2 `ACK` (type `0x71`), ≤ 145 bytes
 
@@ -340,6 +368,62 @@ or act on it; the people it serves simply get the questions they got before.
 cannot remove a question that is always asked (consciousness, breathing, bleeding) or any first-aid advice. Signing it
 with a control-room key is the planned hardening.
 
+### 5.7 `ANNOUNCEMENT` (type `0x76`), at most 160 bytes
+
+A duty officer's own words to every phone in a district, translated and approved per language by the control room.
+It is **not** the disaster declaration of §5.6: that one is a fixed 25-byte switch for the triage questions, this one is
+free text for a person to read. Both travel down from the backend and are separate frames and separate `/v1/sync` fields.
+
+```
+size field
+1    payload_version   = 0x01
+8    announcement_id   random 64-bit, assigned by the backend at approval; the same for every language
+1    lang              index in the language table (en 0, hi 1, or 2, tl 3, war 4, ceb 5)
+1    district          index in the district table (puri 0, delhi 1; append only)
+1    status            0 ACTIVE, 1 WITHDRAWN
+4    approved_at       u32 unix seconds
+4    expires_at        u32 unix seconds, 0 = none
+1+n  text              n ≤ 139 bytes of UTF-8, already in `lang`
+```
+
+Fixed part 20 bytes, so the payload is at most 20 + 1 + 139 = **160 bytes** and the frame at most 22 + 160 = **182
+bytes**, exactly the single-write limit of §2 (the vector `announcement_en_max_size_delhi` pins it). About 46
+Devanagari characters fit. The backend shortens a longer text to 139 bytes on a character boundary and ends it with
+"…"; the whole text stays on `GET /v1/announcements/active`.
+
+Frame: broadcast (no recipient), initial TTL 7, `sender_id` = the gateway that put it into the mesh (not checked
+against the payload).
+
+**Dedupe key:** the first 8 bytes of `SHA-256(announcement_id ‖ lang ‖ status)` (`lang` and `status` one byte each; no
+type byte). It is derived, so a `WITHDRAWN` frame is a new frame that supersedes the `ACTIVE` one of the same language.
+
+**Life:** stored, listed in `INVENTORY`, flooded and expired like an `ACK` (§6): 72 h from first storage. A node drops a
+frame whose `approved_at` is more than 72 h old, or whose `expires_at` (when not 0) has passed, without storing or
+relaying it, and never shows one past `expires_at`. A node never uploads it.
+
+**Delivery, end to end.**
+
+1. At approval the backend assigns the `announcement_id` and, per approved language, the shortened text. An approval and
+   a withdrawal each get a sequence number.
+2. A gateway adds `"district"` (its district id, from its location or its last Ready pack) and
+   `"announcement_cursor"` (the value it was last given, 0 at first) to `POST /v1/sync` (§7). The response carries
+   `"announcements"` (base64 payloads, oldest first, whole approvals/withdrawals only, at most 50 payloads) and the next
+   `"announcement_cursor"`. A gateway that sends neither field gets neither back. A withdrawal is sent for an announcement
+   whose approval the gateway may never have seen; it is harmless.
+3. The gateway wraps each payload in a frame and originates it like an `ACK`.
+4. **Every phone relays every `ANNOUNCEMENT`**, whatever its district or language. It **shows** one only when its
+   `district` equals the phone's stored district (or the phone has none) and its `lang` is the phone's language, or the
+   `en` one when no frame in the phone's language has arrived for that `announcement_id` after 10 minutes. `WITHDRAWN`
+   removes what was shown for the same `announcement_id` and `lang` (and the `en` fallback) and shows nothing.
+
+**Validation on decode:** `payload_version = 1`, at least 21 bytes, `lang` ≤ 5, `status` ≤ 1, text length byte ≤ 139 and
+inside the payload, valid UTF-8, no trailing bytes; anything else is dropped. An unknown `district` index is **not**
+an error: the phone relays and stores the frame and simply never shows it. `approved_at` and `expires_at` are not
+range-checked.
+
+**Upgrade consequence:** a build that predates `ANNOUNCEMENT` relays it once as an unknown type (§4) but does not store
+it, so a district with old phones in the middle of a chain delivers it more slowly.
+
 ---
 
 ## 6. Gossip engine (behaviour every node implements)
@@ -377,7 +461,7 @@ shows it to the user.
 `LOC_HINT` frames (§5.5) are stored, inventoried, flooded and expired exactly like ACKs, except that no node
 shows them to the user; the gateway uploads them (§7). `BROADCAST` frames (§5.6) are stored, inventoried and flooded
 like ACKs but expire 24 h after `issued_at`, are pushed to a peer before other ACKs and NEEDs, and are never uploaded: they
-only travel down from the backend. A node that is not the NEED's requester never needs the
+only travel down from the backend. `ANNOUNCEMENT` frames (§5.7) are stored, inventoried, flooded and expired exactly like ACKs, never uploaded, and shown to the user only by the rule in §5.7. A node that is not the NEED's requester never needs the
 hint's content for anything but forwarding it.
 
 ---
@@ -410,6 +494,7 @@ Response:
 - `broadcasts` (optional, omitted when empty so older gateways see no change) are the **BROADCAST payloads** (§5.6) that are
   live now (issued within the last 24 h), oldest first, in every response whichever gateway asks. The gateway decodes
   each and originates the ones it does not hold into the mesh.
+- `district` and `announcement_cursor` (optional requests) and `announcements` and `announcement_cursor` (response, present only when the request carried one of the two) are the **ANNOUNCEMENT payloads** of §5.7. The response never touches `broadcasts`.
 - `acks` are **ACK payloads** (not frames) with id greater than `ack_cursor`, oldest first,
   at most 50. The gateway wraps each in a frame (`sender_id` = gateway, `recipient_id` =
   `target_node`, TTL 7) and originates it into the mesh.
@@ -419,6 +504,10 @@ Response:
 - `GET /v1/tickets/{ticket_no}` → `Ticket` with `packets: [...]`.
 - `POST /v1/tickets/{ticket_no}/approve` → queues a `DISPATCHED` ACK for every linked NEED's
   origin, returns the updated `Ticket`.
+- `POST /v1/tickets/{ticket_no}/locate` → estimates the position of a ticket with no GPS fix from its landmark now
+  (gazetteer, then the Maps geocoder), stores it as `geo` and returns the updated `Ticket`. `404` unknown ticket; `409` the
+  ticket has a GPS fix or a `mesh` `geo` (never replaced); `503` no Maps geocoder is configured and the gazetteer has no
+  match; `422` the landmark is empty or nothing confident was found.
 - `POST /v1/broadcasts` → body `{ "kind": "disaster" | "cleared" (default "disaster"), "disaster": "flood" | "cyclone" | "earthquake" | "landslide",
   "lat", "lon", "radius_km", "label"? }` (area optional; `radius_km > 0` needs `lat` and `lon`) → `{ "id", "kind", "disaster", "issued_at",
   "expires_at", "area"?, "label"? }`. Stored and served to gateways for 24 h (§5.6). `label` (≤ 80 chars) is the operator's
@@ -436,6 +525,17 @@ Response:
   disaster (never while one is declared in its area). Only gazetteer places whose name says what they are are included.
 - `GET /v1/stats` → `{ "open_by_category": {...}, "gateways_online": n, "tickets": n }`
   (a gateway is online if it synced in the last 60 s).
+- `GET /v1/recover/damage?district=puri|delhi|all` → `{ generated_at, district, areas: [...], totals: {...} }`: tickets grouped
+  by village (nearest gazetteer place within 3 km, else a ~2 km grid cell, else `Unlocated`) with reports, merged duplicates,
+  households (distinct origin phones), households reached (on resolved tickets), photo tags, `damage_level`
+  (`severe|moderate|light|none`) and `damage_reason`; totals add `median_minutes_to_dispatch`, `share_with_location`,
+  `needs_confirmed_closed`. Deterministic.
+- `GET /v1/recover/evidence/{ticket_no}` and `GET /v1/recover/evidence?area=<area_id>&district=` → an evidence record per ticket
+  (area pack: `{tickets: [...], integrity}`), origin phones as salted SHA-256 pseudonyms, `integrity: {algorithm: "sha256",
+  digest}` over canonical JSON (tamper-evidence of the export, not authenticity). `?download=1` sets `Content-Disposition`.
+- `POST /v1/recover/report?district=` → `{ generated_at, district, counts, text_en, text_local, local_lang, model:
+  "gemini"|"template", evidence_digests }`: relief and insurer report generated now, not persisted. Same number-validation rule as sitreps.
+  These three need `X-Operator-Key` when `RELAY_OPERATOR_KEY` is set.
 - `POST /v1/dev/inject` → body `{ "needs": [NeedJson...] }`; dev only.
 - `GET /healthz` → `{ "ok": true }`.
 
@@ -450,17 +550,28 @@ Response:
   "status": "OPEN", "dispatch_draft": {"en": "...", "local": "..."},
   "first_reported_at": 1790000000, "max_hops": 2, "gateways": ["a1b2c3d4e5f60718"],
   "msg_ids": ["0011223344556677"],
-  "answers": {"conscious": "no", "road_reachable": "yes"}
+  "answers": {"conscious": "no", "road_reachable": "yes"},
+  "photo_tags": {"floodwater": 2, "people_stranded": 1}
 }
 ```
 `answers` (optional, omitted when the ticket has none) maps question key to answer key (§5.1 table; `unknown` is a
 real answer). For a merged ticket it holds the first report's answers, and a later report fills only keys the ticket
 does not have yet.
+`photo_tags` (optional, omitted when empty) maps a tag key (§5.1 table) to the number of linked reports that carried
+it, so `{"floodwater": 2}` on a 3-report ticket means two phones saw floodwater. These are observations from the
+requesters' phones, not verified facts, and they never change `priority_score` or `priority_tier`; the only effect on
+priority is a note appended to `priority_reason`, e.g. "Photo shows: floodwater, people stranded." The detail view's
+`packets` entries carry `photo_tags` as a list of keys when that report had any.
 `status` is `OPEN` or `DISPATCHED`.
 
 **`geo`** (optional, only on a ticket with `has_location = false`) is an approximate position, never a fix, and never
 set on a ticket that has one: `{ "lat", "lon", "source", ... }`, where `source` is one of
-- `"gazetteer"` or `"gemini_maps"`: looked up from the free-text landmark; also carries `query` (the landmark);
+- `"gazetteer"`: looked up from the free-text landmark in the curated Puri gazetteer; also carries `query` (the landmark);
+- `"gemini_maps"`: found by Gemini with Google Maps grounding from the landmark; carries `query`, `name` (the Google
+  Maps place chosen), `district` (id of the district whose bounding box holds the point: `puri` or `delhi`, as in the
+  dashboard) and, when Google returned them, `place_id` and `maps_uri` (an `https` link to the place on Google Maps).
+  Only an answer backed by a Google Maps grounding chunk and inside the ticket's district is stored. A dashboard that
+  shows a `gemini_maps` position must credit Google Maps (grounding terms) and may link `maps_uri`;
 - `"mesh"`: estimated from `LOC_HINT` frames (§5.5); also carries `radius_m` (u32, metres, a multiple of 10) and
   `hint_count` (the hints that agreed and were used). A mesh estimate replaces a landmark one; a landmark lookup never
   replaces a mesh one.
@@ -492,7 +603,8 @@ also carries its own `loc_acc`.
 `protocol/vectors.json` holds hex encodings produced by `protocol/gen_vectors.py` (the
 reference encoder). Both codecs must (a) encode each vector's fields to exactly the given hex
 and (b) decode the hex back to the same fields. The v1 vectors are byte-identical to the originals; the `need_v2_*`
-vectors cover the answer bytes, and the `loc_hint_*` vectors cover `LOC_HINT` (fields include its dedupe `key`).
+vectors cover the answer bytes, the `need_v3_*` vectors cover the photo tags (fields carry `photo_tags` and `photo_tags_mask`;
+`photo_tag_bank` is the bit table both codecs must match), and the `loc_hint_*` vectors cover `LOC_HINT` (fields include its dedupe `key`), `broadcast_vectors` cover `BROADCAST`, and `announcement_vectors` cover `ANNOUNCEMENT` (fields include its dedupe `key`; `must_reject_announcement_payloads` lists what both decoders refuse; `announcement_lang_codes` and `announcement_district_codes` are the index tables).
 `must_reject_need_payloads` and `must_reject_loc_hint_payloads` list payloads both decoders must refuse,
 `loc_hint_acc_max_m` is the accuracy-bucket table, and `answer_bank` is the question table both codecs must match. Regenerate with
 `python3 protocol/gen_vectors.py > protocol/vectors.json`.

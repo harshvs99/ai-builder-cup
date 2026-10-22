@@ -107,7 +107,7 @@ fun AskScreen(nav: RelayNav, mode: AskMode, prefillFrom: String?, flowOwner: Vie
     val state by vm.state.collectAsStateWithLifecycle()
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
     val myNeeds by MeshRepository.myNeeds.collectAsStateWithLifecycle()
-    val lang = settings.language
+    val lang = settings.effectiveLanguage
     val langNow by rememberUpdatedState(lang)
     val perms = rememberPermissions()
     val speaker = LocalSpeaker.current

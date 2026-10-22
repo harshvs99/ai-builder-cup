@@ -38,6 +38,17 @@ android {
         // builds; village builds pass -Prelay.helpLocateDefault=false so position sharing is strictly opt-in.
         val helpLocate = providers.gradleProperty("relay.helpLocateDefault").orElse("true").get().trim().lowercase() != "false"
         buildConfigField("boolean", "HELP_LOCATE_DEFAULT", helpLocate.toString())
+
+        // Languages this build can offer (contract v2 section 1). The picker shows a language only when it is also enabled in the
+        // backend's GET /v1/languages. English and Hindi by default; Odia, Filipino and Waray keep their strings but stay hidden
+        // until a community reviewer signs them off (then: -Prelay.enabledLangs=en,hi,or and the backend's RELAY_LANGS).
+        val enabledLangs = providers.gradleProperty("relay.enabledLangs").orElse("en,hi").get().filter { it.isLetter() || it == ',' }
+        buildConfigField("String", "ENABLED_LANGS", "\"$enabledLangs\"")
+
+        // A demo shelter list (placeholders no officer verified) shows only in demo builds, with a "Demo" badge. Every debug build is a demo
+        // build; for a release build pass -Prelay.demoShelters=true. Without it a release build shows only officer-published lists.
+        val demoShelters = providers.gradleProperty("relay.demoShelters").orElse("false").get().trim().lowercase() == "true"
+        buildConfigField("boolean", "DEMO_SHELTERS", demoShelters.toString())
     }
 
     // Release uses a real keystore when relay.signing.storeFile is set; otherwise the debug key, so a
@@ -106,6 +117,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // Background refresh of the Ready pack (best effort, every 6 h with a network).
+    implementation(libs.androidx.work.runtime.ktx)
     // On-device Gemma (LiteRT-LM). Needs API 31+; the manifest overrides minSdk for it and GemmaRunner guards at runtime.
     implementation(libs.litertlm.android)
 

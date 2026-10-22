@@ -9,7 +9,7 @@ import json
 import math
 import struct
 
-NEED, ACK, HELLO, INVENTORY, LOC_HINT, BROADCAST = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
+NEED, ACK, HELLO, INVENTORY, LOC_HINT, BROADCAST, ANNOUNCEMENT = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76
 F_HAS_RECIPIENT, F_HAS_SIGNATURE = 0x01, 0x02
 
 
@@ -73,16 +73,31 @@ def answers_bytes(answers):
     return bytes([answer_byte(q, v) for q, v in answers] + [0] * (3 - len(answers)))
 
 
+# Photo tag table (SPEC 5.1): bit -> JSON key. The phone classifies a photo on-device into these; only the
+# 16-bit mask travels, never pixels. Bits are never renumbered; bit 15 is reserved and must be 0.
+PHOTO_TAGS = (
+    "floodwater", "house_damaged", "house_collapsed", "roof_damaged", "person_injured", "people_stranded",
+    "road_blocked", "tree_fallen", "power_line_down", "boat_damaged", "crops_damaged", "livestock_lost",
+    "vehicle_damaged", "fire", "landslide",
+)
+
+
+def tags_mask(keys):
+    return sum(1 << PHOTO_TAGS.index(k) for k in keys)
+
+
 def need_payload(n):
     answers = n.get("answers") or []
+    tags = tags_mask(n.get("photo_tags") or [])
     return (
         struct.pack(
             ">B8s8sIBBBBiiBB",
-            2 if answers else 1, n["msg_id"], n["origin_node"], n["created_at"], n["category"], n["urgency"],
+            3 if tags else 2 if answers else 1, n["msg_id"], n["origin_node"], n["created_at"], n["category"], n["urgency"],
             n["people"], n["vuln_flags"], e5(n["lat"]), e5(n["lon"]), n["loc_acc"], n["lang"],
         )
         + lp(n["item"], 16) + lp(n["landmark"], 24) + lp(n["summary"], 40)
-        + (answers_bytes(answers) if answers else b"")
+        + (answers_bytes(answers) if answers or tags else b"")
+        + (struct.pack(">H", tags) if tags else b"")
     )
 
 
@@ -128,6 +143,27 @@ def broadcast_payload(b):
         ">B8sBBIiiH", 1, b["bcast_id"], BROADCAST_KINDS[b["kind"]], DISASTERS[b["disaster"]], b["issued_at"],
         e5(b["lat"]), e5(b["lon"]), b["radius_km"],
     )
+
+
+LANGS = {"en": 0, "hi": 1, "or": 2, "tl": 3, "war": 4, "ceb": 5}
+DISTRICT_CODES = {"puri": 0, "delhi": 1}  # wire index of a district (SPEC 5.7)
+ANNOUNCEMENT_STATUS = {"active": 0, "withdrawn": 1}
+MAX_ANNOUNCEMENT_TEXT = 139
+ANNOUNCEMENT_TTL_S = 72 * 3600  # stored like an ACK: dropped 72 h after first storage (SPEC 5.7)
+
+
+def announcement_payload(a):
+    text = a["text"].encode("utf-8")
+    assert len(text) <= MAX_ANNOUNCEMENT_TEXT, "vector text must already fit; the backend shortens before encoding"
+    return struct.pack(
+        ">B8sBBBII", 1, a["announcement_id"], LANGS[a["lang"]], DISTRICT_CODES[a["district"]],
+        ANNOUNCEMENT_STATUS[a["status"]], a["approved_at"], a["expires_at"],
+    ) + bytes([len(text)]) + text
+
+
+def announcement_key(announcement_id, lang, status):
+    """Dedupe key (SPEC 5.7): first 8 bytes of SHA-256(announcement_id || lang || status)."""
+    return hashlib.sha256(announcement_id + bytes([LANGS[lang], ANNOUNCEMENT_STATUS[status]])).digest()[:8]
 
 
 def opaque_key(type_, sender, ts_ms, payload):
@@ -266,6 +302,49 @@ need5 = dict(
 p5 = v2_vector("need_v2_max_size", need5, 7, TS + 40, B)
 assert len(p5) == 121
 
+# NEED payload_version 3: v1 layout + 3 answer bytes (all-empty allowed) + photo_tags u16 BE. Appended after the v2 vectors.
+def v3_vector(name, need, ttl, ts, sender):
+    pl = need_payload(need)
+    vectors.append({
+        "name": name, "kind": "NEED",
+        "fields": {**{k: (H(v) if isinstance(v, bytes) else v) for k, v in need.items() if k not in ("answers", "photo_tags")},
+                   "lat_e5": e5(need["lat"]), "lon_e5": e5(need["lon"]),
+                   "answers": answers_json(need.get("answers") or []),
+                   "photo_tags": list(need["photo_tags"]), "photo_tags_mask": tags_mask(need["photo_tags"])},
+        "frame": {"type": NEED, "ttl": ttl, "timestamp_ms": ts, "sender_id": H(sender), "recipient_id": None},
+        "payload_hex": H(pl), "frame_hex": H(frame(NEED, ttl, ts, sender, pl)),
+    })
+    return pl
+
+
+# Tags only: three empty answer slots, then mask 0x0021 (floodwater + people_stranded).
+need6 = dict(
+    msg_id=bytes.fromhex("1112131415161718"), origin_node=A, created_at=1_790_000_300,
+    category=1, urgency=2, people=4, vuln_flags=0b10000, lat=20.296123, lon=85.824509,
+    loc_acc=2, lang=0, item="boat", landmark="temple", summary="water in house, stuck on roof",
+    photo_tags=["floodwater", "people_stranded"],
+)
+p6 = v3_vector("need_v3_tags_only", need6, 7, TS + 45, A)
+
+# Answers and tags together, non-ASCII strings; mask 0x400A (house_damaged + roof_damaged + landslide).
+need7 = dict(
+    msg_id=bytes.fromhex("2122232425262728"), origin_node=B, created_at=1_790_000_400,
+    category=4, urgency=2, people=6, vuln_flags=0b00110, lat=-0.000005, lon=179.999995,
+    loc_acc=3, lang=2, item="ଆଶ୍ରୟ", landmark="ସ୍କୁଲ", summary="roof gone",
+    answers=[(7, 1), (6, 2)], photo_tags=["house_damaged", "roof_damaged", "landslide"],
+)
+v3_vector("need_v3_answers_and_tags", need7, 5, TS + 46, B)
+
+# Largest v3 NEED: every string at its byte limit, 3 answers, every defined tag. 118 + 3 + 2 = 123 byte payload, 145 byte frame.
+need8 = dict(
+    msg_id=bytes.fromhex("ffffffffffffffff"), origin_node=B, created_at=0xFFFFFFFF,
+    category=6, urgency=3, people=255, vuln_flags=0xFF, lat=21.0, lon=86.0, loc_acc=5, lang=5,
+    item="i" * 16, landmark="l" * 24, summary="s" * 40, answers=[(8, 1), (7, 2), (1, 0)],
+    photo_tags=list(PHOTO_TAGS),
+)
+p8 = v3_vector("need_v3_max_size", need8, 7, TS + 47, B)
+assert len(p8) == 123 and tags_mask(PHOTO_TAGS) == 0x7FFF
+
 # LOC_HINT (SPEC 5.5): a relay with a fix vouches that it heard a no-fix NEED directly from its origin.
 def hint_vector(name, h, ttl, ts):
     pl = loc_hint_payload(h)
@@ -333,6 +412,54 @@ bad_broadcast = {
     "lon_out_of_range": pb1[:19] + struct.pack(">i", -18_000_001) + pb1[23:],
 }
 
+# ANNOUNCEMENT (SPEC 5.7): a duty officer's words, per language, to every phone in a district. Own list, like BROADCAST.
+announcement_vectors = []
+
+
+def announcement_vector(name, a, ttl, ts, sender):
+    pl = announcement_payload(a)
+    announcement_vectors.append({
+        "name": name, "kind": "ANNOUNCEMENT",
+        "fields": {**{k: (H(v) if isinstance(v, bytes) else v) for k, v in a.items()},
+                   "key": H(announcement_key(a["announcement_id"], a["lang"], a["status"]))},
+        "frame": {"type": ANNOUNCEMENT, "ttl": ttl, "timestamp_ms": ts, "sender_id": H(sender), "recipient_id": None},
+        "payload_hex": H(pl), "frame_hex": H(frame(ANNOUNCEMENT, ttl, ts, sender, pl)),
+    })
+    return pl
+
+
+AID = bytes.fromhex("5a5b5c5d5e5f6061")
+pan1 = announcement_vector("announcement_en_active", dict(
+    announcement_id=AID, lang="en", district="puri", status="active", approved_at=1_790_000_000, expires_at=0,
+    text="Cyclone shelters in Puri are open. Move now."), 7, TS + 100, D)
+# Devanagari costs 3 bytes per character (about 46 characters fit).
+announcement_vector("announcement_hi_active_with_expiry", dict(
+    announcement_id=AID, lang="hi", district="puri", status="active", approved_at=1_790_000_000,
+    expires_at=1_790_086_400, text="पुरी में चक्रवात शरण स्थल खुले हैं। अभी जाइए।"), 7, TS + 110, D)
+# Text of exactly 139 bytes: the largest payload (160) and frame (182) there is.
+announcement_vector("announcement_en_max_size_delhi", dict(
+    announcement_id=bytes.fromhex("ffffffffffffff01"), lang="en", district="delhi", status="active",
+    approved_at=0xFFFFFFFF, expires_at=0xFFFFFFFF, text=("Water supply stops from 14:00 today. Store water now. " * 3)[:139]), 4, TS + 120, A)
+# The same announcement withdrawn: a new dedupe key, and the text is kept (a phone shows nothing for it).
+announcement_vector("announcement_en_withdrawn", dict(
+    announcement_id=AID, lang="en", district="puri", status="withdrawn", approved_at=1_790_000_000, expires_at=0,
+    text="Cyclone shelters in Puri are open. Move now."), 7, TS + 130, D)
+announcement_vector("announcement_hi_withdrawn_empty_text", dict(
+    announcement_id=AID, lang="hi", district="delhi", status="withdrawn", approved_at=1_790_000_000, expires_at=0,
+    text=""), 7, TS + 140, B)
+
+# ANNOUNCEMENT payloads every decoder must reject.
+bad_announcement = {
+    "version_2": bytes([2]) + pan1[1:],
+    "too_short": pan1[:20],
+    "trailing_byte": pan1 + b"\x00",
+    "text_length_past_end": pan1[:-1],
+    "text_length_over_139": pan1[:20] + bytes([140]) + b"a" * 140,
+    "lang_six": pan1[:9] + bytes([6]) + pan1[10:],
+    "status_two": pan1[:11] + bytes([2]) + pan1[12:],
+    "invalid_utf8": pan1[:20] + bytes([2, 0xC3, 0x28]),
+}
+
 # Frames every decoder must reject.
 good = frame(NEED, 7, TS, A, p)
 bad = {
@@ -354,7 +481,15 @@ bad_need = {
     "v2_missing_answer_byte": p3[:-1],
     "v2_four_answer_bytes": p3 + b"\x00",
     "v1_with_answer_bytes": bytes([1]) + v1_body + answers_bytes([(1, 2)]),
-    "version_3": bytes([3]) + p3[1:],
+    "version_3": bytes([3]) + p3[1:],  # a v2 body labelled v3: the photo_tags u16 is missing
+    "version_4": bytes([4]) + p6[1:],
+    "v3_photo_tags_zero": p6[:-2] + b"\x00\x00",
+    "v3_photo_tag_bit15": p6[:-2] + struct.pack(">H", 0x8000 | tags_mask(["floodwater"])),
+    "v3_missing_tag_byte": p6[:-1],
+    "v3_extra_trailing_byte": p6 + b"\x00",
+    "v3_no_tag_bytes": p6[:-2],
+    "v2_with_photo_tags": bytes([2]) + p6[1:],
+    "v1_with_photo_tags": bytes([1]) + p6[1:],
 }
 
 # LOC_HINT payloads (a frame's payload bytes) every decoder must reject.
@@ -374,15 +509,23 @@ print(json.dumps({
     "vectors": vectors,
     "must_reject_frames": {k: H(v) for k, v in bad.items()},
     "sizes": {"need1_payload": len(p), "need2_payload": len(p2), "ack1_payload": len(pa),
-              "need_v2_max_payload": len(p5), "loc_hint_payload": len(ph1), "broadcast_payload": len(pb1)},
+              "need_v2_max_payload": len(p5), "need_v3_max_payload": len(p8), "loc_hint_payload": len(ph1), "broadcast_payload": len(pb1),
+              "announcement_max_payload": len(announcement_payload(dict(
+                  announcement_id=AID, lang="en", district="puri", status="active", approved_at=0, expires_at=0, text="a" * 139)))},
     "answer_bank": [
         {"id": qid, "key": key, "options": [{"value": v, "key": k} for k, v in opts.items()]}
         for qid, (key, opts) in BANK.items()
     ],
+    "photo_tag_bank": [{"bit": i, "key": k} for i, k in enumerate(PHOTO_TAGS)],
     "must_reject_need_payloads": {k: H(v) for k, v in bad_need.items()},
     "must_reject_loc_hint_payloads": {k: H(v) for k, v in bad_hint.items()},
     "loc_hint_acc_max_m": {str(k): v for k, v in HINT_ACC_MAX_M.items()},
     "broadcast_vectors": broadcast_vectors,
     "must_reject_broadcast_payloads": {k: H(v) for k, v in bad_broadcast.items()},
     "broadcast_ttl_s": BROADCAST_TTL_S,
+    "announcement_vectors": announcement_vectors,
+    "must_reject_announcement_payloads": {k: H(v) for k, v in bad_announcement.items()},
+    "announcement_lang_codes": LANGS,
+    "announcement_district_codes": DISTRICT_CODES,
+    "announcement_ttl_s": ANNOUNCEMENT_TTL_S,
 }, indent=2, ensure_ascii=False))

@@ -79,6 +79,21 @@ Odia has no on-device speech model, so voice input falls back to typing.
   Needs a device test with a restarted Android peer.
 - No-location prompt before Send (`NoLocationLogic`): an alert from `CheckScreen`; with no landmark, "Send without location" asks again.
 
+## Contract v2 (languages, Ready mode, shelters, announcements)
+
+Built from `docs/design/app-contract-v2.md`, mirroring `android/` with the same test names.
+
+- Languages: `LanguageCatalog` (RelayKit/I18n), build list `RelayEnabledLangs` (Info.plist / `RELAY_ENABLED_LANGS`), `GET /v1/languages` via
+  `LanguageClient`. Only en and hi are offered by default; or, tl, war keep their strings, marked `pendingReview`.
+- `ANNOUNCEMENT` (0x76): `Payload/Announcement.swift`, gossip store/relay in `GossipNode`, golden vectors in `VectorsTests`,
+  show/hide rules in `AnnouncementBoard`, sync fields in `SyncClient` / `GatewaySyncer`, Home card in `HomeScreen`.
+- Ready: `RelayKit/Ready` (models, atomic `ReadyStore`, `ReadyRefresher`, `HttpReadyApi`, `ReadyView`, `Shelters`), app side in
+  `Services/Ready` (`ReadyCenter`, `AnnouncementCenter`) and `Screens/Ready` (Ready, household, shelters). Background refresh is a
+  `BGAppRefreshTask` (`org.relay.ios.ready-refresh`, Info.plist `BGTaskSchedulerPermittedIdentifiers` + `fetch`). Demo shelter lists show only
+  in Debug builds or with `RELAY_DEMO_SHELTERS = YES`.
+- **Not compiled or run in the container that wrote it** (no Swift toolchain, no iOS SDK): run `swift test` in `ios/RelayCore`, then build the
+  Xcode project, before trusting any of the above. The Android twin of every test passes on the JVM.
+
 ## Device-test checklist
 
 1. iPhone locked and Android: Android may not discover a locked iPhone because iOS moves the service UUID to the

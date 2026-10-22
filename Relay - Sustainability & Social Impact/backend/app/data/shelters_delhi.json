@@ -1,0 +1,10 @@
+[
+  {"id": "del-sch-01", "name": "Government Boys Senior Secondary School, Connaught Place", "name_local": "सरकारी बॉयज़ सीनियर सेकेंडरी स्कूल, कनॉट प्लेस", "kind": "school", "lat": 28.632, "lon": 77.219, "capacity": 700, "facilities": ["water", "toilets"], "block": "New Delhi", "demo": true},
+  {"id": "del-camp-01", "name": "Yamuna Bank Relief Camp", "name_local": "यमुना बैंक राहत शिविर", "kind": "relief_camp", "lat": 28.623, "lon": 77.279, "capacity": 1500, "facilities": ["water", "toilets", "kitchen", "first_aid"], "block": "Shahdara", "demo": true},
+  {"id": "del-hos-01", "name": "Civil Hospital, Old Delhi", "name_local": "सिविल अस्पताल, पुरानी दिल्ली", "kind": "hospital", "lat": 28.66, "lon": 77.23, "capacity": 400, "facilities": ["water", "toilets", "generator", "first_aid", "medical"], "block": "Central", "demo": true},
+  {"id": "del-sch-02", "name": "Sarvodaya Kanya Vidyalaya, Mayur Vihar", "name_local": "सर्वोदय कन्या विद्यालय, मयूर विहार", "kind": "school", "lat": 28.608, "lon": 77.295, "capacity": 650, "facilities": ["water", "toilets"], "block": "East", "demo": true},
+  {"id": "del-camp-02", "name": "Burari Relief Camp", "name_local": "बुराड़ी राहत शिविर", "kind": "relief_camp", "lat": 28.75, "lon": 77.195, "capacity": 2000, "facilities": ["water", "toilets", "kitchen"], "block": "North", "demo": true},
+  {"id": "del-sch-03", "name": "Government School, Dwarka Sector 9", "name_local": "सरकारी विद्यालय, द्वारका सेक्टर 9", "kind": "school", "lat": 28.587, "lon": 77.06, "capacity": 600, "facilities": ["water", "toilets", "generator"], "block": "South West", "demo": true},
+  {"id": "del-hos-02", "name": "District Hospital, Saket", "name_local": "जिला अस्पताल, साकेत", "kind": "hospital", "lat": 28.528, "lon": 77.215, "capacity": 350, "facilities": ["water", "toilets", "generator", "first_aid", "medical"], "block": "South", "demo": true},
+  {"id": "del-camp-03", "name": "Rohini Community Relief Centre", "name_local": "रोहिणी सामुदायिक राहत केंद्र", "kind": "relief_camp", "lat": 28.715, "lon": 77.12, "capacity": 900, "facilities": ["water", "toilets", "first_aid"], "block": "North West", "demo": true}
+]

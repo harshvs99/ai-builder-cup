@@ -11,6 +11,8 @@ gateway phones upload them, so every ticket goes through clustering, scoring and
   * 3 clusters of duplicate reports (3 + 3 + 2): same need, within ~60 m, different origin phones
   * 1 drinking-water request deliberately tagged MEDICAL (the category triage should correct)
   * languages en / hi / or, spread over three gateway phones
+  * 14 reports carry synthetic photo tags (floodwater, house_collapsed, ...), as an on-device classifier would
+    report them: only the tag bitmask travels, never a picture
 
 Everything is derived from ``--seed`` (default 7) and ``--night-start`` (default: yesterday
 21:40 IST), so a run is repeatable. Re-running with the same two values uploads the same msg_ids,
@@ -42,6 +44,7 @@ from app.codec import (  # noqa: E402
     Need,
     encode_frame,
     encode_need,
+    photo_tags_from_json,
 )
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -88,6 +91,14 @@ PLAIN_MIX = (
     + ["MISSING_PERSON", "OTHER"]
 )  # 23 reports
 NO_GPS_MIX = ["RESCUE", "MEDICAL", "WATER", "FOOD", "SHELTER", "MEDICAL", "FOOD", "RESCUE"]
+# Synthetic photo tags (SPEC 5.1) for the scenarios where someone would plausibly photograph the scene: what an
+# on-device classifier would report, not a verified assessment. A fixed table, so the night stays repeatable.
+PHOTO_TAGS_BY_ITEM: dict[str, list[str]] = {
+    "boat": ["floodwater", "people_stranded"],
+    "rescue": ["floodwater", "house_damaged"],
+    "shelter": ["house_collapsed"],
+    "tarpaulin": ["roof_damaged", "tree_fallen"],
+}
 # (gazetteer place, category, scenario index, reports): the duplicate clusters
 CLUSTERS = [
     ("district headquarters hospital puri", "MEDICAL", 0, 3),
@@ -163,6 +174,7 @@ def build_frames(seed: int = 7, night_start: datetime | None = None) -> list[See
             vuln_flags=flag_bits, lat=lat if has_fix else 0.0, lon=lon if has_fix else 0.0,
             loc_acc=(loc_acc if loc_acc is not None else rng.choice([1, 2, 2, 3])) if has_fix else 0,
             lang=LANG_CODES.index(lang), item=item, landmark=landmark, summary=summaries[lang],
+            photo_tags=photo_tags_from_json(PHOTO_TAGS_BY_ITEM.get(item, [])),
         )
         assert len(need.summary.encode("utf-8")) <= 40 and len(need.item.encode("utf-8")) <= 16, need
         assert len(need.landmark.encode("utf-8")) <= 24, need.landmark

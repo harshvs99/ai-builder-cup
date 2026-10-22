@@ -12,6 +12,7 @@ from conftest import T0, decode_acks, need_frame, sync
 
 METRES_PER_DEG = math.radians(1) * 6_371_000.0  # matches cluster.haversine_m
 PURI = (19.8135, 85.8312)  # base of boat-puri
+CONNAUGHT = (28.6315, 77.2167)
 
 CAT = {"MEDICAL": 0, "RESCUE": 1, "WATER": 2, "FOOD": 3, "SHELTER": 4, "MISSING_PERSON": 5, "OTHER": 6}
 
@@ -176,11 +177,31 @@ def test_template_orders_and_local_language():
     t = ticket(7, "MEDICAL", at=PURI, landmark="school", lang="or", item="insulin")
     en, local, lang, source = dispatch.draft_order(t, "Pipili Medical Team", 35, None)
     assert "#7" in en and "Pipili Medical Team" in en and "ETA 35 min" in en and source == "template"
-    assert lang == "or" and "#7" in local and "Pipili Medical Team" in local and "35" in local
+    # Odia is not enabled by default: Puri's order is English + Hindi, whatever the requester spoke
+    assert lang == "hi" and "#7" in local and "Pipili Medical Team" in local and "35" in local and "टिकट" in local
     _, local2, lang2, _ = dispatch.draft_order(ticket(8, lang="en"), "Gop Supply Team", 20, None)
-    assert (local2, lang2) == (None, None)
+    assert lang2 == "hi" and "#8" in local2
     assert dispatch.draft_order(ticket(9, lang="hi"), "T", 5, None)[2] == "hi"
-    assert dispatch.draft_order(ticket(9, lang="tl"), "T", 5, None)[1:3] == (None, None)
+    assert dispatch.draft_order(ticket(9, lang="or", at=CONNAUGHT), "T", 5, None)[2] == "hi"
+    # unlocated: the requester's language if it is an enabled district language, else the default district's
+    assert dispatch.draft_order(ticket(9, lang="hi", at=None), "T", 5, None)[2] == "hi"
+    assert dispatch.draft_order(ticket(9, lang="or", at=None), "T", 5, None)[2] == "hi"
+    assert dispatch.draft_order(ticket(9, lang="tl", at=None), "T", 5, None)[2] == "hi"
+    delhi_team = {"base_lat": CONNAUGHT[0], "base_lon": CONNAUGHT[1]}
+    assert dispatch.draft_order(ticket(9, at=None), "T", 5, None, delhi_team)[2] == "hi"
+
+
+def test_odia_orders_return_when_odia_is_enabled(monkeypatch):
+    monkeypatch.setenv("RELAY_LANGS", "en,hi,or")
+    t = ticket(7, "MEDICAL", at=PURI, landmark="school", lang="or", item="insulin")
+    en, local, lang, source = dispatch.draft_order(t, "Pipili Medical Team", 35, None)
+    assert lang == "or" and "#7" in local and "Pipili Medical Team" in local and "35" in local and "ଟିକେଟ" in local
+    # the district's language, whatever the requester spoke: Puri -> Odia, Delhi -> Hindi
+    assert dispatch.draft_order(ticket(8, lang="en"), "Gop Supply Team", 20, None)[2] == "or"
+    assert dispatch.draft_order(ticket(9, lang="hi"), "T", 5, None)[2] == "or"
+    assert dispatch.draft_order(ticket(9, lang="or", at=CONNAUGHT), "T", 5, None)[2] == "hi"
+    assert dispatch.draft_order(ticket(9, lang="or", at=None), "T", 5, None)[2] == "or"
+    assert dispatch.draft_order(ticket(9, lang="tl", at=None), "T", 5, None)[2] == "or"  # tl has no order template
 
 
 def test_model_order_accepted_only_with_ticket_number_and_team_name():
@@ -248,8 +269,9 @@ def test_propose_writes_pending_proposals_and_sends_nothing(client):
     by = {p["ticket_no"]: p for p in r["proposals"]}
     assert by[101]["team_id"] == "boat-puri" and by[101]["eta_min"] == 10
     assert by[102]["team_id"] == "med-pipili" and by[103]["team_id"] == "sup-nimapara"
-    assert by[102]["local_lang"] == "hi" and "#102" in by[102]["order_local"]
-    assert by[101]["local_lang"] is None and by[101]["order_local"] is None
+    # every order is bilingual in the district's local language (Odia is off, so Puri: Hindi), whatever the requester spoke
+    assert all(p["local_lang"] == "hi" for p in by.values())
+    assert "#102" in by[102]["order_local"] and "#101" in by[101]["order_local"]
     assert set(by[101]) == {"ticket_no", "team_id", "team_name", "eta_min", "order_en", "order_local",
                             "local_lang", "reason", "proposed_at"}
     ts = tickets_by_no(client)

@@ -13,8 +13,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -40,12 +43,22 @@ import org.relay.app.ui.ask.TriageScreen
 import org.relay.app.ui.home.HomeScreen
 import org.relay.app.ui.home.LanguageScreen
 import org.relay.app.ui.home.RequestsScreen
+import org.relay.app.ui.i18n.AppLanguages
 import org.relay.app.ui.i18n.LocalStrings
 import org.relay.app.ui.network.ConsoleScreen
 import org.relay.app.ui.network.DeveloperScreen
 import org.relay.app.ui.network.NetworkScreen
 import org.relay.app.ui.network.SettingsScreen
+import org.relay.app.ui.ready.HouseholdScreen
+import org.relay.app.ui.ready.ReadyScreen
+import org.relay.app.ui.ready.ShelterDetailScreen
+import org.relay.app.ui.ready.ShelterListScreen
 import org.relay.app.ui.request.RequestDetailScreen
+import org.relay.app.ready.ReadyRepository
+import org.relay.core.lang.LanguageCatalog
+import org.relay.core.ready.ReadyPolicy
+import org.relay.core.ready.RefreshTrigger
+import org.relay.core.payload.Lang
 
 /** Permission / Bluetooth setup actions used by the developer screens (built from [Permissions]). */
 class SetupActions(
@@ -69,7 +82,7 @@ private class Tab(val route: String, val icon: ImageVector, val label: @Composab
  * flow screen uses StepTopAppBar (which handles the status bar) plus navigationBarsPadding()/imePadding().
  */
 @Composable
-fun RelayRoot() {
+fun RelayRoot(openReady: Boolean = false, onReadyOpened: () -> Unit = {}) {
     val ctx = LocalContext.current
     val navController = rememberNavController()
     val permissions = rememberPermissions()
@@ -90,7 +103,31 @@ fun RelayRoot() {
     }
 
     val settings by MeshRepository.settings.flow.collectAsStateWithLifecycle()
+    // Ready mode: a refresh when the network comes back, and one every 3 h while the app runs (app open is in MainActivity).
+    val online = MeshRepository.status.collectAsStateWithLifecycle().value.internetAvailable
+    LaunchedEffect(online) { if (online) ReadyRepository.refresh(ctx, RefreshTrigger.NETWORK_REGAINED) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(ReadyPolicy.PERIODIC_MS)
+            ReadyRepository.refresh(ctx, RefreshTrigger.PERIODIC)
+        }
+    }
+    val snackbar = remember { SnackbarHostState() }
+    // The stored language was switched off (backend or build): say so once, then keep showing English.
+    val resolution = settings.languageResolution
+    val englishStrings = LocalStrings.current
+    LaunchedEffect(resolution.unavailable, settings.languageNoticeFor) {
+        if (LanguageCatalog.shouldAnnounce(resolution, Lang.fromTag(settings.languageNoticeFor))) {
+            val gone = resolution.unavailable ?: return@LaunchedEffect
+            MeshRepository.settings.update { it.copy(languageNoticeFor = gone.tag) }
+            snackbar.showSnackbar(englishStrings.home.languageUnavailable(AppLanguages.of(gone).englishName))
+        }
+    }
     val startRoute = remember { if (settings.languageConfirmed) Routes.HOME else Routes.LANGUAGE }
+
+    LaunchedEffect(openReady) {
+        if (openReady && settings.languageConfirmed) { nav.openReady(); onReadyOpened() }
+    }
 
     val backStack by navController.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
@@ -105,6 +142,7 @@ fun RelayRoot() {
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (!Routes.hidesBottomBar(route)) {
                 NavigationBar {
@@ -152,6 +190,12 @@ fun RelayRoot() {
                 composable(Routes.NETWORK) { NetworkScreen(nav) }
                 composable(Routes.CONSOLE) { ConsoleScreen(nav) }
                 composable(Routes.SETTINGS) { SettingsScreen(nav) }
+                composable(Routes.READY) { ReadyScreen(nav) }
+                composable(Routes.HOUSEHOLD) { HouseholdScreen(nav) }
+                composable(Routes.SHELTERS) { ShelterListScreen(nav) }
+                composable(Routes.SHELTER, listOf(navArgument("id") { type = NavType.StringType })) { e ->
+                    ShelterDetailScreen(nav, java.net.URLDecoder.decode(e.arguments?.getString("id").orEmpty(), "UTF-8"))
+                }
                 composable(Routes.DEVELOPER) { DeveloperScreen(nav) }
                 composable(Routes.LEGACY_HOME) { LegacyHomeScreen(actions) }
             }

@@ -87,6 +87,20 @@ final class AppModel {
     private let network = NetworkMonitor()
     private let battery = BatteryMonitor()
     private let skipFixWait = Broadcaster<Bool>(false)
+    /// Ready mode (pack, plan, household, banner): see `ReadyCenter`.
+    let ready: ReadyCenter
+    /// The control room's announcements: see `AnnouncementCenter`.
+    let announcements: AnnouncementCenter
+    @ObservationIgnored private let readyDelegate = ReadyNotificationDelegate()
+    /// Demo builds (every Debug build, or `RELAY_DEMO_SHELTERS = YES`) may show a demo shelter list, with a "Demo" badge; Release builds never do.
+    let demoBuild: Bool
+    private static var isDebug: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
 
     @ObservationIgnored private var started = false
     @ObservationIgnored private var engineStarted = false
@@ -104,6 +118,9 @@ final class AppModel {
         let repository = MeshRepository(
             dataDirectory: AppModel.dataDirectory(), settings: settings,
             logSink: { relayLogger.info("\($0, privacy: .public)") })
+        let readyCenter = ReadyCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
+        let announcementCenter = AnnouncementCenter(directory: AppModel.dataDirectory().appendingPathComponent("ready", isDirectory: true))
+        let readyStore = readyCenter.store
         let transport = CoreBluetoothTransport()
         let log: @Sendable (String) -> Void = { [weak repository] in repository?.log($0) }
         // Mesh-assisted location (SPEC 5.5): the engine reads this phone's latest fix from its own queue, and asks the
@@ -113,7 +130,8 @@ final class AppModel {
         let engine = MeshEngine(
             repository: repository, transport: transport, syncClient: SyncClient(),
             hintFix: { latestFix.relayFix() },
-            requestFix: { Task { @MainActor in _ = location.start() } })
+            requestFix: { Task { @MainActor in _ = location.start() } },
+            district: { readyStore.load().district })
 
         self.repository = repository
         self.engine = engine
@@ -125,9 +143,38 @@ final class AppModel {
         self.settings = settings.current
         self.villagerStatus = VillagerStatus.from(repository.snapshot.status, now: currentTimeMs())
         self.permissions = Permissions(location: location)
+        self.demoBuild = buildConfig.demoShelters || AppModel.isDebug
+        self.ready = readyCenter
+        self.announcements = announcementCenter
         // The Bluetooth prompt needs the mesh started; Permissions calls back into the model for that.
         permissions.startBluetooth = { [weak self] in self?.startMesh() }
         speaker.speed = settings.current.voiceSpeed
+        ready.context = { [weak self] in
+            guard let self else { return (RefreshInput(connected: false, lat: nil, lon: nil, lang: "en", household: Household()), "", "") }
+            let s = self.settings
+            let fix = self.locationFix
+            return (RefreshInput(connected: self.internetAvailable, lat: fix?.lat, lon: fix?.lon, lang: s.effectiveLanguage.tag, household: s.household),
+                    s.backendUrl, s.deviceKey)
+        }
+        let packetStore = repository.packetStore
+        announcementCenter.heldProvider = { AnnouncementBoard.heldFrom(packetStore) }
+        announcementCenter.context = { [weak self] in
+            guard let self else { return (nil, .en, "", "", false) }
+            return (self.ready.snapshot.district, self.settings.effectiveLanguage, self.settings.backendUrl, self.settings.deviceKey, self.internetAvailable)
+        }
+        announcementCenter.reloadHeld()
+        readyCenter.afterRefresh = { [weak announcementCenter] trigger in
+            await announcementCenter?.fetch(trigger)
+            await announcementCenter?.notifyNew()
+        }
+        engine.onAnnouncement = { [weak announcementCenter] _ in
+            Task { @MainActor in
+                announcementCenter?.reloadHeld()
+                await announcementCenter?.notifyNew()
+            }
+        }
+        readyDelegate.onOpenReady = { [weak self] in Task { @MainActor in self?.ready.openRequested = true } }
+        UNUserNotificationCenter.current().delegate = readyDelegate
     }
 
     /// Starts everything. Idempotent; call it as early as possible (`RelayApp.init`) so a background relaunch by
@@ -149,7 +196,11 @@ final class AppModel {
         }
         network.start { [engine = self.engine, weak self] ok in
             engine.setInternetAvailable(ok)
-            Task { @MainActor in self?.internetAvailable = ok }
+            Task { @MainActor in
+                let regained = ok && self?.internetAvailable == false
+                self?.internetAvailable = ok
+                if regained { await self?.ready.refresh(.networkRegained) }
+            }
         }
         battery.start { [engine = self.engine, weak self] percent, charging in
             engine.setBattery(percent: percent, charging: charging)
@@ -178,6 +229,14 @@ final class AppModel {
             }
         })
         tasks.append(Task { [weak self] in await self?.permissions.refresh() })
+        refreshLanguages()
+        tasks.append(Task { [weak self] in
+            await self?.ready.refresh(.appOpen)
+            while !Task.isCancelled { // every 3 h while the app runs (the policy also enforces it)
+                try? await Task.sleep(nanoseconds: UInt64(ReadyPolicy.periodicMs) * 1_000_000)
+                await self?.ready.refresh(.periodic)
+            }
+        })
 
         if CBManager.authorization != .notDetermined { startMesh() }
     }
@@ -205,6 +264,18 @@ final class AppModel {
 
     func openAppSettings() { permissions.openAppSettings() }
 
+    // ================================================================== languages
+
+    /// Which languages the backend offers (`GET /v1/languages`, no key); best effort. The cached copy, or the build default
+    /// while there is none, is used offline.
+    func refreshLanguages() {
+        let backend = settings.backendUrl
+        Task.detached(priority: .utility) { [weak self] in
+            guard let body = LanguageClient().fetch(backend) else { return }
+            await MainActor.run { self?.updateSettings { var s = $0; s.serverLanguagesJson = body; return s } }
+        }
+    }
+
     // ================================================================== scene phase
 
     /// Forward SwiftUI's `scenePhase`. `.active`/`.inactive` count as foreground (continuous scanning, no flapping
@@ -221,6 +292,8 @@ final class AppModel {
             }
             location.refreshAuthorization()
             Task { await permissions.refresh() }
+            refreshLanguages()
+            Task { await ready.refresh(.appOpen) }
         } else {
             speech.cancel()
             speaker.stop()
@@ -271,7 +344,7 @@ final class AppModel {
         transcript = ""
         transcriptIsFinal = false
         speaker.stop()
-        let lang = settings.language
+        let lang = settings.effectiveLanguage
         guard await permissions.ensureMicrophone() else {
             speech.fail(text: SpeechLogic.onError(SpeechLogic.errorInsufficientPermissions, lang: lang, offlineAttempt: true,
                                                   online: false, alreadyRetried: true).message ?? "",
@@ -327,7 +400,7 @@ final class AppModel {
     @discardableResult
     func speak(_ text: String, lang: Lang? = nil) -> Bool {
         speaker.speed = settings.voiceSpeed
-        return speaker.speak(text, lang: lang ?? settings.language)
+        return speaker.speak(text, lang: lang ?? settings.effectiveLanguage)
     }
 
     /// Speaks `lines` in a row in `lang` and calls `onDone` after the last one. False when there is no voice (then `onDone`
@@ -374,7 +447,7 @@ final class AppModel {
     }
 
     private func applySettings(_ s: RelaySettings) {
-        let languageChanged = s.language != settings.language
+        let languageChanged = s.effectiveLanguage != settings.effectiveLanguage
         settings = s
         speaker.speed = s.voiceSpeed
         if languageChanged { speech.cancel() }
@@ -429,7 +502,7 @@ final class AppModel {
     /// blanked, so `BuildConfig` falls back to its defaults instead of using the literal text.
     private static func cleanedInfoDictionary() -> [String: Any]? {
         guard var info = Bundle.main.infoDictionary else { return nil }
-        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault"] {
+        for key in ["RelayBackendURL", "RelayDeviceKey", "RelayLockConnection", "RelayHelpLocateDefault", "RelayEnabledLangs", "RelayDemoShelters"] {
             if let v = info[key] as? String, v.contains("$(") { info[key] = "" }
         }
         return info

@@ -36,10 +36,11 @@ final class VectorsTests: XCTestCase {
             category: NeedCategory.fromCode(i(fl, "category"))!, urgency: i(fl, "urgency"), people: i(fl, "people"),
             vulnFlags: i(fl, "vuln_flags"), latE5: Geo.toE5(d(fl, "lat")), lonE5: Geo.toE5(d(fl, "lon")),
             locAcc: i(fl, "loc_acc"), lang: Lang.fromCode(i(fl, "lang"))!,
-            item: str("item"), landmark: str("landmark"), summary: str("summary"), answers: answers)
+            item: str("item"), landmark: str("landmark"), summary: str("summary"), answers: answers,
+            photoTags: (fl["photo_tags_mask"] as? NSNumber)?.intValue ?? 0)
     }
 
-    func testVectorsFilePresent() { XCTAssertEqual(11, vectors.count) }
+    func testVectorsFilePresent() { XCTAssertEqual(14, vectors.count) }
 
     func testEveryVectorEncodesAndDecodes() throws {
         for v in vectors {
@@ -125,13 +126,40 @@ final class VectorsTests: XCTestCase {
         XCTAssertEqual(i(sizes, "need_v2_max_payload"), h(s(byName["need_v2_max_size"]!, "payload_hex")).count)
         XCTAssertEqual(NeedCodec.maxPayloadV2, i(sizes, "need_v2_max_payload"))
         XCTAssertLessThanOrEqual(h(s(byName["need_v2_max_size"]!, "frame_hex")).count, 182)
+        XCTAssertEqual(i(sizes, "need_v3_max_payload"), h(s(byName["need_v3_max_size"]!, "payload_hex")).count)
+        XCTAssertEqual(NeedCodec.maxPayloadV3, i(sizes, "need_v3_max_payload"))
+        XCTAssertLessThanOrEqual(h(s(byName["need_v3_max_size"]!, "frame_hex")).count, 182)
     }
 
-    func testV1VectorsStayV1AndAnswerVectorsAreV2() {
+    func testV1VectorsStayV1AnswerVectorsAreV2AndTagVectorsAreV3() {
         for v in vectors where s(v, "kind") == "NEED" {
-            let hasAnswers = obj(v, "fields")["answers"] != nil
-            XCTAssertEqual(hasAnswers ? 2 : 1, Int(h(s(v, "payload_hex"))[0]), s(v, "name"))
+            let fields = obj(v, "fields")
+            let want = fields["photo_tags"] != nil ? 3 : fields["answers"] != nil ? 2 : 1
+            XCTAssertEqual(want, Int(h(s(v, "payload_hex"))[0]), s(v, "name"))
         }
+    }
+
+    func testPhotoTagTableMatchesSharedTable() {
+        let bank = root["photo_tag_bank"] as! [JObj]
+        XCTAssertEqual(PhotoTags.keys.count, bank.count)
+        for b in bank { XCTAssertEqual(s(b, "key"), PhotoTags.keys[i(b, "bit")]) }
+        XCTAssertEqual(0x7FFF, PhotoTags.allMask)
+        XCTAssertEqual(["floodwater", "people_stranded"], PhotoTags.toKeys(0x21))
+        XCTAssertEqual(0x21, PhotoTags.fromKeys(["people_stranded", "floodwater"]))
+        XCTAssertNil(PhotoTags.fromKeys(["selfie"]))
+    }
+
+    func testEncoderRejectsReservedPhotoTagBitAndFallsBackToOlderVersions() throws {
+        let v = vectors.first { s($0, "name") == "need_v3_tags_only" }!
+        let need = needFrom(obj(v, "fields"), decodedStrings: false)
+        for bad in [0x8000, 0x10000, -1] {
+            var n = need; n.photoTags = bad
+            XCTAssertThrowsError(try NeedCodec.encode(n))
+        }
+        var none = need; none.photoTags = 0
+        XCTAssertEqual(1, Int(try NeedCodec.encode(none)[0]))
+        none.answers = [NeedAnswer(1, 2)]
+        XCTAssertEqual(2, Int(try NeedCodec.encode(none)[0]))
     }
 
     func testQuestionBankMatchesSharedTable() {
@@ -191,6 +219,45 @@ final class VectorsTests: XCTestCase {
         let bad = root["must_reject_broadcast_payloads"] as! [String: String]
         XCTAssertGreaterThanOrEqual(bad.count, 8)
         for (name, hexv) in bad { XCTAssertNil(BroadcastCodec.decode(h(hexv)), "must reject \(name)") }
+    }
+
+    // ---- ANNOUNCEMENT (SPEC 5.7): its own vector list too
+    func testAnnouncementVectorsMatchByteForByte() throws {
+        let list = try XCTUnwrap(root["announcement_vectors"] as? [JObj])
+        XCTAssertGreaterThanOrEqual(list.count, 5)
+        for v in list {
+            let name = s(v, "name")
+            let fl = obj(v, "fields")
+            let a = Announcement(
+                announcementId: h(s(fl, "announcement_id")), lang: try XCTUnwrap(Lang.fromTag(s(fl, "lang"))),
+                district: try XCTUnwrap(AnnouncementDistricts.indexOf(s(fl, "district"))),
+                status: s(fl, "status") == "active" ? .active : .withdrawn,
+                approvedAt: l(fl, "approved_at"), expiresAt: l(fl, "expires_at"), text: s(fl, "text"))
+            let payload = try AnnouncementCodec.encode(a)
+            XCTAssertEqual(s(v, "payload_hex"), Hex.encode(payload), "\(name) payload")
+            XCTAssertEqual(a, AnnouncementCodec.decode(h(s(v, "payload_hex"))), "\(name) decode")
+            XCTAssertEqual(s(v, "frame_hex"), Hex.encode(try FrameCodec.encode(frameOf(v, payload))), "\(name) frame")
+            XCTAssertEqual(s(fl, "key"), a.keyHex, "\(name) key")
+            XCTAssertLessThanOrEqual(s(v, "frame_hex").count / 2, 182, "\(name) fits one write")
+            XCTAssertEqual(FrameTypes.announcement, i(obj(v, "frame"), "type"))
+        }
+        XCTAssertEqual(AnnouncementCodec.maxPayload, i(obj(root, "sizes"), "announcement_max_payload"))
+        XCTAssertEqual(AnnouncementCodec.ttlSec, l(root, "announcement_ttl_s"))
+    }
+
+    func testAnnouncementPayloadsEveryDecoderMustReject() {
+        let bad = root["must_reject_announcement_payloads"] as! [String: String]
+        XCTAssertGreaterThanOrEqual(bad.count, 8)
+        for (name, hexv) in bad { XCTAssertNil(AnnouncementCodec.decode(h(hexv)), "must reject \(name)") }
+    }
+
+    func testAnnouncementIndexTablesMatchTheVectors() {
+        let langs = root["announcement_lang_codes"] as! [String: NSNumber]
+        XCTAssertEqual(Lang.allCases.count, langs.count)
+        for l in Lang.allCases { XCTAssertEqual(l.code, langs[l.tag]?.intValue, l.tag) }
+        let districts = root["announcement_district_codes"] as! [String: NSNumber]
+        XCTAssertEqual(AnnouncementDistricts.ids.count, districts.count)
+        for (idx, id) in AnnouncementDistricts.ids.enumerated() { XCTAssertEqual(idx, districts[id]?.intValue, id) }
     }
 
     func testBroadcastRecipientAllFfIsBroadcast() throws {

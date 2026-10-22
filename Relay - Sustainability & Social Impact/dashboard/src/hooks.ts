@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { detectNewTickets } from './lib/diff';
 import { ALL_DISTRICTS, DEFAULT_DISTRICT, districtById } from './lib/districts';
-import type { Broadcast, Gateway, Sitrep, Stats, Team, Ticket } from './types';
+import type {
+  Broadcast, CapImportResult, DamageMap, Gateway, NewWarning, ReadyShelter, ReadyWarning, RecoverReport, Sitrep, Stats, Team, Ticket,
+} from './types';
 
 export const POLL_MS = 2000;
 export const PULSE_MS = 4000;
@@ -129,33 +131,159 @@ export function useTicketDetail(no: number | null) {
   return [detail, setDetail] as const;
 }
 
-/** Latest situation report plus a regenerate action. */
-export function useSitrep() {
+/** A district's latest situation report plus a regenerate action. ``district`` null: none chosen. */
+export function useSitrep(district: string | null) {
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    setSitrep(null);
+    setError(null);
+    if (!district) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
     const ctl = new AbortController();
     api
-      .latestSitrep(ctl.signal)
+      .latestSitrep(district, ctl.signal)
       .then((r) => setSitrep(r))
       .catch((e) => !ctl.signal.aborted && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => !ctl.signal.aborted && setLoaded(true));
     return () => ctl.abort();
-  }, []);
+  }, [district]);
   const regenerate = useCallback(async () => {
+    if (!district) return;
     setBusy(true);
     setError(null);
     try {
-      setSitrep(await api.runSitrep());
+      setSitrep(await api.runSitrep(district));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [district]);
   return { sitrep, loaded, busy, error, regenerate };
+}
+
+export const RECOVER_POLL_MS = 10_000;
+
+/** Damage map for a district id or "all", refreshed every 10 s (the backend computes it on request). */
+export function useDamage(district: string) {
+  const [damage, setDamage] = useState<DamageMap | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setDamage(null);
+    setError(null);
+    let stopped = false;
+    const ctl = new AbortController();
+    const load = () =>
+      api
+        .getDamage(district, ctl.signal)
+        .then((d) => {
+          if (stopped) return;
+          setDamage(d);
+          setError(null);
+        })
+        .catch((e) => !stopped && setError(e instanceof Error ? e.message : String(e)));
+    void load();
+    const id = setInterval(load, RECOVER_POLL_MS);
+    return () => {
+      stopped = true;
+      ctl.abort();
+      clearInterval(id);
+    };
+  }, [district]);
+  return { damage, error };
+}
+
+/** The relief and insurer report for a district: generated on demand, kept only in this page. */
+export function useRecoverReport(district: string) {
+  const [report, setReport] = useState<RecoverReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setReport(null); // a report is for the district it was generated for
+    setError(null);
+  }, [district]);
+  const generate = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setReport(await api.recoverReport(district));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [district]);
+  return { report, busy, error, generate };
+}
+
+/** A district's Ready-mode warnings and shelter list, plus issue / cancel / CAP-import actions. */
+export function useReady(district: string | null) {
+  const [warnings, setWarnings] = useState<ReadyWarning[]>([]);
+  const [shelters, setShelters] = useState<ReadyShelter[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  const reload = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!district) return;
+      const [w, s] = await Promise.all([api.listWarnings(district, signal), api.listShelters(district, signal)]);
+      if (signal?.aborted) return;
+      setWarnings(w);
+      setShelters(s);
+    },
+    [district],
+  );
+
+  useEffect(() => {
+    setWarnings([]);
+    setShelters([]);
+    setError(null);
+    if (!district) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    const ctl = new AbortController();
+    reload(ctl.signal)
+      .catch((e) => !ctl.signal.aborted && setError(message(e)))
+      .finally(() => !ctl.signal.aborted && setLoaded(true));
+    return () => ctl.abort();
+  }, [district, reload]);
+
+  /** Run a write, then re-read the list; errors land in `error` and the result is null. */
+  const act = useCallback(
+    async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const out = await fn();
+        await reload();
+        return out;
+      } catch (e) {
+        setError(message(e));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [reload],
+  );
+
+  const issue = useCallback((w: NewWarning) => act(() => api.issueWarning(w)), [act]);
+  const cancel = useCallback((id: number) => act(() => api.cancelWarning(id)), [act]);
+  const importCap = useCallback(
+    (xml: string): Promise<CapImportResult | null> => (district ? act(() => api.importCap(district, xml)) : Promise.resolve(null)),
+    [act, district],
+  );
+  return { warnings, shelters, loaded, busy, error, issue, cancel, importCap };
 }
 
 const SEEN_KEY = 'relay.seenTickets';

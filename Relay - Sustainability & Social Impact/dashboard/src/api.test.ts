@@ -16,6 +16,16 @@ describe('api client', () => {
     expect(f.mock.calls[0]?.[0]).toBe('http://x:1/v1/tickets');
   });
 
+  it('reads the language registry and tolerates a bad body', async () => {
+    const f = vi.fn().mockResolvedValueOnce(json([{ code: 'en', english_name: 'English', native_name: 'English', enabled: true }]))
+      .mockResolvedValueOnce(json({ nope: 1 }));
+    vi.stubGlobal('fetch', f);
+    const c = createClient('http://x');
+    expect((await c.listLanguages())?.[0]?.code).toBe('en');
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/languages');
+    expect(await c.listLanguages()).toBeNull();
+  });
+
   it('POSTs approve', async () => {
     const f = vi.fn().mockResolvedValue(json(mkTicket({ status: 'DISPATCHED' })));
     vi.stubGlobal('fetch', f);
@@ -34,6 +44,53 @@ describe('api client', () => {
     expect(f.mock.calls[0]?.[1]?.headers).toMatchObject({ 'X-Operator-Key': 'k1' });
     expect(f.mock.calls[1]?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Operator-Key': 'k1' } });
     expect(f.mock.calls[2]?.[1]?.headers).toBeUndefined();
+  });
+
+  it('fetches evidence packs with the operator key and returns a blob', async () => {
+    const f = vi.fn().mockImplementation(async () => new Response('{"ok":1}', { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const blob = await createClient('http://x', 'k1').ticketEvidence(101);
+    expect(await blob.text()).toBe('{"ok":1}');
+    expect(f.mock.calls[0]?.[0]).toBe('http://x/v1/recover/evidence/101?download=1');
+    expect(f.mock.calls[0]?.[1]).toMatchObject({ headers: { 'X-Operator-Key': 'k1' } });
+    await createClient('http://x').areaEvidence('place:a b', 'puri');
+    expect(f.mock.calls[1]?.[0]).toBe('http://x/v1/recover/evidence?area=place%3Aa%20b&district=puri&download=1');
+    expect(f.mock.calls[1]?.[1]).toBeUndefined();
+  });
+
+  it('talks to the Ready endpoints with the operator key', async () => {
+    const f = vi.fn().mockImplementation(async () => json({ warnings: [], shelters: [], imported: [], skipped: [] }));
+    vi.stubGlobal('fetch', f);
+    const c = createClient('http://x', 'k1');
+    expect(await c.listWarnings('puri')).toEqual([]);
+    expect(await c.listShelters('delhi')).toEqual([]);
+    await c.importCap('puri', '<alert/>');
+    await c.cancelWarning(4);
+    expect(f.mock.calls.map((x) => x[0])).toEqual([
+      'http://x/v1/ready/warnings?district=puri',
+      'http://x/v1/ready/shelters?district=delhi',
+      'http://x/v1/ready/warnings/import-cap',
+      'http://x/v1/ready/warnings/4/cancel',
+    ]);
+    expect(JSON.parse(f.mock.calls[2]?.[1]?.body as string)).toEqual({ district: 'puri', cap_xml: '<alert/>' });
+    expect(f.mock.calls[3]?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Operator-Key': 'k1' } });
+  });
+
+  it('talks to the shelter list endpoints', async () => {
+    const f = vi.fn().mockImplementation(async () => json({ lists: [], id: 3, published: 1, skipped: [] }));
+    vi.stubGlobal('fetch', f);
+    const c = createClient('http://x', 'k1');
+    expect(await c.listShelterLists('puri')).toEqual([]);
+    await c.discoverShelters('puri');
+    await c.saveShelterList(3, []);
+    await c.publishShelterList(3, 'checked');
+    expect(f.mock.calls.map((x) => [x[0], x[1]?.method])).toEqual([
+      ['http://x/v1/ready/shelter-lists?district=puri', undefined],
+      ['http://x/v1/ready/shelter-lists/discover', 'POST'],
+      ['http://x/v1/ready/shelter-lists/3', 'PATCH'],
+      ['http://x/v1/ready/shelter-lists/3/publish', 'POST'],
+    ]);
+    expect(f.mock.calls[2]?.[1]?.headers).toMatchObject({ 'X-Operator-Key': 'k1' });
   });
 
   it('wraps network failures as ApiError(status 0)', async () => {

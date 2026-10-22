@@ -14,6 +14,9 @@ Layout (all top-level collections in the configured database):
   dispatch/{ticket_no}  ``proposal`` / ``dispatch`` maps (or null); ``team_id`` and ``active`` (counts
                         toward the team's load) are set by approve
   sitreps/{id}          generated sitreps; ``id`` comes from counters/sitrep
+  announcements/{id}       announcement drafts and approvals; ``id`` comes from counters/announcement
+  warnings/{id}         ready-mode warnings; ``id`` comes from counters/warning
+  shelter_lists/{id}    shelter lists (draft/published/archived); ``id`` comes from counters/shelter_list
   counters/{name}       ``ticket_no`` and ``ack_seq``: ``value`` is the last number handed out
 
 Atomicity: every multi-document write is one Firestore transaction (reads first, then
@@ -300,7 +303,7 @@ class FirestoreStore:
         no = (snap.to_dict() or {}).get("ticket_no") if snap.exists else None
         return int(no) if no is not None else None
 
-    def set_mesh_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
+    def set_geo(self, ticket_no: int, geo: dict[str, Any]) -> bool:
         from google.cloud import firestore
 
         tref = self._col("tickets").document(str(ticket_no))
@@ -308,7 +311,7 @@ class FirestoreStore:
         @firestore.transactional
         def run(txn) -> bool:
             snap = tref.get(transaction=txn)
-            if not snap.exists:
+            if not snap.exists or (geo.get("source") != "mesh" and "geo" not in keep_mesh_geo((snap.to_dict() or {}).get("geo"), {"geo": geo})):
                 return False
             # ``links`` are the ticket's packets, written in the same transaction that links them
             for lk in snap.get("links") or []:
@@ -558,17 +561,163 @@ class FirestoreStore:
             ref, sid = self._next(txn, "sitrep")
             saved = {**{k: v for k, v in sitrep.items() if k != "id"}, "id": sid}
             txn.set(self._col("sitreps").document(str(sid)), saved)
+            if saved.get("district"):
+                # a per-district pointer: a filtered, ordered query would need a composite index
+                txn.set(self._col("sitrep_latest").document(saved["district"]), {"id": sid})
             txn.set(ref, {"value": sid})
             return saved
 
         with self._write_lock:
             return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
 
-    def latest_sitrep(self) -> dict[str, Any] | None:
+    def latest_sitrep(self, district: str | None = None) -> dict[str, Any] | None:
         from google.cloud import firestore
 
+        if district is not None:
+            ptr = self._col("sitrep_latest").document(district).get()
+            if not ptr.exists:
+                return None
+            snap = self._col("sitreps").document(str(int(ptr.get("id")))).get()
+            return snap.to_dict() if snap.exists else None
         docs = list(self._col("sitreps").order_by("id", direction=firestore.Query.DESCENDING).limit(1).stream())
         return docs[0].to_dict() if docs else None
+
+    # ------------------------------------------------------------------ announcements
+    def add_announcement(self, announcement: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, bid = self._next(txn, "announcement")
+            saved = {**{k: v for k, v in announcement.items() if k != "id"}, "id": bid}
+            txn.set(self._col("announcements").document(str(bid)), saved)
+            txn.set(ref, {"value": bid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None:
+        snap = self._col("announcements").document(str(announcement_id)).get()
+        return snap.to_dict() if snap.exists else None
+
+    def update_announcement(self, announcement_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        ref = self._col("announcements").document(str(announcement_id))
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any] | None:
+            snap = ref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            saved = {**snap.to_dict(), **fields, "id": announcement_id}
+            txn.set(ref, saved)
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def list_announcements(self, district: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        # equality filters only (no composite index); newest-first sort in memory
+        q = self._col("announcements")
+        for field, val in (("district", district), ("status", status)):
+            if val is not None:
+                q = self._eq(q, field, "==", val)
+        docs = [s.to_dict() for s in q.stream()]
+        docs.sort(key=lambda d: d["id"], reverse=True)
+        return docs
+
+    # ------------------------------------------------------------------ ready-mode warnings
+    def add_warning(self, warning: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, wid = self._next(txn, "warning")
+            saved = {**{k: v for k, v in warning.items() if k != "id"}, "id": wid}
+            txn.set(self._col("warnings").document(str(wid)), saved)
+            txn.set(ref, {"value": wid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def get_warning(self, warning_id: int) -> dict[str, Any] | None:
+        snap = self._col("warnings").document(str(warning_id)).get()
+        return snap.to_dict() if snap.exists else None
+
+    def list_warnings(self, district: str | None = None) -> list[dict[str, Any]]:
+        from google.cloud import firestore
+
+        # newest 200 by the single-field ``id`` index; the district filter is in memory (no composite index)
+        docs = self._col("warnings").order_by("id", direction=firestore.Query.DESCENDING).limit(200).stream()
+        out = [d.to_dict() for d in docs]
+        return [w for w in out if district is None or w.get("district") == district]
+
+    def cancel_warning(self, warning_id: int, now: int) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        ref = self._col("warnings").document(str(warning_id))
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any] | None:
+            snap = ref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            w = snap.to_dict()
+            if w.get("cancelled_at") is None:
+                w["cancelled_at"] = int(now)
+                txn.set(ref, w)
+            return w
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    # ------------------------------------------------------------------ shelter lists
+    def add_shelter_list(self, record: dict[str, Any]) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any]:
+            ref, lid = self._next(txn, "shelter_list")
+            saved = {**{k: v for k, v in record.items() if k != "id"}, "id": lid}
+            txn.set(self._col("shelter_lists").document(str(lid)), saved)
+            txn.set(ref, {"value": lid})
+            return saved
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def get_shelter_list(self, list_id: int) -> dict[str, Any] | None:
+        snap = self._col("shelter_lists").document(str(list_id)).get()
+        return snap.to_dict() if snap.exists else None
+
+    def update_shelter_list(self, list_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        from google.cloud import firestore
+
+        ref = self._col("shelter_lists").document(str(list_id))
+
+        @firestore.transactional
+        def run(txn) -> dict[str, Any] | None:
+            snap = ref.get(transaction=txn)
+            if not snap.exists:
+                return None
+            rec = {**snap.to_dict(), **{k: v for k, v in fields.items() if k not in ("id", "district")}}
+            txn.set(ref, rec)
+            return rec
+
+        with self._write_lock:
+            return run(self.db.transaction(max_attempts=TXN_ATTEMPTS))
+
+    def list_shelter_lists(self, district: str | None = None) -> list[dict[str, Any]]:
+        # one equality filter (automatic index); newest-first sort in memory
+        q = self._col("shelter_lists")
+        if district is not None:
+            q = self._eq(q, "district", "==", district)
+        docs = [s.to_dict() for s in q.stream()]
+        docs.sort(key=lambda d: d["id"], reverse=True)
+        return docs[:200]
 
     # ------------------------------------------------------------------ acks
     def _newest_ack_seq(self) -> int:

@@ -14,7 +14,7 @@ struct NewRequestScreen: View {
     @FocusState private var typingFocused: Bool
 
     private var ctl: AskFlowController { nav.ensureFlow() }
-    private var lang: Lang { model.settings.language }
+    private var lang: Lang { model.settings.effectiveLanguage }
     private var voiceAvailable: Bool { model.isVoiceInputAvailable(for: lang) }
 
     var body: some View {

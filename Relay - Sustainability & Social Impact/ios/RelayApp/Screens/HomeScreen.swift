@@ -15,7 +15,7 @@ struct HomeScreen: View {
         NowClock { now in
             let home = HomeModel.make(
                 villager: model.villagerStatus, area: model.settings.areaLabel, needs: model.myNeeds, now: now, strings: strings)
-            content(home)
+            content(home, now)
                 .sheet(isPresented: $showHelp) { HelpSheet(help: home.help) }
         }
         .navigationTitle(strings.home.title)
@@ -35,11 +35,14 @@ struct HomeScreen: View {
         }
     }
 
-    private func content(_ home: HomeModel) -> some View {
+    private func content(_ home: HomeModel, _ now: Int64) -> some View {
         ScrollView {
             VStack(spacing: Theme.Space.xl) {
                 headerLine(home)
+                announcementCards(now: now)
+                readyBanner()
                 statusCard(home)
+                sheltersRow()
                 micSection(home)
                 requests(home)
             }
@@ -58,6 +61,62 @@ struct HomeScreen: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(home.headerLine)
+    }
+
+    /// "Message from the control room": newest first, at most 3, dismissible; the text is already in the person's language.
+    @ViewBuilder
+    private func announcementCards(now: Int64) -> some View {
+        let r = strings.ready
+        let cards = model.announcements.cards(nowMs: now, district: model.ready.snapshot.district, lang: model.settings.effectiveLanguage)
+        ForEach(cards) { c in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(r.announcementTitle).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button { model.announcements.dismiss(c.announcementId) } label: {
+                        Image(systemName: "xmark").frame(width: Theme.Size.minTouch, height: Theme.Size.minTouch).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(r.dismissAnnouncement)
+                }
+                Text(c.text).font(.body)
+                Button { model.speak(c.text, lang: c.lang) } label: {
+                    Image(systemName: "speaker.wave.2.fill").frame(width: Theme.Size.minTouch, height: Theme.Size.minTouch).contentShape(Rectangle())
+                }
+                .accessibilityLabel(r.hearAnnouncement)
+            }
+            .padding(.leading, Theme.Space.l).padding(.vertical, Theme.Space.s).padding(.trailing, Theme.Space.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Palette.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    /// The cyclone warning banner (only while the stored pack has an active warning): severity colour, headline,
+    /// "Landfall in about N h" and a "Get ready" button.
+    @ViewBuilder
+    private func readyBanner() -> some View {
+        let nowSec = Int64(Date().timeIntervalSince1970)
+        if let w = ReadyView.activeWarning(model.ready.snapshot.pack, nowSec: nowSec) {
+            let r = strings.ready
+            let level = ReadyView.level(w)
+            let colors = levelColors(level)
+            let hours = ReadyView.landfallHours(w, nowSec: nowSec)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(r.levelWord(level)).font(.subheadline.weight(.semibold))
+                Text(w.headline).font(.headline)
+                if let h = hours { Text(r.landfallIn(h)).font(.subheadline) }
+                Button { nav.push(.ready) } label: {
+                    Text(r.getReady).font(.headline).frame(minHeight: Theme.Size.minTouch, alignment: .leading)
+                }
+            }
+            .foregroundStyle(colors.foreground)
+            .tint(colors.foreground)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.l)
+            .background(colors.background, in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(r.bannerDescription(level, headline: w.headline, hours: hours))
+            .accessibilityAddTraits(.isButton)
+        }
     }
 
     private func statusCard(_ home: HomeModel) -> some View {
@@ -87,6 +146,29 @@ struct HomeScreen: View {
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .relayGlassCard()
+    }
+
+    /// "Shelters": the nearest safe place, from the stored list.
+    private func sheltersRow() -> some View {
+        let r = strings.ready
+        return Button { nav.push(.shelters) } label: {
+            HStack(spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(r.sheltersRow).font(.headline).foregroundStyle(Color.primary)
+                    Text(r.sheltersRowHelp).font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(Theme.Space.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .relayGlassCard()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(r.sheltersRow). \(r.sheltersRowHelp)")
+        .accessibilityAddTraits(.isButton)
     }
 
     private func micSection(_ home: HomeModel) -> some View {

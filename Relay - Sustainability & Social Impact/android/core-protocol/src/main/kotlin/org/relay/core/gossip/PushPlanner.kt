@@ -8,7 +8,8 @@ import org.relay.core.frame.FrameTypes
  * most inside a bounded burst and the rest follows later. Local policy only: nothing here is on the wire.
  *
  * Order: ACKs addressed to the peer itself, control-room broadcasts, other ACKs (they close the loop for a villager), then NEEDs, then
- * LOC_HINTs (they refine a location, they never gate a rescue). Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
+ * control-room announcements (small, and a rescue request must not wait behind them), then LOC_HINTs (they refine a location,
+ * they never gate a rescue). Each group is newest first. The batch is cut at [budgetBytes] of raw frame bytes, but always
  * holds at least one frame so progress is guaranteed.
  */
 object PushPlanner {
@@ -24,7 +25,8 @@ object PushPlanner {
             p.type == FrameTypes.BROADCAST -> 1
             p.type == FrameTypes.ACK -> 2
             p.type == FrameTypes.NEED -> 3
-            else -> 4
+            p.type == FrameTypes.ANNOUNCEMENT -> 4
+            else -> 5
         }
         return candidates.sortedWith(compareBy<StoredPacket> { group(it) }.thenByDescending { it.expiryBasisMs })
     }

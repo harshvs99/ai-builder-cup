@@ -23,6 +23,10 @@ data class SyncResponse(
     val broadcasts: List<ByteArray> = emptyList(),
     /** Present only when the backend reports hints (it adds `hints` when the upload held any); null otherwise. */
     val hints: HintCounts? = null,
+    /** ANNOUNCEMENT payloads (SPEC 5.7) for the district the request named; every gateway originates them into the mesh. Absent = none. */
+    val announcements: List<ByteArray> = emptyList(),
+    /** The cursor to send next time, or null when the response had none (an older backend). */
+    val announcementCursor: Long? = null,
 )
 
 /** Result of a `GET /v1/health` reachability probe; [detail] is short, human-readable text. */
@@ -36,7 +40,10 @@ class SyncClient(
     private val readTimeoutMs: Int = 10_000,
 ) {
     @Throws(SyncException::class)
-    fun sync(cfg: SyncConfig, gatewayNode: ByteArray, frames: List<ByteArray>, ackCursor: Long): SyncResponse {
+    fun sync(
+        cfg: SyncConfig, gatewayNode: ByteArray, frames: List<ByteArray>, ackCursor: Long,
+        district: String? = null, announcementCursor: Long? = null,
+    ): SyncResponse {
         val body = try {
             val arr = JSONArray()
             val enc = Base64.getEncoder() // standard alphabet, padded, no line wrapping
@@ -45,6 +52,11 @@ class SyncClient(
                 .put("gateway_node", Hex.encode(gatewayNode))
                 .put("frames", arr)
                 .put("ack_cursor", ackCursor)
+                .also { o ->
+                    // SPEC 5.7: either field asks the backend for ANNOUNCEMENT payloads; a gateway that sends neither gets neither.
+                    if (district != null) o.put("district", district)
+                    if (announcementCursor != null) o.put("announcement_cursor", announcementCursor)
+                }
                 .toString().toByteArray(Charsets.UTF_8)
         } catch (e: Exception) {
             throw SyncException("cannot build request: $e", e)
@@ -121,8 +133,15 @@ class SyncClient(
             for (i in 0 until bJson.length()) {
                 try { broadcasts += dec.decode(bJson.getString(i)) } catch (_: IllegalArgumentException) { /* skip bad entry */ }
             }
+            val aJson = o.optJSONArray("announcements") ?: JSONArray()
+            val announcements = ArrayList<ByteArray>(aJson.length())
+            for (i in 0 until aJson.length()) {
+                try { announcements += dec.decode(aJson.getString(i)) } catch (_: IllegalArgumentException) { /* skip bad entry */ }
+            }
             return SyncResponse(
                 broadcasts = broadcasts,
+                announcements = announcements,
+                announcementCursor = if (o.has("announcement_cursor") && !o.isNull("announcement_cursor")) o.optLong("announcement_cursor") else null,
                 accepted = o.optInt("accepted", 0),
                 duplicates = o.optInt("duplicates", 0),
                 rejected = o.optInt("rejected", 0),

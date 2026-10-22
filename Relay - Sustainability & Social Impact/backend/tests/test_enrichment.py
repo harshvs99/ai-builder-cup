@@ -9,7 +9,8 @@ import pytest
 
 from app import geocode, priority
 from app.agent import GeminiAgent
-from app.geocode import Gazetteer, MapsGeocoder, in_bbox
+from app.districts import DISTRICTS, by_id
+from app.geocode import Found, Gazetteer, MapsGeocoder, in_bbox
 from app.store import SqliteStore
 
 from conftest import T0, need_frame, sync
@@ -105,10 +106,11 @@ def test_shipped_gazetteer_loads_if_present():
 
 class Finder:
     def __init__(self, result=None, exc=None, delay=0.0):
-        self.result, self.exc, self.delay, self.calls = result, exc, delay, []
+        self.result, self.exc, self.delay, self.calls, self.searched = result, exc, delay, [], []
 
-    def find(self, landmark):
+    def find(self, landmark, districts):
         self.calls.append(landmark)
+        self.searched.append([d.id for d in districts])
         if self.delay:
             time.sleep(self.delay)
         if self.exc:
@@ -116,27 +118,166 @@ class Finder:
         return self.result
 
 
+def at(lat, lon, name="Old Lighthouse", place_id="ChIJabc", maps_uri="https://maps.google.com/?cid=42"):
+    return Found(lat, lon, name, place_id, maps_uri)
+
+
+PURI = by_id("puri")
+DELHI = by_id("delhi")
+
+
 def test_maps_geocoder_accepts_point_inside_district():
-    g = MapsGeocoder(Finder((19.81, 85.83))).locate("old lighthouse")
-    assert g == {"lat": 19.81, "lon": 85.83, "source": "gemini_maps", "query": "old lighthouse"}
+    g = MapsGeocoder(Finder(at(19.81, 85.83))).locate("old lighthouse", PURI)
+    assert g == {"lat": 19.81, "lon": 85.83, "source": "gemini_maps", "query": "old lighthouse",
+                 "name": "Old Lighthouse", "place_id": "ChIJabc", "maps_uri": "https://maps.google.com/?cid=42",
+                 "district": "puri"}
 
 
-@pytest.mark.parametrize("point", [(20.2961, 85.8245 + 5), (28.61, 77.20), (0.0, 0.0), (float("nan"), 85.8),
-                                   ("x", "y"), (19.8,), None])
-def test_maps_geocoder_rejects_outside_district_and_junk(point):
-    assert MapsGeocoder(Finder(point)).locate("somewhere") is None
+def test_maps_geocoder_optional_handles_and_unsafe_uri():
+    g = MapsGeocoder(Finder(Found(19.81, 85.83, "X", "ChIJ", None))).locate("x", PURI)
+    assert "maps_uri" not in g and g["place_id"] == "ChIJ"
+    g = MapsGeocoder(Finder(Found(19.81, 85.83, "X", None, "javascript:alert(1)"))).locate("x", PURI)
+    assert g is None  # the only handle was not an https link: effectively ungrounded
+
+
+@pytest.mark.parametrize("found", [at(20.2961, 85.8245 + 5), at(28.61, 77.20), at(0.0, 0.0), at(float("nan"), 85.8),
+                                   at("x", "y"), at(None, None), "junk", None])
+def test_maps_geocoder_rejects_outside_district_and_junk(found):
+    assert MapsGeocoder(Finder(found)).locate("somewhere", PURI) is None
+
+
+def test_maps_geocoder_requires_grounding():
+    for ungrounded in (Found(19.81, 85.83, "Old Lighthouse"), Found(19.81, 85.83, "X", "", "")):
+        assert MapsGeocoder(Finder(ungrounded)).locate("x", PURI) is None
+
+
+def test_maps_geocoder_validates_against_the_ticket_district():
+    delhi_pt = at(28.6139, 77.2090, "India Gate")
+    assert MapsGeocoder(Finder(delhi_pt)).locate("india gate", PURI) is None
+    g = MapsGeocoder(Finder(delhi_pt)).locate("india gate", DELHI)
+    assert (g["district"], g["name"]) == ("delhi", "India Gate")
+    # unknown district: any known district's bbox will do, and the finder is told to look in all of them
+    f = Finder(delhi_pt)
+    assert MapsGeocoder(f).locate("india gate")["district"] == "delhi"
+    assert f.searched == [[d.id for d in DISTRICTS]]
+    assert MapsGeocoder(Finder(at(19.81, 85.83))).locate("x")["district"] == "puri"
+    assert MapsGeocoder(Finder(at(40.0, 10.0))).locate("x") is None  # inside none of them
+    f = Finder(at(19.81, 85.83))
+    MapsGeocoder(f).locate("x", PURI)
+    assert f.searched == [["puri"]]
 
 
 def test_maps_geocoder_never_raises_and_times_out():
     assert MapsGeocoder(Finder(exc=ConnectionError("down"))).locate("x") is None
-    assert MapsGeocoder(Finder((19.81, 85.83), delay=0.5), timeout_s=0.05).locate("x") is None
+    assert MapsGeocoder(Finder(at(19.81, 85.83), delay=0.5), timeout_s=0.05).locate("x") is None
+
+
+# ------------------------------------------------------------------ the genai finder (fake client, no network)
+
+class Obj:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def maps_chunk(title, uri="https://maps.google.com/?cid=1", place_id="places/1"):
+    return Obj(maps=Obj(title=title, uri=uri, place_id=place_id))
+
+
+def reply(text, chunks=None, candidates=True):
+    cands = [Obj(grounding_metadata=Obj(grounding_chunks=chunks))] if candidates else []
+    return Obj(text=text, candidates=cands)
+
+
+class FakeModels:
+    def __init__(self, resp):
+        self.resp, self.calls = resp, []
+
+    def generate_content(self, **kw):
+        self.calls.append(kw)
+        return self.resp
+
+
+def finder_with(resp):
+    models = FakeModels(resp)
+    f = geocode.GenaiMapsFinder("m", 6.0, api_key="k", client=Obj(models=models))
+    return f, models
+
+
+ANSWER = json.dumps({"found": True, "name": "Pipili Bus Stand", "lat": 20.1, "lon": 85.83})
+
+
+def test_genai_finder_picks_the_chunk_matching_the_model_name():
+    f, models = finder_with(reply(ANSWER, [maps_chunk("Pipili Market", place_id="a"),
+                                           maps_chunk("Pipili Bus Stand", place_id="b")]))
+    got = f.find("pipili bus stand", [PURI])
+    assert (got.name, got.place_id, got.lat, got.lon) == ("Pipili Bus Stand", "b", 20.1, 85.83)
+    kw = models.calls[0]
+    assert kw["config"].tools[0].google_maps is not None
+    assert kw["config"].tool_config.retrieval_config.lat_lng.latitude == PURI.centre[0]
+    assert '"pipili bus stand"' in kw["contents"] and "Puri district" in kw["contents"]
+
+
+def test_genai_finder_falls_back_to_first_chunk_and_fenced_json():
+    f, _ = finder_with(reply("```json\n" + ANSWER + "\n```", [maps_chunk("Totally Different", place_id="a"),
+                                                            maps_chunk("Other", place_id="b")]))
+    assert f.find("x", [PURI]).place_id == "a"
+
+
+def test_genai_finder_unknown_district_names_all_and_sets_no_centre():
+    f, models = finder_with(reply(ANSWER, [maps_chunk("Pipili Bus Stand")]))
+    f.find("x", DISTRICTS)
+    assert "Puri, Delhi" in models.calls[0]["contents"]
+    assert models.calls[0]["config"].tool_config is None
+
+
+@pytest.mark.parametrize("resp", [
+    reply(ANSWER, None),  # no grounding chunks at all
+    reply(ANSWER, []),
+    reply(ANSWER, [Obj(maps=None), Obj(web=Obj(uri="https://example.com"))]),  # grounded, but not on Maps
+    reply(ANSWER, [Obj(maps=Obj(title=None, uri=None, place_id=None))]),
+    reply(ANSWER, candidates=False),
+    reply(json.dumps({"found": False}), [maps_chunk("x")]),
+    reply(json.dumps({"found": True, "lat": "20.1", "lon": 85.8}), [maps_chunk("x")]),
+])
+def test_genai_finder_rejects_ungrounded_and_unfound(resp):
+    f, _ = finder_with(resp)
+    assert f.find("x", [PURI]) is None
+
+
+def test_genai_finder_end_to_end_through_the_geocoder():
+    f, _ = finder_with(reply(ANSWER, [maps_chunk("Pipili Bus Stand")]))
+    g = MapsGeocoder(f).locate("pipili bus stand", PURI)
+    assert (g["name"], g["district"], g["place_id"]) == ("Pipili Bus Stand", "puri", "places/1")
+    f, _ = finder_with(reply(ANSWER, None))
+    assert MapsGeocoder(f).locate("pipili bus stand", PURI) is None
 
 
 def test_geocoder_from_env_is_off_unless_explicit():
     assert geocode.geocoder_from_env({}).name == "none"
-    assert geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps"}).name == "none"  # needs Vertex too
+    assert geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps"}).name == "none"  # needs a backend too
+    assert geocode.geocoder_from_env({"GEMINI_API_KEY": "k", "GOOGLE_GENAI_USE_VERTEXAI": "true"}).name == "none"
     on = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GOOGLE_GENAI_USE_VERTEXAI": "true"})
     assert on.name == "gemini_maps"  # lazy client: no credentials or network needed to construct
+    keyed = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GEMINI_API_KEY": "k"})
+    assert keyed.name == "gemini_maps"
+    assert keyed._finder._kwargs == {"api_key": "k"}
+    vtx = geocode.geocoder_from_env({"RELAY_GEOCODER": "gemini_maps", "GEMINI_API_KEY": "k",
+                                     "GOOGLE_GENAI_USE_VERTEXAI": "true", "GOOGLE_CLOUD_PROJECT": "p"})
+    assert vtx._finder._kwargs["vertexai"] is True
+
+
+def test_geocoder_from_env_picks_vertex_or_api_key_and_model():
+    base = {"RELAY_GEOCODER": "gemini_maps"}
+    vertex = geocode.geocoder_from_env({**base, "GOOGLE_GENAI_USE_VERTEXAI": "1", "GOOGLE_CLOUD_PROJECT": "p"})
+    assert vertex._finder._kwargs == {"vertexai": True, "project": "p", "location": "global"}
+    key = geocode.geocoder_from_env({**base, "GEMINI_API_KEY": "k"})
+    assert key.name == "gemini_maps" and key._finder._kwargs == {"api_key": "k"}
+    both = geocode.geocoder_from_env({**base, "GEMINI_API_KEY": "k", "GOOGLE_GENAI_USE_VERTEXAI": "true"})
+    assert both._finder._kwargs["vertexai"] is True  # Vertex wins, as for the other Gemini clients
+    assert key._finder._model == "gemini-3.8-flash"
+    assert geocode.geocoder_from_env({**base, "GEMINI_API_KEY": "k", "GEMINI_MODEL": "m1"})._finder._model == "m1"
+    assert geocode.geocoder_from_env(
+        {**base, "GEMINI_API_KEY": "k", "GEMINI_MODEL": "m1", "GEMINI_GEOCODE_MODEL": "m2"})._finder._model == "m2"
 
 
 def test_in_bbox():
@@ -161,7 +302,7 @@ def test_no_fix_ticket_gets_gazetteer_geo_but_stays_unlocated(make_client, gazet
 
 def test_gps_fix_is_never_overwritten_by_a_geocode(make_client, gazetteer_file):
     c = make_client()
-    finder = Finder((19.81, 85.83))
+    finder = Finder(at(19.81, 85.83))
     c.app.state.pipeline.geocoder = MapsGeocoder(finder)
     f, _ = need_frame(lat=20.29612, lon=85.82451, loc_acc=1, landmark="jagannath mandir")
     sync(c, [f])
@@ -172,12 +313,15 @@ def test_gps_fix_is_never_overwritten_by_a_geocode(make_client, gazetteer_file):
 
 def test_unknown_landmark_has_no_geo_and_maps_fills_it_in_phase_two(make_client, gazetteer_file):
     c = make_client()
-    finder = Finder((19.8123, 85.8301))
+    finder = Finder(at(19.8123, 85.8301, "Old Lighthouse"))
     c.app.state.pipeline.geocoder = MapsGeocoder(finder)
     f, _ = need_frame(lat=0.0, lon=0.0, loc_acc=0, landmark="old lighthouse")
     sync(c, [f])
     t = c.get("/v1/tickets/101").json()
-    assert t["geo"] == {"lat": 19.8123, "lon": 85.8301, "source": "gemini_maps", "query": "old lighthouse"}
+    assert t["geo"] == {"lat": 19.8123, "lon": 85.8301, "source": "gemini_maps", "query": "old lighthouse",
+                        "name": "Old Lighthouse", "place_id": "ChIJabc", "maps_uri": "https://maps.google.com/?cid=42",
+                        "district": "puri"}
+    assert finder.searched == [["puri", "delhi"]]  # no GPS-fixed ticket from this gateway yet: district unknown
     assert t["has_location"] is False and t["lat"] is None
     # a gazetteer hit short-circuits the model: no call, so no cost and no network
     f2, _ = need_frame(lat=0.0, lon=0.0, loc_acc=0, landmark="jagannath mandir")
@@ -188,10 +332,55 @@ def test_unknown_landmark_has_no_geo_and_maps_fills_it_in_phase_two(make_client,
 
 def test_maps_result_outside_district_is_rejected_end_to_end(make_client, gazetteer_file):
     c = make_client()
-    c.app.state.pipeline.geocoder = MapsGeocoder(Finder((28.6139, 77.2090)))
+    finder = Finder(at(28.6139, 77.2090))
+    c.app.state.pipeline.geocoder = MapsGeocoder(finder)
+    sync(c, [need_frame(lat=20.29612, lon=85.82451)[0]])  # this gateway carries Puri traffic with a fix
     f, _ = need_frame(lat=0.0, lon=0.0, loc_acc=0, landmark="old lighthouse")
     assert sync(c, [f]).json()["accepted"] == 1
-    assert "geo" not in c.get("/v1/tickets/101").json()
+    assert "geo" not in c.get("/v1/tickets/102").json()
+    assert finder.searched == [["puri"]]
+
+
+def test_no_fix_ticket_district_follows_its_gateway(make_client, gazetteer_file):
+    c = make_client()
+    finder = Finder(at(28.6139, 77.2090, "India Gate"))
+    c.app.state.pipeline.geocoder = MapsGeocoder(finder)
+    delhi_gw = "d" * 16
+    sync(c, [need_frame(lat=28.60, lon=77.21)[0], need_frame(lat=28.63, lon=77.19)[0]], gateway=delhi_gw)
+    sync(c, [need_frame(lat=20.29612, lon=85.82451)[0]])  # the Puri gateway
+    f, _ = need_frame(lat=0.0, lon=0.0, loc_acc=0, landmark="india gate")
+    sync(c, [f], gateway=delhi_gw)
+    t = c.get("/v1/tickets/104").json()
+    assert t["geo"]["district"] == "delhi" and t["geo"]["name"] == "India Gate"
+    assert finder.searched == [["delhi"]]
+    # the same Delhi answer for a ticket carried by the Puri gateway is out of its district
+    f2, _ = need_frame(lat=0.0, lon=0.0, loc_acc=0, landmark="india gate")
+    sync(c, [f2])
+    assert "geo" not in c.get("/v1/tickets/105").json() and finder.searched[-1] == ["puri"]
+
+
+def test_gateway_district_is_the_median_of_its_fixes_and_none_without_any():
+    from app.geocode import gateway_district
+
+    def tk(lat, lon, gw, acc=1):
+        return {"lat_e5": round(lat * 1e5), "lon_e5": round(lon * 1e5)}, [{"gateway_node": gw, "loc_acc": acc}]
+
+    rows = [tk(28.6, 77.2, "a"), tk(28.7, 77.1, "a"), tk(19.8, 85.8, "a"), tk(19.8, 85.8, "b"), tk(0, 0, "a", acc=0),
+            tk(19.8, 85.8, "c", acc=0)]
+    assert gateway_district(rows, {"a"}).id == "delhi"  # median of the fixes: one outlier doesn't move it
+    assert gateway_district(rows, {"b"}).id == "puri"
+    assert gateway_district(rows, {"c"}) is None  # only a no-fix ticket
+    assert gateway_district(rows, {"zzz"}) is None and gateway_district([], {"a"}) is None
+
+
+def test_gemini_maps_order_text_names_the_place():
+    from app import dispatch
+
+    geo = {"lat": 19.8123, "lon": 85.8301, "source": "gemini_maps", "query": "old lighthouse", "name": "Old Lighthouse"}
+    t = {"ticket_no": 7, "category": "FOOD", "item": "rice", "people": 2, "landmark": "old lighthouse", "geo": geo,
+         "has_location": False, "lat": None, "lon": None}
+    assert "approx. near Old Lighthouse (Google Maps, from landmark 'old lighthouse')" in dispatch.order_template_en(t, "Team A", 30)
+    assert dispatch.ticket_point(t) == (19.8123, 85.8301)
 
 
 def test_geocoder_failure_does_not_lose_the_ticket_or_ack(make_client, gazetteer_file):

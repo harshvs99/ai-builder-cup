@@ -294,6 +294,163 @@
       "frame_hex": "017007000001a0c4506ca3000079b2b2b2b2b2b2b2b202ffffffffffffffffb2b2b2b2b2b2b2b2ffffffff0603ffff00200b20008339c005051069696969696969696969696969696969186c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c2873737373737373737373737373737373737373737373737373737373737373737373737373737373413a08"
     },
     {
+      "name": "need_v3_tags_only",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "1112131415161718",
+        "origin_node": "a1a1a1a1a1a1a1a1",
+        "created_at": 1790000300,
+        "category": 1,
+        "urgency": 2,
+        "people": 4,
+        "vuln_flags": 16,
+        "lat": 20.296123,
+        "lon": 85.824509,
+        "loc_acc": 2,
+        "lang": 0,
+        "item": "boat",
+        "landmark": "temple",
+        "summary": "water in house, stuck on roof",
+        "lat_e5": 2029612,
+        "lon_e5": 8582451,
+        "answers": [],
+        "photo_tags": [
+          "floodwater",
+          "people_stranded"
+        ],
+        "photo_tags_mask": 33
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 7,
+        "timestamp_ms": 1790000000168,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000000021",
+      "frame_hex": "017007000001a0c4506ca8000052a1a1a1a1a1a1a1a1031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000000021"
+    },
+    {
+      "name": "need_v3_answers_and_tags",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "2122232425262728",
+        "origin_node": "b2b2b2b2b2b2b2b2",
+        "created_at": 1790000400,
+        "category": 4,
+        "urgency": 2,
+        "people": 6,
+        "vuln_flags": 6,
+        "lat": -5e-06,
+        "lon": 179.999995,
+        "loc_acc": 3,
+        "lang": 2,
+        "item": "ଆଶ୍ରୟ",
+        "landmark": "ସ୍କୁଲ",
+        "summary": "roof gone",
+        "lat_e5": -1,
+        "lon_e5": 18000000,
+        "answers": [
+          {
+            "id": 7,
+            "question": "house_damaged",
+            "value": 1,
+            "answer": "yes"
+          },
+          {
+            "id": 6,
+            "question": "how_long",
+            "value": 2,
+            "answer": "1-2 days"
+          }
+        ],
+        "photo_tags": [
+          "house_damaged",
+          "roof_damaged",
+          "landslide"
+        ],
+        "photo_tags_mask": 16394
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 5,
+        "timestamp_ms": 1790000000169,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "032122232425262728b2b2b2b2b2b2b2b26ab13d1004020606ffffffff0112a88003020fe0ac86e0acb6e0ad8de0acb0e0ad9f0fe0acb8e0ad8de0ac95e0ad81e0acb209726f6f6620676f6e65393200400a",
+      "frame_hex": "017005000001a0c4506ca9000052b2b2b2b2b2b2b2b2032122232425262728b2b2b2b2b2b2b2b26ab13d1004020606ffffffff0112a88003020fe0ac86e0acb6e0ad8de0acb0e0ad9f0fe0acb8e0ad8de0ac95e0ad81e0acb209726f6f6620676f6e65393200400a"
+    },
+    {
+      "name": "need_v3_max_size",
+      "kind": "NEED",
+      "fields": {
+        "msg_id": "ffffffffffffffff",
+        "origin_node": "b2b2b2b2b2b2b2b2",
+        "created_at": 4294967295,
+        "category": 6,
+        "urgency": 3,
+        "people": 255,
+        "vuln_flags": 255,
+        "lat": 21.0,
+        "lon": 86.0,
+        "loc_acc": 5,
+        "lang": 5,
+        "item": "iiiiiiiiiiiiiiii",
+        "landmark": "llllllllllllllllllllllll",
+        "summary": "ssssssssssssssssssssssssssssssssssssssss",
+        "lat_e5": 2100000,
+        "lon_e5": 8600000,
+        "answers": [
+          {
+            "id": 8,
+            "question": "last_seen_today",
+            "value": 1,
+            "answer": "yes"
+          },
+          {
+            "id": 7,
+            "question": "house_damaged",
+            "value": 2,
+            "answer": "no"
+          },
+          {
+            "id": 1,
+            "question": "conscious",
+            "value": 0,
+            "answer": "unknown"
+          }
+        ],
+        "photo_tags": [
+          "floodwater",
+          "house_damaged",
+          "house_collapsed",
+          "roof_damaged",
+          "person_injured",
+          "people_stranded",
+          "road_blocked",
+          "tree_fallen",
+          "power_line_down",
+          "boat_damaged",
+          "crops_damaged",
+          "livestock_lost",
+          "vehicle_damaged",
+          "fire",
+          "landslide"
+        ],
+        "photo_tags_mask": 32767
+      },
+      "frame": {
+        "type": 112,
+        "ttl": 7,
+        "timestamp_ms": 1790000000170,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "03ffffffffffffffffb2b2b2b2b2b2b2b2ffffffff0603ffff00200b20008339c005051069696969696969696969696969696969186c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c2873737373737373737373737373737373737373737373737373737373737373737373737373737373413a087fff",
+      "frame_hex": "017007000001a0c4506caa00007bb2b2b2b2b2b2b2b203ffffffffffffffffb2b2b2b2b2b2b2b2ffffffff0603ffff00200b20008339c005051069696969696969696969696969696969186c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c2873737373737373737373737373737373737373737373737373737373737373737373737373737373413a087fff"
+    },
+    {
       "name": "loc_hint_basic",
       "kind": "LOC_HINT",
       "fields": {
@@ -358,8 +515,10 @@
     "need2_payload": 118,
     "ack1_payload": 131,
     "need_v2_max_payload": 121,
+    "need_v3_max_payload": 123,
     "loc_hint_payload": 31,
-    "broadcast_payload": 25
+    "broadcast_payload": 25,
+    "announcement_max_payload": 160
   },
   "answer_bank": [
     {
@@ -511,6 +670,68 @@
       ]
     }
   ],
+  "photo_tag_bank": [
+    {
+      "bit": 0,
+      "key": "floodwater"
+    },
+    {
+      "bit": 1,
+      "key": "house_damaged"
+    },
+    {
+      "bit": 2,
+      "key": "house_collapsed"
+    },
+    {
+      "bit": 3,
+      "key": "roof_damaged"
+    },
+    {
+      "bit": 4,
+      "key": "person_injured"
+    },
+    {
+      "bit": 5,
+      "key": "people_stranded"
+    },
+    {
+      "bit": 6,
+      "key": "road_blocked"
+    },
+    {
+      "bit": 7,
+      "key": "tree_fallen"
+    },
+    {
+      "bit": 8,
+      "key": "power_line_down"
+    },
+    {
+      "bit": 9,
+      "key": "boat_damaged"
+    },
+    {
+      "bit": 10,
+      "key": "crops_damaged"
+    },
+    {
+      "bit": 11,
+      "key": "livestock_lost"
+    },
+    {
+      "bit": 12,
+      "key": "vehicle_damaged"
+    },
+    {
+      "bit": 13,
+      "key": "fire"
+    },
+    {
+      "bit": 14,
+      "key": "landslide"
+    }
+  ],
   "must_reject_need_payloads": {
     "v2_unknown_question_id": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f72f90000",
     "v2_value_out_of_range_for_question": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720b0000",
@@ -520,7 +741,15 @@
     "v2_missing_answer_byte": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a11",
     "v2_four_answer_bytes": "020102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a110000",
     "v1_with_answer_bytes": "010102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a0000",
-    "version_3": "030102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a1100"
+    "version_3": "030102030405060708a1a1a1a1a1a1a1a16ab13be400030208001ef82c0082f533010106646f63746f72067363686f6f6c2066617468657220756e636f6e7363696f75732c206e6565647320646f63746f720a1100",
+    "version_4": "041112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000000021",
+    "v3_photo_tags_zero": "031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000000000",
+    "v3_photo_tag_bit15": "031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000008001",
+    "v3_missing_tag_byte": "031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f6600000000",
+    "v3_extra_trailing_byte": "031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f66000000002100",
+    "v3_no_tag_bytes": "031112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f66000000",
+    "v2_with_photo_tags": "021112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000000021",
+    "v1_with_photo_tags": "011112131415161718a1a1a1a1a1a1a1a16ab13cac01020410001ef82c0082f533020004626f61740674656d706c651d776174657220696e20686f7573652c20737475636b206f6e20726f6f660000000021"
   },
   "must_reject_loc_hint_payloads": {
     "version_2": "020011223344556677d4d4d4d4d4d4d4d4001ef8210082f52102bd6ab13b85",
@@ -624,5 +853,145 @@
     "lat_out_of_range": "01a1a2a3a4a5a6a7a801006ab13b8000895441000000000000",
     "lon_out_of_range": "01a1a2a3a4a5a6a7a801006ab13b8000000000feed577f0000"
   },
-  "broadcast_ttl_s": 86400
+  "broadcast_ttl_s": 86400,
+  "announcement_vectors": [
+    {
+      "name": "announcement_en_active",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "en",
+        "district": "puri",
+        "status": "active",
+        "approved_at": 1790000000,
+        "expires_at": 0,
+        "text": "Cyclone shelters in Puri are open. Move now.",
+        "key": "d85f3ebec7a4b49f"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000223,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+      "frame_hex": "017607000001a0c4506cdf000041d4d4d4d4d4d4d4d4015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e"
+    },
+    {
+      "name": "announcement_hi_active_with_expiry",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "hi",
+        "district": "puri",
+        "status": "active",
+        "approved_at": 1790000000,
+        "expires_at": 1790086400,
+        "text": "पुरी में चक्रवात शरण स्थल खुले हैं। अभी जाइए।",
+        "key": "b7692563b86ff916"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000233,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610100006ab13b806ab28d0077e0a4aae0a581e0a4b0e0a58020e0a4aee0a587e0a48220e0a49ae0a495e0a58de0a4b0e0a4b5e0a4bee0a4a420e0a4b6e0a4b0e0a4a320e0a4b8e0a58de0a4a5e0a4b220e0a496e0a581e0a4b2e0a58720e0a4b9e0a588e0a482e0a5a420e0a485e0a4ade0a58020e0a49ce0a4bee0a487e0a48fe0a5a4",
+      "frame_hex": "017607000001a0c4506ce900008cd4d4d4d4d4d4d4d4015a5b5c5d5e5f60610100006ab13b806ab28d0077e0a4aae0a581e0a4b0e0a58020e0a4aee0a587e0a48220e0a49ae0a495e0a58de0a4b0e0a4b5e0a4bee0a4a420e0a4b6e0a4b0e0a4a320e0a4b8e0a58de0a4a5e0a4b220e0a496e0a581e0a4b2e0a58720e0a4b9e0a588e0a482e0a5a420e0a485e0a4ade0a58020e0a49ce0a4bee0a487e0a48fe0a5a4"
+    },
+    {
+      "name": "announcement_en_max_size_delhi",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "ffffffffffffff01",
+        "lang": "en",
+        "district": "delhi",
+        "status": "active",
+        "approved_at": 4294967295,
+        "expires_at": 4294967295,
+        "text": "Water supply stops from 14:00 today. Store water now. Water supply stops from 14:00 today. Store water now. Water supply stops from 14:00 t",
+        "key": "5682be328c729095"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 4,
+        "timestamp_ms": 1790000000243,
+        "sender_id": "a1a1a1a1a1a1a1a1",
+        "recipient_id": null
+      },
+      "payload_hex": "01ffffffffffffff01000100ffffffffffffffff8b576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a30302074",
+      "frame_hex": "017604000001a0c4506cf30000a0a1a1a1a1a1a1a1a101ffffffffffffff01000100ffffffffffffffff8b576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a303020746f6461792e2053746f7265207761746572206e6f772e20576174657220737570706c792073746f70732066726f6d2031343a30302074"
+    },
+    {
+      "name": "announcement_en_withdrawn",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "en",
+        "district": "puri",
+        "status": "withdrawn",
+        "approved_at": 1790000000,
+        "expires_at": 0,
+        "text": "Cyclone shelters in Puri are open. Move now.",
+        "key": "3bc94bcb0152f640"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000253,
+        "sender_id": "d4d4d4d4d4d4d4d4",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610000016ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+      "frame_hex": "017607000001a0c4506cfd000041d4d4d4d4d4d4d4d4015a5b5c5d5e5f60610000016ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e"
+    },
+    {
+      "name": "announcement_hi_withdrawn_empty_text",
+      "kind": "ANNOUNCEMENT",
+      "fields": {
+        "announcement_id": "5a5b5c5d5e5f6061",
+        "lang": "hi",
+        "district": "delhi",
+        "status": "withdrawn",
+        "approved_at": 1790000000,
+        "expires_at": 0,
+        "text": "",
+        "key": "aaa9f52977051bb6"
+      },
+      "frame": {
+        "type": 118,
+        "ttl": 7,
+        "timestamp_ms": 1790000000263,
+        "sender_id": "b2b2b2b2b2b2b2b2",
+        "recipient_id": null
+      },
+      "payload_hex": "015a5b5c5d5e5f60610101016ab13b800000000000",
+      "frame_hex": "017607000001a0c4506d07000015b2b2b2b2b2b2b2b2015a5b5c5d5e5f60610101016ab13b800000000000"
+    }
+  ],
+  "must_reject_announcement_payloads": {
+    "version_2": "025a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+    "too_short": "015a5b5c5d5e5f60610000006ab13b8000000000",
+    "trailing_byte": "015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e00",
+    "text_length_past_end": "015a5b5c5d5e5f60610000006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f77",
+    "text_length_over_139": "015a5b5c5d5e5f60610000006ab13b80000000008c6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+    "lang_six": "015a5b5c5d5e5f60610600006ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+    "status_two": "015a5b5c5d5e5f60610000026ab13b80000000002c4379636c6f6e65207368656c7465727320696e205075726920617265206f70656e2e204d6f7665206e6f772e",
+    "invalid_utf8": "015a5b5c5d5e5f60610000006ab13b800000000002c328"
+  },
+  "announcement_lang_codes": {
+    "en": 0,
+    "hi": 1,
+    "or": 2,
+    "tl": 3,
+    "war": 4,
+    "ceb": 5
+  },
+  "announcement_district_codes": {
+    "puri": 0,
+    "delhi": 1
+  },
+  "announcement_ttl_s": 259200
 }

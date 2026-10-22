@@ -60,8 +60,10 @@ class SyncTest {
 
     @After fun stopServer() { server.stop(0) }
 
-    private fun syncer(node: org.relay.core.gossip.GossipNode, store: InMemoryPacketStore, state: GatewayState, logs: MutableList<String> = ArrayList()) =
-        GatewaySyncer(node, store, state, SyncClient(connectTimeoutMs = 2_000, readTimeoutMs = 4_000), { cfg }, { logs += it })
+    private fun syncer(
+        node: org.relay.core.gossip.GossipNode, store: InMemoryPacketStore, state: GatewayState, logs: MutableList<String> = ArrayList(),
+        district: () -> String? = { null },
+    ) = GatewaySyncer(node, store, state, SyncClient(connectTimeoutMs = 2_000, readTimeoutMs = 4_000), { cfg }, { logs += it }, district = district)
 
     private fun framesIn(r: Req): List<ByteArray> =
         (0 until r.body.getJSONArray("frames").length()).map { Base64.getDecoder().decode(r.body.getJSONArray("frames").getString(it)) }
@@ -375,5 +377,75 @@ class SyncTest {
         val node = TestSupport.node(gatewayId, store)
         val out = syncer(node, store, GatewayState(null)).syncOnce()
         assertTrue(out.ok); assertEquals(0, out.broadcastsOriginated)
+    }
+
+    // ------------------------------------------------------------ control-room announcements (SPEC 5.7)
+    private fun announcementPayload(
+        lang: org.relay.core.payload.Lang, status: org.relay.core.payload.AnnouncementStatus = org.relay.core.payload.AnnouncementStatus.ACTIVE,
+        id: ByteArray = TestSupport.id(0x71), text: String = "Shelters are open",
+    ): String = Base64.getEncoder().encodeToString(org.relay.core.payload.AnnouncementCodec.encode(
+        org.relay.core.payload.Announcement(id, lang, 0, status, System.currentTimeMillis() / 1000 - 60, 0, text),
+    ))
+
+    private fun syncBody(announcements: List<String>, cursor: Long) = JSONObject().put("accepted", 0).put("duplicates", 0).put("rejected", 0)
+        .put("acks", JSONArray()).put("ack_cursor", 0).put("announcements", JSONArray(announcements)).put("announcement_cursor", cursor)
+
+    @Test fun theGatewaySendsItsDistrictAndCursorAndOriginatesEachAnnouncementOnce() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val state = GatewayState(null)
+        val s = syncer(node, store, state, district = { "puri" })
+        responder = { syncBody(listOf(announcementPayload(org.relay.core.payload.Lang.EN), announcementPayload(org.relay.core.payload.Lang.HI, text = "शरण स्थल खुले हैं")), 12) }
+
+        val first = s.syncOnce()
+        assertTrue(first.ok); assertEquals(2, first.announcementsOriginated)
+        assertEquals("puri", requests[0].body.getString("district"))
+        assertEquals(0L, requests[0].body.getLong("announcement_cursor"))
+        assertEquals(2, store.all().count { it.type == FrameTypes.ANNOUNCEMENT })
+        assertEquals(12L, state.announcementCursor())
+
+        // next round sends the stored cursor; the same payloads again are not originated twice
+        assertEquals(0, s.syncOnce().announcementsOriginated)
+        assertEquals(12L, requests[1].body.getLong("announcement_cursor"))
+        assertEquals(2, store.all().count { it.type == FrameTypes.ANNOUNCEMENT })
+    }
+
+    @Test fun aWithdrawalIsANewFrameAndAnnouncementsAreNeverUploaded() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val s = syncer(node, store, GatewayState(null))
+        responder = { syncBody(listOf(announcementPayload(org.relay.core.payload.Lang.EN)), 1) }
+        assertEquals(1, s.syncOnce().announcementsOriginated)
+        responder = { syncBody(listOf(announcementPayload(org.relay.core.payload.Lang.EN, org.relay.core.payload.AnnouncementStatus.WITHDRAWN)), 2) }
+        assertEquals(1, s.syncOnce().announcementsOriginated)
+        assertEquals(2, store.all().count { it.type == FrameTypes.ANNOUNCEMENT })
+        assertEquals(0, s.syncOnce().uploaded) // announcements go down, never up
+        assertFalse(requests[0].body.has("district")) // no district known: the field is left out
+    }
+
+    @Test fun badOrExpiredAnnouncementPayloadsAreSkippedAndAFailedRoundKeepsTheCursor() {
+        val store = InMemoryPacketStore()
+        val node = TestSupport.node(gatewayId, store)
+        val state = GatewayState(null)
+        val s = syncer(node, store, state)
+        responder = { syncBody(listOf("not-base64-!!", Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3)),
+            Base64.getEncoder().encodeToString(org.relay.core.payload.AnnouncementCodec.encode(org.relay.core.payload.Announcement(
+                TestSupport.id(0x72), org.relay.core.payload.Lang.EN, 0, org.relay.core.payload.AnnouncementStatus.ACTIVE,
+                System.currentTimeMillis() / 1000 - 80 * 3600, 0, "old")))), 5) }
+        val out = s.syncOnce()
+        assertTrue(out.ok); assertEquals(0, out.announcementsOriginated)
+        assertEquals(5L, state.announcementCursor())
+        status = 500
+        assertFalse(s.syncOnce().ok)
+        assertEquals(5L, state.announcementCursor())
+    }
+
+    @Test fun theAnnouncementCursorSurvivesARestartAndOldStateFilesLoad() {
+        val file = File(tmp.root, "gw2.json")
+        GatewayState(file).setAnnouncementCursor(33)
+        assertEquals(33L, GatewayState(file).announcementCursor())
+        File(tmp.root, "old.json").writeText("""{"cursor":4,"uploaded":["aa"]}""")
+        val old = GatewayState(File(tmp.root, "old.json"))
+        assertEquals(4L, old.ackCursor()); assertEquals(0L, old.announcementCursor()); assertTrue(old.isUploaded("aa"))
     }
 }
